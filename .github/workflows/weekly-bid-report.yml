@@ -2,8 +2,10 @@ name: 나라장터 입찰 모니터링 주간 리포트
 
 on:
   schedule:
-    # 매주 월요일 07:00 KST = 일요일 22:00 UTC
-    - cron: "0 22 * * 0"
+    # 매주 월요일 07:00 KST = 일요일 22:00 UTC (원래 운영 주기 — 테스트 끝나면 이걸로 되돌리기)
+    # - cron: "0 22 * * 0"
+    # [테스트용] 매일 07:00 KST = 매일 22:00 UTC
+    - cron: "0 22 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -47,6 +49,8 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          # LOOKBACK_DAYS: "7"  # 원래 값 (매주 실행 기준) — 테스트 끝나면 이걸로 되돌리기
+          LOOKBACK_DAYS: "1" # [테스트용] 매일 실행이라 최근 1일치만 조회
         run: npm run report
 
       - name: 리포트 파일 업로드 (백업)
