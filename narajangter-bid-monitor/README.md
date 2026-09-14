@@ -91,6 +91,23 @@ data.go.kr 입찰공고 API는 공고에 걸린 업종코드 목록을 직접 �
 
 ## 사전 준비
 
+### 0. Node.js 설치
+
+이 프로젝트는 Node.js 20 이상이 필요합니다 (`package.json`의 `engines.node` 참고).
+
+```bash
+node -v   # v20.x 이상인지 확인
+```
+
+설치되어 있지 않다면 [nodejs.org](https://nodejs.org/)에서 LTS 버전을 받거나,
+Windows에서는 winget으로 설치할 수 있습니다.
+
+```powershell
+winget install -e --id OpenJS.NodeJS.LTS
+```
+
+설치 직후에는 새 터미널을 열어야 `node`/`npm` 명령이 인식됩니다.
+
 ### 1. data.go.kr API 신청
 
 아래 두 서비스를 각각 **활용신청** 하세요 (승인까지 최대 1~2일 소요될 수 있습니다).
@@ -116,6 +133,20 @@ Gmail을 쓴다면 [앱 비밀번호](https://myaccount.google.com/apppasswords)
 cp .env.example .env
 # .env를 열어 API 키 / SMTP 정보를 채워넣기
 ```
+
+## 사용 패키지
+
+`npm install` 한 번으로 아래 패키지가 모두 설치됩니다 (버전은 `package.json` 참고).
+
+| 패키지 | 용도 |
+|---|---|
+| `dotenv` | `.env` 파일의 환경변수 로드 |
+| `fast-xml-parser` | data.go.kr API의 XML 응답 파싱 |
+| `nodemailer` | SMTP로 리포트/실패 알림 이메일 발송 |
+| `zod` | 환경변수·설정 파일(config/*.json) 형식 검증 |
+| `typescript` / `tsx` (dev) | TypeScript 컴파일 및 스크립트 직접 실행 |
+| `vitest` (dev) | 단위 테스트 실행 |
+| `@types/node`, `@types/nodemailer` (dev) | TypeScript 타입 정의 |
 
 ## 로컬 실행
 
