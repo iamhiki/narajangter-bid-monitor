@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "report": "tsx src/index.ts",
-    "report:dry-run": "DRY_RUN=true tsx src/index.ts",
+    "report:dry-run": "cross-env DRY_RUN=true tsx src/index.ts",
     "verify:api": "tsx scripts/verifyApi.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/nodemailer": "^8.0.1",
+    "cross-env": "^10.1.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3",
     "vitest": "^4.1.10"
