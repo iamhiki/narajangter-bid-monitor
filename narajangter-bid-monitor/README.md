@@ -176,8 +176,18 @@ npm run typecheck
 ## 매주 월요일 자동 발송 (GitHub Actions)
 
 저장소 루트의 `.github/workflows/weekly-bid-report.yml`이 매주 월요일 07:00(KST)에
-자동으로 실행되도록 설정되어 있습니다. 아래 값을 저장소 **Settings > Secrets and variables >
-Actions**에 등록하세요.
+자동으로 실행되도록 설정되어 있습니다.
+
+> **왜 로컬 `.env`와 별개로 등록해야 하나요?**
+> 이 자동 실행은 내 컴퓨터가 아니라 GitHub의 서버에서 돌아갑니다. `.env` 파일은
+> `.gitignore`에 포함되어 있어 저장소에 올라가지 않으므로(API 키 유출 방지), GitHub
+> 서버는 로컬 `.env` 값을 전혀 볼 수 없습니다. 그래서 동일한 값을 저장소 설정의
+> "Secrets"라는 별도 저장 공간에 **한 번 더** 등록해야 워크플로가 이 값을 읽을 수
+> 있습니다. 등록하지 않으면 실행 시 값이 빈 문자열이 되어 환경변수 검증 단계에서
+> 바로 실패합니다.
+
+등록 절차: 저장소 페이지 → **Settings** → **Secrets and variables → Actions** →
+**New repository secret** → 아래 이름으로 로컬 `.env`와 동일한 값을 하나씩 등록.
 
 | Secret 이름 | 설명 |
 |---|---|
@@ -232,3 +242,25 @@ narajangter-bid-monitor/
 ├── scripts/verifyApi.ts    # API 필드명 진단 스크립트
 └── test/                    # 매칭/검증 로직 단위 테스트
 ```
+
+## 핵심 로직 위치 (팀원용 빠른 참조)
+
+"이 기능이 어디 코드에 있지?"를 찾을 때 쓰는 표입니다.
+
+| 기능 | 위치 |
+|---|---|
+| **강력추천/참고용 판정** | `src/matching/matchEngine.ts`의 `evaluateNotice()` — 코드 매칭과 키워드 매칭이 **둘 다** 되면 강력추천, 하나만 되면 참고용 |
+| 강력추천/참고용 타입 정의 | `src/matching/types.ts` (`Confidence` 타입) |
+| 키워드/제외키워드 매칭 | `src/matching/keywordMatcher.ts` |
+| 세부품명코드/업종코드 매칭 | `src/matching/codeMatcher.ts` |
+| 최소 예산금액 필터 | `src/matching/matchEngine.ts`의 `evaluateNotice()` 앞부분 (`config.minBudgetAmount`) |
+| 자격조건(참가자격 부족) 필터 | `src/matching/qualificationFilter.ts`, `src/matching/applyQualificationFilter.ts` |
+| 리포트에서 강력추천/참고용 배지 렌더링 | `src/report/buildReport.ts` (`CONFIDENCE_STYLE`) |
+| 환경변수 로드/검증 | `src/config/env.ts` |
+| `config/*.json` 로드/검증 | `src/config/loadJsonConfig.ts` |
+| data.go.kr API 응답 필드명 후보 | `src/api/fieldCandidates.ts` |
+| 이메일 발송 (리포트/실패 알림) | `src/email/sendReportEmail.ts`, `src/email/mailer.ts` |
+| 전체 실행 순서 | `src/index.ts` |
+
+키워드/코드/수신자만 바꾸고 싶다면 이 표의 코드를 건드릴 필요 없이 `config/*.json`만
+수정하면 됩니다 (위 "매칭 대상" 섹션 참고).
