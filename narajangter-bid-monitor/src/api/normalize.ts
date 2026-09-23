@@ -41,6 +41,8 @@ export function normalizeRawItem(
     industryText: pickString(raw, fields.industryText),
     productClsfcNo: pickString(raw, fields.productClsfcNo),
     productClsfcName: pickString(raw, fields.productClsfcName),
+    // 후보 필드명이 실측 검증 전이라 "MthdNm" 접미사 휴리스틱도 함께 시도한다 (fieldResolver.ts 참고).
+    bidMethod: pickString(raw, fields.bidMethod, "MthdNm"),
     raw,
   };
 }

@@ -4,3 +4,9 @@ dist/
 output/
 *.log
 .DS_Store
+cache/
+
+# 과거 공고 코퍼스 (scripts/buildCorpus.ts 산출물).
+# 과업지시서 본문이 통째로 들어 있고 발주기관 담당자 성명·연락처가 섞여 있어
+# 저장소에 올리지 않는다. 각자 로컬에서 npm run build:corpus 로 만든다.
+data/

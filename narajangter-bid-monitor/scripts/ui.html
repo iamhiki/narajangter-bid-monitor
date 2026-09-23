@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>싱크로율 탐색기 — (주)지일</title>
+
+<!-- ji1.co.kr과 같은 폰트. 네트워크가 막혀도 아래 폴백 스택으로 읽힌다. -->
+<link rel="stylesheet" href="https://webfontworld.github.io/gmarket/GmarketSans.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+
+<script>
+  // 테마를 그리기 전에 적용한다. 본문이 뜬 뒤에 바꾸면 흰 화면이 한 번 번쩍인다.
+  // 사생활 보호 모드·사이트 데이터 차단에서 localStorage 접근이 throw할 수 있어 감싼다.
+  try {
+    const saved = localStorage.getItem("ui-theme");
+    if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
+  } catch (e) { /* 저장소를 못 쓰면 시스템 설정을 따른다 */ }
+</script>
+
+<style>
+/* ── ji1.co.kr 디자인 토큰 ───────────────────────────────────────
+   브랜드 녹색(#1d6b4f) · 본문 #333 / Pretendard · 제목 GmarketSans — ji1.co.kr 기반, 브랜드색은 회사 선호에 따라 녹색 계열
+   테두리 #ddd~#dfdfdf · 배경 #f1f1f1~#f4f4f4 · 모서리 거의 각짐
+
+   팔레트는 :root에 라이트로 한 벌 정의하고, 다크에서는 **같은 이름의 토큰만**
+   덮어쓴다. 어떤 색도 미디어 쿼리 안에서만 정의되지 않게 해야 한쪽 모드에서
+   색이 통째로 빠지는 일이 없다.                                        */
+:root {
+  --brand: #1d6b4f;
+  --brand-hover: #175840;
+  --on-brand: #ffffff;      /* 브랜드색 위에 얹는 글자색 */
+  --brand-dark: #16241e;
+  --brand-tint: #eaf4ef;
+  --ink: #333333;
+  --ink-strong: #1c1c1c;
+  /* ji1의 본문 보조색(#767676)은 11~12px 작은 글씨에서 4.5:1을 못 넘긴다.
+     두 색 모두 흰 패널과 회색 배경 양쪽에서 AA를 넘도록 한 단계씩 진하게 잡았다. */
+  --muted: #666666;   /* 패널 5.74 · 배경 5.22 */
+  --faint: #6a6a6a;   /* 패널 5.41 · 배경 4.92 */
+  --line: #dfdfdf;
+  --line-soft: #ececec;
+  --panel: #ffffff;
+  --bg: #f4f4f4;
+  --warn: #8f6210;    /* AA 4.98:1 (경고 틴트 배경 위) */
+  --warn-tint: #fdf6e8;
+  /* 강력추천 — 브랜드 녹색과 겹치지 않는 주의색. 이메일 리포트의 강력추천 색과 맞췄다. */
+  --urgent: #b91c1c;       /* 흰 패널 6.47 · 흰 글자 6.47 */
+  --on-urgent: #ffffff;    /* urgent 배경 위에 얹는 글자색 */
+  --urgent-tint: #fdeaea;
+  --radius: 2px;
+  --head: 'GmarketSans', 'Pretendard', -apple-system, sans-serif;
+  --body: 'Pretendard', 'Noto Sans KR', -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+}
+
+/* 다크에서 브랜드색을 밝게 올리므로, 그 위의 글자는 흰색이 아니라 어두운 색이어야
+   읽힌다 (--on-brand). 이걸 #fff로 두면 배지·버튼 글자가 배경에 묻힌다. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --brand: #5fc298;
+    --brand-hover: #7ad0ac;
+    --on-brand: #0e1512;
+    --brand-dark: #0d1512;
+    --brand-tint: #16261f;
+    --ink: #dcdcd8;
+    --ink-strong: #f2f2ef;
+    --muted: #a3a39d;
+    --faint: #90908a;
+    --line: #333940;
+    --line-soft: #272c32;
+    --panel: #1c2026;
+    --bg: #15191e;
+    --warn: #d6a343;
+    --warn-tint: #2b2415;
+    /* 다크에서는 밝은 적색이라 그 위 글자는 흰색이 아니라 어두운 색이어야 읽힌다. */
+    --urgent: #e26a6a;
+    --on-urgent: #1a1012;
+    --urgent-tint: #2e1a1a;
+  }
+}
+:root[data-theme="dark"] {
+  --brand: #5fc298; --brand-hover: #7ad0ac; --on-brand: #0e1512;
+  --brand-dark: #0d1512; --brand-tint: #16261f;
+  --ink: #dcdcd8; --ink-strong: #f2f2ef; --muted: #a3a39d; --faint: #90908a;
+  --line: #333940; --line-soft: #272c32; --panel: #1c2026; --bg: #15191e;
+  --warn: #d6a343; --warn-tint: #2b2415;
+  --urgent: #e26a6a; --on-urgent: #1a1012; --urgent-tint: #2e1a1a;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: 15px; line-height: 1.6;
+  word-break: keep-all;           /* ji1.co.kr과 동일 — 한국어 줄바꿈 */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 헤더 ─────────────────────────────────────────────────── */
+.topbar { background: var(--brand-dark); color: #fff; }
+.topbar .inner {
+  max-width: 1180px; margin: 0 auto; padding-block: 0;
+  padding-left: 24px; padding-right: 24px;
+  height: 72px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.topbar .logo {
+  height: 30px; width: auto; display: block;
+  /* 원본이 짙은 색이라 그대로 두면 다크 바에서 안 보인다. 완전한 흰색으로 반전. */
+  filter: brightness(0) invert(1);
+}
+.topbar .slash { color: rgba(255,255,255,.28); }
+.topbar h1 {
+  font-family: var(--head); font-size: 15px; font-weight: 500; margin: 0;
+  letter-spacing: .02em; color: rgba(255,255,255,.88);
+}
+
+/* 테마 토글. 상단바는 두 모드에서 모두 어두우므로 여기 색은 흰 계열로 고정한다. */
+.theme { margin-left: auto; display: flex; border: 1px solid rgba(255,255,255,.22); }
+.theme button {
+  font-family: var(--body); font-size: 12px; cursor: pointer; padding: 6px 12px;
+  border: 0; background: transparent; color: rgba(255,255,255,.62); line-height: 1.4;
+  border-right: 1px solid rgba(255,255,255,.16);
+}
+.theme button:last-child { border-right: 0; }
+.theme button:hover { color: #fff; background: rgba(255,255,255,.08); }
+.theme button[aria-pressed="true"] { background: rgba(255,255,255,.92); color: var(--brand-dark); font-weight: 600; }
+@media (max-width: 560px) {
+  .topbar .inner { height: auto; padding-block: 14px; }
+  .theme { margin-left: 0; width: 100%; }
+  .theme button { flex: 1; }
+}
+
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 26px 40px; padding-left: 24px; padding-right: 24px; }
+
+.sub { color: var(--muted); font-size: 13px; }
+.corpus-line {
+  border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 20px;
+  color: var(--muted); font-size: 13px;
+}
+.corpus-line b { color: var(--ink-strong); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── 탭 ───────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+.tabs button {
+  font-family: var(--head); font-size: 14px; font-weight: 500; cursor: pointer;
+  padding: 11px 20px; border: 0; background: none; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; letter-spacing: .02em;
+}
+.tabs button:hover { color: var(--ink-strong); }
+.tabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); font-weight: 700; }
+
+/* ── 폼 ───────────────────────────────────────────────────── */
+.search { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.search input, .search select {
+  height: 44px; padding: 6px 16px; font-size: 15px; font-family: inherit;  /* ji1 .input 규격 */
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); color: var(--ink);
+}
+.search input { flex: 1 1 320px; min-width: 0; }
+.search input::placeholder { color: var(--faint); }
+.search input:focus, .search select:focus { outline: none; border-color: var(--brand); }
+.search button {
+  height: 44px; padding: 0 24px; font-family: var(--head); font-size: 14px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--brand); border-radius: var(--radius);
+  background: var(--brand); color: var(--on-brand); letter-spacing: .02em;
+}
+.search button:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+.search button:disabled { opacity: .45; cursor: default; }
+.search button.ghost { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.search button.ghost:hover { background: var(--bg); border-color: var(--muted); }
+
+.examples { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; }
+.examples button {
+  font-family: inherit; font-size: 12.5px; cursor: pointer; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); color: var(--muted);
+}
+.examples button:hover { border-color: var(--brand); color: var(--brand); }
+
+/* ── 판정 배너 ────────────────────────────────────────────── */
+.verdict {
+  padding: 13px 16px; margin-bottom: 16px; font-size: 14px;
+  border: 1px solid var(--line); border-left: 3px solid var(--muted); background: var(--panel);
+}
+.verdict.hit { border-left-color: var(--brand); background: var(--brand-tint); }
+.verdict.edge { border-left-color: var(--warn); background: var(--warn-tint); color: var(--warn); }
+.verdict b { font-variant-numeric: tabular-nums; }
+
+/* ── 카드 ─────────────────────────────────────────────────── */
+.card, .notice {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 8px;
+}
+.notice { border-left: 3px solid var(--line); }
+.notice.strong { border-left-color: var(--brand); }
+.notice.edge { border-left-color: var(--warn); }
+.notice h3 { font-family: var(--head); margin: 0 0 5px; font-size: 15.5px; font-weight: 500; line-height: 1.5; color: var(--ink-strong); }
+.notice h3 a { color: inherit; text-decoration: none; }
+.notice h3 a:hover { color: var(--brand); }
+
+.row { display: flex; gap: 16px; align-items: flex-start; }
+.score {
+  flex: 0 0 76px; text-align: right; font-family: var(--head);
+  font-size: 25px; font-weight: 700; letter-spacing: -.01em; color: var(--brand);
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.score small { display: block; font-size: 11px; font-weight: 400; color: var(--faint); letter-spacing: .04em; margin-top: 2px; }
+.name { font-family: var(--head); font-weight: 500; color: var(--ink-strong); }
+.meta { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+
+.bars { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+.bar { flex: 1 1 170px; min-width: 150px; }
+.bar span { font-size: 11.5px; color: var(--muted); display: block; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.track { height: 4px; background: var(--line-soft); overflow: hidden; }
+.fill { height: 100%; background: var(--brand); }
+
+.badges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; align-items: center; }
+.badge {
+  font-size: 11px; padding: 3px 8px; background: var(--bg); color: var(--muted);
+  white-space: nowrap; border: 1px solid var(--line-soft); letter-spacing: .01em;
+}
+.badge.hi { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
+.badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
+.badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
+
+.simlist { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
+.simlist a.why { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
+.simlist a.why:hover { color: var(--brand); border-bottom-color: var(--brand); }
+.simlist b { color: var(--ink-strong); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+details.body { margin-top: 10px; }
+details.body summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+details.body summary:hover { color: var(--brand); }
+details.body pre {
+  margin: 10px 0 0; padding: 12px; max-height: 260px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line-soft);
+  font: 12.5px/1.75 ui-monospace, 'Consolas', monospace; white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── 통계 · 표 ────────────────────────────────────────────── */
+.stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.stat { flex: 1 1 150px; background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; }
+.stat b { display: block; font-family: var(--head); font-size: 24px; font-weight: 700; color: var(--ink-strong); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.stat span { font-size: 12.5px; color: var(--muted); }
+
+.scroll { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+thead th { background: var(--bg); color: var(--muted); font-weight: 500; font-size: 12px; white-space: nowrap; letter-spacing: .03em; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.nobody td { color: var(--faint); }
+.tag { font-size: 11px; padding: 2px 7px; background: var(--brand-tint); color: var(--brand); white-space: nowrap; }
+.tag.none { background: var(--bg); color: var(--faint); }
+
+/* ── 근거 모달 ────────────────────────────────────────────── */
+dialog {
+  width: min(780px, calc(100vw - 32px)); max-height: 86vh; padding: 0;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); color: var(--ink);
+}
+dialog::backdrop { background: rgba(28, 28, 28, .5); }
+.dlg-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 15px 20px; background: var(--brand-dark); color: #fff;
+}
+.dlg-head strong { font-family: var(--head); font-weight: 500; font-size: 15px; letter-spacing: .02em; }
+.dlg-head button {
+  font-family: inherit; font-size: 13px; cursor: pointer; padding: 6px 14px;
+  border: 1px solid rgba(255,255,255,.3); border-radius: var(--radius);
+  background: transparent; color: #fff;
+}
+.dlg-head button:hover { background: rgba(255,255,255,.12); }
+#whyBody { padding: 18px 20px 24px; overflow: auto; max-height: calc(86vh - 58px); }
+#whyBody h4 { font-family: var(--head); margin: 24px 0 5px; font-size: 14px; font-weight: 500; color: var(--ink-strong); }
+#whyBody h4:first-child { margin-top: 0; }
+#whyBody h4 b { color: var(--brand); font-variant-numeric: tabular-nums; }
+#whyBody p.sub { margin: 0 0 10px; }
+#whyBody code { font: 12.5px ui-monospace, 'Consolas', monospace; background: var(--bg); padding: 2px 6px; border: 1px solid var(--line-soft); }
+#whyBody th { white-space: nowrap; }
+#whyBody table:not(.scroll table) { border: 1px solid var(--line); }
+.formula {
+  font: 14px/1.7 ui-monospace, 'Consolas', monospace; background: var(--brand-tint);
+  color: var(--brand); padding: 12px 14px; margin: 8px 0 0; overflow-x: auto;
+  border-left: 3px solid var(--brand);
+}
+
+/* ── 필터 칩 ──────────────────────────────────────────────── */
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.chip-gap { width: 1px; height: 22px; background: var(--line); margin: 0 6px; }
+.chip {
+  font-family: var(--body); font-size: 12.5px; cursor: pointer; padding: 6px 13px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.chip.on { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
+/* 강력추천 칩은 켜지 않아도 눈에 띄어야 한다 — 담당자가 제일 먼저 찾는 값이다. */
+.chip.urgent { border-color: var(--urgent); color: var(--urgent); font-weight: 600; }
+.chip.urgent.on { background: var(--urgent); color: var(--on-urgent); border-color: var(--urgent); }
+
+/* ── 구분 그룹 (본공고 / 사전규격) ────────────────────────── */
+.group { margin-bottom: 26px; }
+.group-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid var(--brand); padding-bottom: 8px; }
+.group-head h2 {
+  font-family: var(--head); font-size: 16px; font-weight: 700; margin: 0;
+  color: var(--ink-strong); letter-spacing: -.01em;
+}
+.group-n { font-family: var(--body); font-size: 13px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.group-strong {
+  margin-left: auto; font-size: 12px; font-weight: 600; padding: 3px 10px;
+  background: var(--urgent-tint); color: var(--urgent); border: 1px solid var(--urgent);
+}
+.group-note { margin: 8px 0 12px; font-size: 12.5px; color: var(--muted); }
+
+/* ── 추천등급 ─────────────────────────────────────────────── */
+.grade {
+  font-family: var(--head); font-size: 12px; font-weight: 700; padding: 3px 10px;
+  background: var(--bg); color: var(--muted); border: 1px solid var(--line); letter-spacing: .02em;
+}
+.grade.urgent { background: var(--urgent); color: var(--on-urgent); border-color: var(--urgent); }
+.notice.urgent { border-left-color: var(--urgent); border-left-width: 4px; }
+
+/* ── 동작 원리 ────────────────────────────────────────────── */
+h2.sec {
+  font-family: var(--head); font-size: 17px; font-weight: 700; color: var(--ink-strong);
+  margin: 36px 0 4px; padding-bottom: 10px; border-bottom: 2px solid var(--brand);
+  letter-spacing: -.01em;
+}
+h2.sec:first-child { margin-top: 0; }
+p.lead { margin: 0 0 16px; }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 12.5px; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.sw { width: 11px; height: 11px; display: inline-block; border: 1px solid var(--line); }
+.sw.done { background: var(--brand); border-color: var(--brand); }
+.sw.partial { background: var(--warn); border-color: var(--warn); }
+.sw.todo { background: var(--panel); }
+.sw.hold { background: var(--line); border-color: var(--muted); }
+
+.flow { margin-bottom: 8px; }
+.stage {
+  display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+  border-left: 3px solid var(--line); padding: 14px 18px; margin-bottom: 6px;
+}
+.stage.current { border-left-color: var(--brand); background: var(--brand-tint); }
+.stage-no {
+  flex: 0 0 34px; font-family: var(--head); font-size: 20px; font-weight: 700;
+  color: var(--brand); line-height: 1.3;
+}
+.stage-body { flex: 1; min-width: 0; }
+.stage-body h3 {
+  font-family: var(--head); font-size: 14.5px; font-weight: 500; margin: 0 0 5px;
+  color: var(--ink-strong); display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.stage-body p { margin: 0 0 6px; font-size: 13.5px; }
+.stage-body code, .step code, .limits code {
+  font: 12px ui-monospace, 'Consolas', monospace; background: var(--bg);
+  padding: 2px 6px; border: 1px solid var(--line-soft); color: var(--muted);
+}
+.pill {
+  font-family: var(--body); font-size: 11px; font-weight: 500; padding: 2px 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted); letter-spacing: 0;
+}
+.pill.done { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+.pill.partial { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); }
+.pill.todo { background: var(--panel); color: var(--faint); }
+.pill.hold { background: var(--line); color: var(--muted); }
+b.ok { color: var(--brand); }
+b.warnx { color: var(--warn); }
+
+.step {
+  display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+  padding: 18px 20px; margin-bottom: 8px;
+}
+.step-no {
+  flex: 0 0 30px; height: 30px; font-family: var(--head); font-size: 15px; font-weight: 700;
+  background: var(--brand); color: var(--on-brand); display: flex; align-items: center; justify-content: center;
+}
+.step h3 { font-family: var(--head); font-size: 14.5px; font-weight: 500; margin: 3px 0 9px; color: var(--ink-strong); }
+.step p { margin: 0 0 9px; font-size: 13.5px; }
+.step p:last-child { margin-bottom: 0; }
+.step i { font-style: italic; }
+
+.io { margin: 0 0 12px; border: 1px solid var(--line-soft); }
+.io > div { display: flex; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); align-items: baseline; flex-wrap: wrap; }
+.io > div:last-child { border-bottom: 0; }
+.io span { flex: 0 0 100px; font-size: 11.5px; color: var(--faint); }
+.io code { flex: 1; min-width: 0; word-break: break-all; }
+
+.callout { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--warn); padding: 16px 20px; }
+.callout p { margin: 0 0 10px; font-size: 13.5px; }
+.callout p:last-child { margin-bottom: 0; }
+.dist { margin: 0 0 12px; }
+.dist > div { display: flex; gap: 12px; padding: 7px 0; align-items: baseline; flex-wrap: wrap; }
+.dist span { flex: 0 0 120px; font-size: 12.5px; color: var(--muted); }
+.dist code { font: 13px ui-monospace, 'Consolas', monospace; background: none; border: 0; padding: 0; color: var(--ink); }
+.dist code b { color: var(--warn); }
+
+ul.limits { margin: 0; padding-left: 20px; }
+ul.limits li { margin-bottom: 10px; font-size: 13.5px; }
+ul.limits .fixed { font-size: 11px; font-weight: 600; padding: 2px 8px; margin-right: 4px; background: var(--brand); color: var(--on-brand); }
+
+.empty { color: var(--faint); padding: 36px 0; text-align: center; font-size: 14px; }
+footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12.5px; }
+footer b { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <!-- ji1.co.kr의 로고 원본. 어두운 색 + 투명 배경이라 다크 바 위에서는
+         흰색으로 반전시킨다 (사이트는 mix-blend-mode:difference로 같은 효과를 낸다). -->
+    <img src="/assets/logo.png" alt="(주)지일" class="logo">
+    <span class="slash">|</span>
+    <h1>입찰 공고 싱크로율 탐색기</h1>
+
+    <div class="theme" role="group" aria-label="화면 테마">
+      <button type="button" data-theme-set="light" title="라이트 모드">라이트</button>
+      <button type="button" data-theme-set="dark" title="다크 모드">다크</button>
+      <button type="button" data-theme-set="system" title="OS 설정을 따름">시스템</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="corpus-line" id="corpusInfo">코퍼스 불러오는 중…</div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="live">실제 공고</button>
+    <button role="tab" aria-selected="false" data-tab="search">직접 검색</button>
+    <button role="tab" aria-selected="false" data-tab="corpus">과거사업 목록</button>
+    <button role="tab" aria-selected="false" data-tab="how">동작 원리</button>
+  </div>
+
+  <section id="tab-live">
+    <div class="search">
+      <select id="days">
+        <option value="3">최근 3일</option>
+        <option value="7" selected>최근 7일</option>
+        <option value="14">최근 14일</option>
+        <option value="30">최근 30일</option>
+      </select>
+      <button type="button" id="load">나라장터에서 불러오기</button>
+      <button type="button" id="refresh" class="ghost">새로 조회</button>
+    </div>
+    <div class="filters" id="filters"></div>
+    <p class="sub" id="liveMeta" style="margin:0 0 18px">조회에 40초쯤 걸립니다. 한 번 불러오면 캐시되니 탭을 오가도 다시 기다리지 않습니다.</p>
+    <div id="liveResults"></div>
+  </section>
+
+  <section id="tab-search" hidden>
+    <form class="search" id="form">
+      <input id="q" placeholder="공고 제목을 붙여넣으세요 — 예: 국립낙동강생물자원관 어린이 체험공간 전시 제작설치" autocomplete="off">
+      <button type="submit" id="go">검색</button>
+    </form>
+    <div class="examples" id="examples"></div>
+    <div id="verdict"></div>
+    <div id="results"></div>
+  </section>
+
+  <section id="tab-corpus" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th class="num">연도</th><th>사업명</th><th>본문</th><th class="num">사업비</th></tr></thead>
+        <tbody id="corpusRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-how" hidden>
+    <h2 class="sec">파이프라인 현황</h2>
+    <p class="sub lead">7단계 중 지금 어디까지 돌아가고 있는지. 색이 곧 상태입니다.</p>
+
+    <div class="legend">
+      <span><i class="sw done"></i>구현 완료</span>
+      <span><i class="sw partial"></i>부분 구현</span>
+      <span><i class="sw todo"></i>미착수</span>
+      <span><i class="sw hold"></i>보류</span>
+    </div>
+
+    <div class="flow">
+      <div class="stage">
+        <div class="stage-no">①</div>
+        <div class="stage-body">
+          <h3>수집 <span class="pill done">완료</span></h3>
+          <p>data.go.kr OpenAPI — 본공고 3종(물품·용역·공사) + 사전규격 3종, 총 6개 오퍼레이션.
+             페이지네이션·재시도·부분실패 처리 포함.</p>
+          <code>src/api/</code>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-no">②</div>
+        <div class="stage-body">
+          <h3>규칙 추출 <span class="pill partial">부분</span></h3>
+          <p>제외 키워드 <b class="ok">✓</b> · 최소 예산 1억원 <b class="ok">✓</b> ·
+             낙찰방법 <b class="ok">✓ 협상에 의한 계약만 통과</b></p>
+          <p class="sub">2026-09-23부터 적용. <b>fail-open</b>이다 — 낙찰방법을 아직 모르는
+             공고(사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이 빗나가면 그럴 수 있음)는
+             거르지 않는다. 값이 있는데 협상에의한이 <b>아닌 게 확인됐을 때만</b> 제외한다.
+             <code>config/keywords.json</code>의 <code>requireNegotiatedContract</code>만
+             <code>false</code>로 바꾸면 끌 수 있다(코드 수정 불필요).</p>
+          <code>config/keywords.json · src/matching/bidMethod.ts · src/matching/matchEngine.ts</code>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-no">③</div>
+        <div class="stage-body">
+          <h3>필터링 <span class="pill done">완료</span></h3>
+          <p><b>③-a</b> 코드·키워드 매칭 — 세부품명번호는 단독 인정, 업종코드는 정밀도가 낮아 제목 키워드가 함께 있을 때만 인정<br>
+             <b>③-b</b> 해외 개최 판별 — 전시회+한국관 조합은 자동배제, 단 몽골은 예외로 표시<br>
+             <b>③-c</b> 자격조건 필터 — 면허제한정보 API의 <b>업종코드</b>를 보유 자격과 대조
+             (대응 API가 없어 본공고만)</p>
+          <p class="sub">코드로 맞춥니다. 이름 부분일치로 보던 시절에는
+             <code>건축공사업(0002)</code> 제한을 지일의 <code>실내건축공사업(0006)</code>이
+             충족한 것으로 판정해(문자열 포함) <b>710억 건물 신축공사가 통과</b>했습니다.
+             부족 허용치도 1→0으로 바꿨습니다 — 면허제한 공고의 <b>72%가 그룹 1개짜리</b>라
+             1개를 봐주면 그만큼에 대해 필터가 꺼진 것과 같았습니다.</p>
+          <code>src/matching/</code>
+        </div>
+      </div>
+
+      <div class="stage current">
+        <div class="stage-no">④</div>
+        <div class="stage-body">
+          <h3>싱크로율 스코어링 <span class="pill done">연결 완료</span></h3>
+          <p>과거사업 <b>103건</b>(2022–2026) 코퍼스 대비 TF-IDF 코사인. 공고 첨부를 읽은 경우는 본문끼리 코사인, 제목만 있으면 포화 포함도를 씁니다.
+             <b class="ok">주간 리포트·구글 시트(N·O열)·텔레그램에 모두 반영됩니다.</b>
+             지금은 <b>표시만</b> 하고 공고를 걸러내지는 않습니다 — 임계값을 정할 근거(담당자 O/X 판정)가
+             아직 없기 때문입니다. 아래에서 계산 방식을 자세히 설명합니다.</p>
+          <p class="sub">코퍼스 파일은 저장소에 없어서(개인정보 포함) GitHub Actions에서는 싱크로율 칸이
+             빈 채로 나머지가 그대로 돕니다. 0%가 아니라 <b>빈 칸</b>입니다 — "안 비슷하다"와
+             "비교할 자료가 없다"는 다릅니다.</p>
+          <code>src/similarity/ · src/corpus/ · src/pipeline.ts</code>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-no">⑤</div>
+        <div class="stage-body">
+          <h3>LLM 판단 <span class="pill todo">미착수</span></h3>
+          <p>경계선 구간(싱크로율 35~65%)만 Claude API로 넘겨 "할 만한 일인가"를 묻는 단계.
+             ④의 출력(유사 과거사업 top3)이 그대로 판단 근거가 됩니다 —
+             키워드 목록보다 실제 수행 이력을 보여주는 쪽이 판단 품질이 높습니다.</p>
+          <code>미구현</code>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-no">⑥</div>
+        <div class="stage-body">
+          <h3>결과 정리 <span class="pill done">완료</span> <span class="pill hold">카카오톡 보류</span></h3>
+          <p>구글 시트 → 텔레그램 → 이메일 순으로 발송. 담당자가 알림을 보고 시트를 열었을 때
+             해당 행이 이미 있어야 하고, SMTP가 죽어도 알림은 가야 하기 때문입니다.
+             셋 중 하나가 실패해도 나머지는 진행됩니다.</p>
+          <code>src/sheets/ · src/notify/ · src/email/</code>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-no">⑦</div>
+        <div class="stage-body">
+          <h3>피드백 <span class="pill partial">쓰기만</span></h3>
+          <p>매 실행마다 신규 공고를 시트에 적재 <b class="ok">✓</b> · 담당자가 O/X/보류 판정 <b class="ok">✓</b><br>
+             <b class="warnx">시트를 읽어서 규칙을 고치는 쪽은 미구현</b> — 판정이 쌓여야 의미가 생깁니다.
+             이 데이터가 ④의 임계값을 확정하는 근거가 됩니다.</p>
+          <code>src/sheets/feedbackRow.ts</code>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="sec">싱크로율은 어떻게 계산하나</h2>
+    <p class="sub lead">숫자 하나만 보여주면 믿을 근거가 없습니다. 각 단계에서 무엇을 하는지, 왜 그렇게 골랐는지.</p>
+
+    <div class="step">
+      <div class="step-no">1</div>
+      <div>
+        <h3>전처리 — 상투어를 지우고 문자 n-gram으로 자른다</h3>
+        <div class="io">
+          <div><span>입력</span><code>[협상에의한계약]고흥분청문화박물관 실감콘텐츠 제작 및 설치</code></div>
+          <div><span>불용어 제거 후</span><code>고흥분청문화박물관실감콘텐츠제작및설치</code></div>
+          <div><span>2·3-gram</span><code>고흥 · 흥분 · 분청 … 실감콘 · 감콘텐 · 콘텐츠 …</code></div>
+        </div>
+        <p><b>왜 형태소 분석기가 아니라 문자 n-gram인가.</b> 공고명은 띄어쓰기가 제각각입니다 —
+          <code>전시관조성</code> / <code>전시관 조성</code>이 같은 사업을 가리킵니다. 공백을 지우고 문자 단위로
+          자르면 이 문제가 사라집니다. 게다가 <code>미디어파사드</code>, <code>실감콘텐츠</code> 같은 업계 신조어는
+          형태소 사전에 없는데, 문자 n-gram은 사전이 필요 없습니다. 네이티브 빌드나 사전 파일이 없으니
+          GitHub Actions에서도 그대로 돕니다.</p>
+        <p><b>왜 2와 3을 같이 쓰나.</b> 2-gram만 쓰면 <code>전시</code>가 "전시회 참가 대행"에도 걸려 지나치게
+          관대해지고, 3-gram만 쓰면 <code>루지조형물</code> 같은 짧은 사업명에서 자질이 너무 적어집니다.</p>
+        <p><b>지우는 상투어.</b> <code>용역 · 사업 · 공고 · 입찰 · 재공고 · 긴급공고 · 일반경쟁 · 협상에의한계약 · 주식회사 …</code>
+          — 이걸 안 지우면 전혀 다른 두 사업이 "~ 조성 사업 용역(재공고)" 꼬리표만으로 0.3~0.4의 바닥 유사도를 갖게 되어
+          진짜 신호가 묻힙니다.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">2</div>
+      <div>
+        <h3>가중치 — 흔한 말로는 점수를 벌 수 없게</h3>
+        <p>각 n-gram에 <b>TF-IDF</b> 가중치를 줍니다. 코퍼스 103건 중 드물게 나오는 조각일수록 큰 값을 받습니다.
+          그래서 <code>실감콘</code>이 <code>제작및</code>보다 높은 가중을 갖습니다 — "실감콘텐츠"가 "제작 및 설치"보다
+          희귀하기 때문입니다.</p>
+        <p><b>IDF는 과거사업 코퍼스에서만 학습합니다.</b> 신규 공고까지 넣어 다시 계산하면, 그 주에 어떤 공고가
+          올라왔느냐에 따라 과거사업 간 점수까지 흔들립니다. 지난주에 0.81이던 게 이번주에 0.76이 되면
+          시트에 점수를 쌓아 임계값을 정할 수가 없습니다.</p>
+        <p>등장 횟수는 <code>1 + ln(count)</code>로 눌러 씁니다 — 과업지시서에 "전시"가 200번 나온다고 해서
+          20번 나온 문서보다 10배 더 전시스럽지는 않으니까요.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">3</div>
+      <div>
+        <h3>사업명끼리 — 코사인 유사도</h3>
+        <p>공고 제목과 과거 사업명을 각각 벡터로 만들고 <b>길이 1로 정규화</b>한 뒤 내적을 구합니다.
+          정규화했기 때문에 내적이 곧 코사인 값이고, 공통 n-gram들의 기여를 그냥 더한 값과 같습니다.</p>
+        <div class="formula">cos(공고, 과거사업) = Σ (공고 가중 × 과거사업 가중)</div>
+        <p>길이를 1로 맞추는 게 중요합니다. 안 그러면 사업명이 긴 쪽이 무조건 큰 값을 갖습니다.</p>
+        <p><b>다만 겹친 n-gram이 3개 미만이면 점수를 0으로 봅니다.</b> 하나만 우연히 겹쳐도 점수가
+          나오던 것이 오탐의 주범이었습니다 — <code>국립농업박물관 소장 박물관자료 보존처리</code>가
+          <code>세월호선체처리</code>와 공통 n-gram 단 <b>1개</b>(<code>처리</code>)로 18.6%를 받았습니다.
+          반면 제대로 된 매칭은 10~15개가 겹칩니다.</p>
+        <p>3으로 잡은 근거가 있습니다. 2·3-gram을 함께 쓰므로 <b>3글자짜리 낱말이 온전히 겹치면
+          최소 3개</b>가 나옵니다(<code>전시관</code> → 전시 / 시관 / 전시관). 즉 "적어도 세 글자짜리
+          말 하나는 통째로 겹쳐야 한다"는 뜻이고, 두 글자 우연 일치(<code>처리</code>, <code>조성</code>)를
+          걸러냅니다.</p>
+        <p>그리고 <b>0점 항목은 목록에 넣지 않습니다.</b> 0점을 그대로 내보내면 정렬이 임의 순서가 되어
+          아무 사업이나 "유사 과거사업"으로 찍힙니다 — 실제로 점수 0.000인 항목이 1위로 나오던
+          버그가 있었습니다.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">4</div>
+      <div>
+        <h3>본문 비교 — 상황에 따라 지표가 다릅니다</h3>
+        <div class="io">
+          <div><span>제목 ↔ 긴 본문</span><code>포화 포함도</code></div>
+          <div><span>본문 ↔ 본문</span><code>코사인</code></div>
+        </div>
+        <p><b>첨부 과업지시서를 읽은 경우(39%)는 코사인을 씁니다.</b> 양쪽 다 긴 문서일 때
+          포함도를 쓰면 질의가 길어질수록 분모가 커져 값이 눌립니다 — 실측에서 <b>자기 자신과
+          비교해도 0.183</b>이 나왔고, 본문을 넣으면 점수가 22%→18%로 오히려 떨어졌습니다.
+          두 문서의 어휘가 얼마나 겹치는지는 양쪽을 대등하게 정규화하는 코사인으로 재야 합니다.</p>
+        <p>아래는 <b>제목만 있는 경우(61%)</b>에 쓰는 포화 포함도 이야기입니다.</p>
+        <p>여기는 코사인을 쓰지 않습니다. <b>20자짜리 제목과 12,000자짜리 과업지시서를 코사인으로 재면
+          제목이 본문에 완벽히 들어 있어도 0.1 언저리에서 천장을 칩니다</b>(분모에 긴 문서의 길이가 통째로 들어가서).
+          실제로 첫 구현에서 본문 점수가 전부 0.005~0.11에 깔렸고, 그 결과
+          <b class="warnx">본문이 있는 사업일수록 가중평균이 깎여 순위에서 밀리는</b> 거꾸로 된 동작이 났습니다 —
+          자료가 많을수록 불리해지는 셈입니다.</p>
+        <p>그래서 "질의의 내용이 이 문서에 얼마나 담겼는가"를 재는 <b>포함도</b>로 바꿨습니다. 문서 길이에
+          영향받지 않아서 사업명 코사인과 같은 눈금에 놓을 수 있습니다.</p>
+        <p>그랬더니 반대 문제가 생겼습니다. <code>청사 승강기 교체공사</code>가 유아안전체험관 과업지시서에서
+          <b>0.79</b>를 받았는데, 그 문서에 <code>승강기</code>가 딱 한 번(체험시설 설명 중에) 나왔기 때문입니다.
+          포함도는 등장 <i>여부</i>만 보니 스쳐 지나간 언급과 주제어를 똑같이 칩니다.</p>
+        <p>그래서 <b>등장 횟수를 포화 함수로</b> 반영합니다 (BM25의 tf 포화 항):</p>
+        <div class="formula">포화 = 등장횟수 / (등장횟수 + k × 길이보정)&nbsp;&nbsp;&nbsp;(k = 8, b = 0.75)</div>
+        <p>1회 등장은 낮은 값, 수십 회는 1에 수렴하되 100회와 200회는 거의 차이가 없습니다.
+          이걸 넣고 승강기 오탐은 <b>0.79 → 0.35</b>, 최종 점수 <b>0.122</b>로 떨어졌습니다.
+          k를 BM25 기본값 1.2가 아니라 8로 올린 건, 과업지시서가 모두 비슷하게 길어서(본문 상한 12,000자)
+          1.2로는 1회 등장이 0.45나 받기 때문입니다.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">5</div>
+      <div>
+        <h3>결합 — 그리고 자료 없는 사업을 벌하지 않기</h3>
+        <div class="formula">점수 = 사업명 코사인 × 0.65 &nbsp;+&nbsp; 본문 포함도 × 0.35</div>
+        <p>과업지시서가 유실된 <b>30건</b>은 가중치를 사업명 쪽으로 몰아 <b>재정규화</b>합니다.
+          본문 점수를 0으로 두고 그냥 가중합하면 자료가 없다는 이유만으로 최대 0.35가 깎여 순위에서
+          부당하게 밀립니다. 자료 유실은 그 사업이 덜 비슷하다는 증거가 아니니까요.</p>
+        <p class="sub">0.65 / 0.35이라는 비율 자체는 아직 근거가 약합니다. O/X 판정이 쌓이면 이 가중치도
+          데이터로 맞출 수 있습니다.</p>
+      </div>
+    </div>
+
+    <h2 class="sec">점수를 어디서 자를 것인가</h2>
+    <div class="callout">
+      <p>대조군을 넣어 실측한 분포입니다 (원점수 / 보정된 싱크로율).</p>
+      <div class="dist">
+        <div><span>전시·체험 계열</span><code>0.539 · 0.491 · 0.420 · 0.344 · <b>0.169</b><br><small>싱크로율 72% · 66% · 58% · 47% · <b>18%</b></small></code></div>
+        <div><span>무관 공고</span><code><b>0.121</b> · 0.040 · 0.033 · 0.031 · 0.021<br><small>싱크로율 <b>10%</b> · 3% · 3% · 3% · 2%</small></code></div>
+      </div>
+      <p><b>양성 최저와 음성 최고가 겹칩니다.</b> 하나의 선으로 자를 수 없다는 뜻이고, 그 겹치는 구간이 곧 ⑤ LLM이 맡아야 할 자리입니다.</p>
+      <p>화면에 보이는 <b>싱크로율(%)</b>은 이 원점수를 기준별 곡선에 통과시킨 값입니다. <b>단조 변환</b>이라 순위는 원점수와 완전히 같고 눈금만 바꿉니다 — 포화계수나 가중치를 건드려 숫자를 올리는 것과는 다릅니다. 그쪽은 분리도를 실제로 망가뜨립니다(k를 1.2로 낮추면 무관 공고가 양성 최저를 추월하는 것을 확인했습니다).</p>
+      <p>구간 <b>높음 65% 이상 · 경계선 35~65% · 낮음 35% 미만</b>은 아직 <b>가설</b>입니다. 담당자 O/X 판정이 쌓이면 기준별로 나눠 다시 잡습니다 — 시트에 <code>원점수</code>와 <code>싱크로율근거</code> 열을 함께 남기는 이유입니다.</p>
+    </div>
+
+    <h2 class="sec">한계</h2>
+    <ul class="limits">
+      <li><b>동의 표현을 못 잡습니다.</b> <code>체험형 콘텐츠</code> ↔ <code>인터랙티브 전시물</code>처럼 글자가
+        안 겹치면 0점입니다. 이건 임베딩의 몫인데, TF-IDF 기준선 대비 몇 % 나은지 측정돼야 API 비용과
+        외부 전송 리스크를 정당화할 수 있어서 나중 단계로 뒀습니다.</li>
+      <li><b>코퍼스가 편향돼 있습니다.</b> 과거 자료에는 <b>우리가 응찰한 건만</b> 들어 있습니다.
+        "전시 분야인가"는 잘 맞히지만 "전시 분야인데 우리가 안 할 일인가"(예산 과소·지역 과원거리)는
+        전혀 못 잡습니다. ⑦의 X 판정이 쌓이면 음성 코퍼스로 쓸 수 있습니다.</li>
+      <li><b>첨부가 붙은 공고는 39%뿐입니다.</b> <span class="fixed">해결됨</span> 나라장터 OpenAPI가
+        첨부파일 URL(<code>ntceSpecDocUrl</code>)을 함께 주는 것을 확인해, 과업지시서·제안요청서를
+        받아 읽도록 했습니다(③.5단계). 다만 실측상 매칭 공고의 <b>39%</b>만 그런 문서를 첨부합니다 —
+        나머지는 입찰공고문·내역서뿐이라 제목만으로 판단합니다. 그래서 두 기준이 공존하고,
+        점수도 기준별로 따로 보정합니다.</li>
+      <li><b>과거 기술제안서는 코퍼스에 없습니다.</b> 지금 코퍼스는 발주처가 낸 과업지시서·제안요청서이고,
+        지일이 작성한 디자인 제안서는 회사 서버에 따로 있습니다. 그쪽이 "우리가 할 수 있다고 말한 것"이라
+        유사도 관점에서 더 가치가 큽니다.</li>
+    </ul>
+  </section>
+
+  <dialog id="why">
+    <div class="dlg-head">
+      <strong>싱크로율 계산 근거</strong>
+      <button type="button" id="whyClose">닫기</button>
+    </div>
+    <div id="whyBody"></div>
+  </dialog>
+
+  <footer>
+    (주)지일 · 로컬 전용 도구 — 과업지시서 본문과 담당자 정보가 들어 있어 <b>외부로 전송하지 않습니다</b>.<br>
+    점수 기준선(65% / 35%)은 아직 <b>가설</b>입니다. 피드백 시트에 O/X 판정이 쌓이면 데이터로 다시 정합니다.
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+/**
+ * JSON을 기대하는 요청의 공통 처리.
+ *
+ * res.json()을 바로 부르면 서버가 HTML(로그인 안내·오류 페이지)을 돌려줬을 때
+ * "Unexpected token '<', \"<!doctype\"... is not valid JSON" 같은, 원인과 아무 상관 없는
+ * 메시지가 사용자에게 보인다. 응답 종류를 먼저 확인해서 읽을 수 있는 이유를 만든다.
+ */
+async function getJson(url) {
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error(`서버에 연결하지 못했습니다. 창이 닫혔거나 PC가 꺼졌을 수 있습니다. (${err.message})`);
+  }
+  const type = res.headers.get("content-type") ?? "";
+  if (!type.includes("application/json")) {
+    if (res.status === 401) throw new Error("접근 권한이 없습니다. 담당자에게 받은 주소(?t=… 포함)로 다시 여세요.");
+    throw new Error(`서버가 예상치 못한 응답을 보냈습니다 (HTTP ${res.status}).`);
+  }
+  const data = await res.json();
+  if (data && data.unauthorized) throw new Error(data.error);
+  return data;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const won = (n) => n == null ? "—" : (n / 100000000).toFixed(2) + "억";
+
+// 보정된 표시값(싱크로율) 기준 구간. src/similarity/calibrate.ts의 HIGH_BAND/LOW_BAND와
+// 같은 값이어야 하며, test/uiDocs.test.ts가 그 일치를 검사한다. 아직 가설이고,
+// 담당자 O/X 판정이 쌓이면 기준별로 나눠 다시 잡는다.
+const HIGH = 0.65, LOW = 0.35;
+
+const EXAMPLES = [
+  "국립낙동강생물자원관 어린이 체험공간 전시 제작설치",
+  "정선군 복합문화센터 공간디자인 및 전시물 제작설치",
+  "과학관 상설전시실 전시물 교체 제작설치",
+  "청사 승강기 교체공사",
+];
+
+let corpus = [];
+
+async function boot() {
+  let data;
+  try {
+    data = await getJson("/api/corpus");
+  } catch (err) {
+    // 여기서 던지면 화면이 "불러오는 중…"에 멈춘 채 콘솔에만 오류가 남는다.
+    $("corpusInfo").innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
+    return;
+  }
+  corpus = data.projects;
+  $("corpusInfo").innerHTML =
+    `과거사업 <b>${data.total}</b>건 · 본문 확보 <b>${data.withBody}</b>건 (${Math.round(data.withBody / data.total * 100)}%) · ${esc(data.years)}`;
+  renderStats(data);
+  renderCorpus();
+  $("examples").innerHTML = EXAMPLES.map((e) => `<button type="button" data-q="${esc(e)}">${esc(e.slice(0, 28))}…</button>`).join("");
+  $("examples").onclick = (ev) => {
+    const q = ev.target.closest("button")?.dataset.q;
+    if (q) { $("q").value = q; search(); }
+  };
+}
+
+function renderStats(d) {
+  $("stats").innerHTML = [
+    ["과거사업", d.total + "건"],
+    ["본문 확보", d.withBody + "건"],
+    ["사업비 추출", d.withBudget + "건"],
+    ["기간", d.range],
+  ].map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("");
+}
+
+function renderCorpus() {
+  $("corpusRows").innerHTML = corpus
+    .slice()
+    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, "ko"))
+    .map((p) => `<tr class="${p.hasBody ? "" : "nobody"}">
+      <td class="num">${p.year}</td>
+      <td>${esc(p.name)}</td>
+      <td><span class="tag ${p.hasBody ? "" : "none"}">${p.hasBody ? p.bodyLength.toLocaleString("ko-KR") + "자" : "없음"}</span></td>
+      <td class="num">${won(p.budgetAmount)}</td>
+    </tr>`).join("");
+}
+
+// ── 직접 검색 ───────────────────────────────────────────────
+async function search() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  $("go").disabled = true;
+  $("results").innerHTML = '<div class="empty">계산 중…</div>';
+  try {
+    const data = await getJson("/api/search?q=" + encodeURIComponent(q));
+    renderVerdict(data.maxScore);
+    renderResults(data.top, q);
+  } catch (err) {
+    $("results").innerHTML = '<div class="empty">검색 실패: ' + esc(err.message) + "</div>";
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function renderVerdict(max) {
+  const el = $("verdict");
+  if (max >= HIGH) {
+    el.className = "verdict hit";
+    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — 과거 수행사업과 뚜렷하게 겹칩니다. <b>검토 대상</b>입니다.`;
+  } else if (max >= LOW) {
+    el.className = "verdict edge";
+    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — <b>경계선 구간</b>입니다. 원점수 기준 유사 공고 최저와 무관 공고 최고가 겹치는 구간이라, 이 점수만으로는 판단할 수 없습니다.`;
+  } else {
+    el.className = "verdict";
+    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — 과거 수행사업과 겹치는 부분이 거의 없습니다.`;
+  }
+}
+
+function renderResults(top, query) {
+  if (!top.length) { $("results").innerHTML = '<div class="empty">결과 없음</div>'; return; }
+  $("results").innerHTML = top.map((m, i) => {
+    const bodyBar = m.bodyScore == null
+      ? `<div class="bar"><span>본문 — 자료 없음</span><div class="track"></div></div>`
+      : `<div class="bar"><span>본문 포함도 ${m.bodyScore.toFixed(3)}</span><div class="track"><div class="fill" style="width:${Math.round(m.bodyScore * 100)}%"></div></div></div>`;
+    return `<div class="card">
+      <div class="row">
+        <div class="score">${m.score.toFixed(3)}<small>${i + 1}위</small></div>
+        <div style="flex:1;min-width:0">
+          <div class="name">${esc(m.name)}</div>
+          <div class="meta">${m.year}년 · ${esc(m.id)}${m.budgetAmount ? " · " + won(m.budgetAmount) : ""}</div>
+          <div class="bars">
+            <div class="bar"><span>사업명 유사도 ${m.nameScore.toFixed(3)}</span><div class="track"><div class="fill" style="width:${Math.round(m.nameScore * 100)}%"></div></div></div>
+            ${bodyBar}
+          </div>
+          <div class="simlist"><a href="#" class="why" data-q="${esc(query)}" data-id="${esc(m.id)}">계산 근거 보기</a></div>
+          ${m.excerpt ? `<details class="body"><summary>과업지시서 발췌 보기</summary><pre>${esc(m.excerpt)}</pre></details>` : ""}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// ── 실제 나라장터 공고 ──────────────────────────────────────
+async function loadNotices(refresh) {
+  const days = $("days").value;
+  $("load").disabled = $("refresh").disabled = true;
+  $("liveMeta").textContent = refresh ? "나라장터에 다시 조회 중… (40초쯤 걸립니다)" : "불러오는 중…";
+  $("liveResults").innerHTML = '<div class="empty">공고 조회 중… 본공고 3종 + 사전규격 3종 + 면허제한정보를 함께 받아옵니다.</div>';
+  try {
+    const data = await getJson(`/api/notices?days=${days}${refresh ? "&refresh=1" : ""}`);
+    if (data.error) {
+      $("liveMeta").textContent = "";
+      $("liveResults").innerHTML = `<div class="verdict edge">조회 실패 — ${esc(data.error)}</div>`;
+      return;
+    }
+    const when = new Date(data.fetchedAt).toLocaleString("ko-KR");
+    const hi = data.items.filter((n) => n.maxScore >= HIGH).length;
+    const mid = data.items.filter((n) => n.maxScore >= LOW && n.maxScore < HIGH).length;
+    $("liveMeta").innerHTML =
+      `최근 ${data.lookbackDays}일 · 규칙 매칭 <b>${data.items.length}건</b> · ` +
+      `싱크로율 높음 <b>${hi}</b> · 경계선 <b>${mid}</b> · 낮음 <b>${data.items.length - hi - mid}</b>` +
+      ` · 첨부읽음 <b>${data.items.filter((n) => n.basis === "제목+과업내용").length}</b>건` +
+      ` · ${esc(when)}${data.cached ? " (캐시)" : ""}`;
+    renderNotices(data.items);
+  } catch (err) {
+    $("liveResults").innerHTML = `<div class="verdict edge">요청 실패 — ${esc(err.message)}</div>`;
+  } finally {
+    $("load").disabled = $("refresh").disabled = false;
+  }
+}
+
+/** 현재 걸려 있는 필터 상태 */
+const filters = { grade: "all", source: "all" };
+let lastItems = [];
+
+function renderNotices(items) {
+  lastItems = items;
+  applyFilters();
+}
+
+function applyFilters() {
+  const shown = lastItems.filter(
+    (n) =>
+      (filters.grade === "all" || n.confidence === filters.grade) &&
+      (filters.source === "all" || n.sourceType === filters.source)
+  );
+
+  // 필터 칩의 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
+  // "지금 뭘 숨기고 있는지"를 알 수 없다.
+  const count = (fn) => lastItems.filter(fn).length;
+  $("filters").innerHTML = [
+    chip("grade", "all", `전체 ${lastItems.length}`),
+    chip("grade", "강력추천", `강력추천 ${count((n) => n.confidence === "강력추천")}`, "urgent"),
+    chip("grade", "참고용", `참고용 ${count((n) => n.confidence === "참고용")}`),
+    `<span class="chip-gap"></span>`,
+    chip("source", "all", "본공고+사전규격"),
+    chip("source", "본공고", `본공고 ${count((n) => n.sourceType === "본공고")}`),
+    chip("source", "사전규격", `사전규격 ${count((n) => n.sourceType === "사전규격")}`),
+  ].join("");
+
+  if (!lastItems.length) {
+    $("liveResults").innerHTML = '<div class="empty">이 기간에 규칙 매칭된 공고가 없습니다.</div>';
+    return;
+  }
+  if (!shown.length) {
+    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다.</div>';
+    return;
+  }
+
+  // 본공고와 사전규격은 담당자가 할 일이 다르다 — 본공고는 마감이 있는 실제 입찰이고,
+  // 사전규격은 아직 공고 전이라 의견 제출·사전 준비 단계다. 섞어 놓으면 우선순위를 못 세운다.
+  const groups = [
+    { key: "본공고", note: "마감이 있는 실제 입찰 — 참가 여부를 지금 판단해야 합니다" },
+    { key: "사전규격", note: "아직 공고 전 단계 — 의견 제출과 사전 준비 대상입니다" },
+  ];
+
+  $("liveResults").innerHTML = groups
+    .map(({ key, note }) => {
+      const list = shown.filter((n) => n.sourceType === key);
+      if (list.length === 0) return "";
+      const strong = list.filter((n) => n.confidence === "강력추천").length;
+      return `
+        <div class="group">
+          <div class="group-head">
+            <h2>${esc(key)} <span class="group-n">${list.length}건</span></h2>
+            ${strong ? `<span class="group-strong">강력추천 ${strong}건</span>` : ""}
+          </div>
+          <p class="group-note">${esc(note)}</p>
+          ${list.map(renderNotice).join("")}
+        </div>`;
+    })
+    .join("");
+}
+
+function chip(group, value, label, tone = "") {
+  const on = filters[group] === value;
+  return `<button type="button" class="chip ${tone} ${on ? "on" : ""}" data-group="${group}" data-value="${esc(value)}">${esc(label)}</button>`;
+}
+
+function renderNotice(n) {
+  const band = n.confidence === "강력추천" ? "urgent" : n.maxScore >= HIGH ? "strong" : n.maxScore >= LOW ? "edge" : "";
+  const pct = Math.round(n.maxScore * 100);
+  // 테스트 단계라 보정된 싱크로율과 원점수를 함께 보여준다 —
+  // 눈금이 맞는지 확인하려면 둘을 나란히 봐야 한다.
+  const scoreBadge =
+    (n.maxScore >= HIGH
+      ? `<span class="badge hi">싱크로율 ${pct}%</span>`
+      : n.maxScore >= LOW
+        ? `<span class="badge warn">경계선 ${pct}%</span>`
+        : `<span class="badge">싱크로율 ${pct}%</span>`) +
+    `<span class="badge raw" title="보정 전 원점수 · 기준 ${esc(n.basis || "제목")}">원 ${(n.rawScore ?? 0).toFixed(3)}</span>`;
+  const title = n.detailUrl
+    ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>`
+    : esc(n.title);
+  const sims = n.similar
+    .filter((s) => s.score > 0.02)
+    .map((s) => `<a href="#" class="why" data-q="${esc(n.title)}" data-id="${esc(s.id)}">${esc(s.name.slice(0, 34))} <b>${s.score.toFixed(3)}</b></a>`)
+    .join(" &nbsp;·&nbsp; ");
+  return `<div class="notice ${band}">
+    <div class="badges">
+      <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
+      ${scoreBadge}
+      <span class="badge">${esc(n.businessType)}</span>
+      ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
+    </div>
+    <h3>${title}</h3>
+    <div class="meta">${esc(n.institution || "기관 미상")}
+      ${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}
+      ${n.deadline ? " · 마감 " + esc(n.deadline) : ""}
+      ${n.bidMethod ? " · " + esc(n.bidMethod.slice(0, 24)) : ""}</div>
+    <div class="meta">규칙 근거: ${esc(n.reason)}</div>
+    ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
+  </div>`;
+}
+
+// ── 점수 근거 ───────────────────────────────────────────────
+async function showWhy(q, id) {
+  $("whyBody").innerHTML = '<div class="empty">계산 중…</div>';
+  $("why").showModal();
+  let e;
+  try {
+    e = await getJson(`/api/explain?q=${encodeURIComponent(q)}&id=${encodeURIComponent(id)}`);
+  } catch (err) {
+    $("whyBody").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    return;
+  }
+  if (e.error) { $("whyBody").innerHTML = `<div class="empty">${esc(e.error)}</div>`; return; }
+
+  const nameRows = e.nameTerms.map((t) =>
+    `<tr><td><code>${esc(t.token)}</code></td><td class="num">${t.queryWeight.toFixed(4)}</td><td class="num">${t.docWeight.toFixed(4)}</td><td class="num">${t.contribution.toFixed(4)}</td></tr>`).join("");
+
+  const bodyBlock = e.bodyTerms ? `
+    <h4>② 본문 포화 포함도 = <b>${e.bodyScore.toFixed(4)}</b></h4>
+    <p class="sub">공고 제목이 과업지시서 본문에 얼마나 담겨 있는지. 등장 횟수가 많을수록 포화값이 1에 가까워집니다 — 스쳐 한 번 언급된 말과 주제어를 구분하기 위한 항입니다.</p>
+    <div class="scroll"><table><thead><tr><th>n-gram</th><th class="num">질의 비중</th><th class="num">본문 등장</th><th class="num">포화</th><th class="num">기여</th></tr></thead><tbody>
+    ${e.bodyTerms.map((t) => `<tr><td><code>${esc(t.token)}</code></td><td class="num">${t.mass.toFixed(4)}</td><td class="num">${t.termFrequency}회</td><td class="num">${t.saturation.toFixed(3)}</td><td class="num">${t.contribution.toFixed(4)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="sub">기여도 상위 ${e.bodyTerms.length}개 / 전체 ${e.bodyTermCount}개</p>`
+    : `<h4>② 본문 — 자료 없음</h4><p class="sub">이 사업은 과업지시서가 유실돼 사업명만으로 비교했습니다.</p>`;
+
+  $("whyBody").innerHTML = `
+    <h4>전처리</h4>
+    <p class="sub">불용어(용역·사업·공고·재공고 등)를 지우고 공백을 없앤 뒤 문자 2·3-gram으로 자릅니다.</p>
+    <div class="scroll"><table><tbody>
+      <tr><th>공고</th><td><code>${esc(e.query.normalized)}</code></td></tr>
+      <tr><th>과거사업</th><td><code>${esc(e.project.normalizedName)}</code></td></tr>
+    </tbody></table></div>
+
+    <h4>① 사업명 코사인 = <b>${e.nameScore.toFixed(4)}</b></h4>
+    <p class="sub">양쪽에 공통으로 있는 n-gram의 TF-IDF 가중치를 곱해 더한 값입니다. 두 벡터 모두 길이 1로 정규화돼 있어 합계가 곧 코사인 값입니다.</p>
+    <div class="scroll"><table><thead><tr><th>n-gram</th><th class="num">공고 가중</th><th class="num">과거사업 가중</th><th class="num">기여</th></tr></thead><tbody>${nameRows}</tbody></table></div>
+    <p class="sub">기여도 상위 ${e.nameTerms.length}개 / 공통 ${e.nameTermCount}개 · 공고에만 있어 점수를 못 받은 n-gram ${e.missingFromName.length}개${e.missingFromName.length ? ": " + e.missingFromName.map((t) => `<code>${esc(t)}</code>`).join(" ") : ""}</p>
+
+    ${bodyBlock}
+
+    <h4>③ 결합</h4>
+    <p class="sub">${esc(e.weights.applied)}</p>
+    <p class="formula">${e.nameScore.toFixed(4)} × ${e.weights.name} ${e.bodyScore != null ? `+ ${e.bodyScore.toFixed(4)} × ${e.weights.body}` : ""} = <b>${e.score.toFixed(4)}</b></p>`;
+}
+
+document.addEventListener("click", (ev) => {
+  const link = ev.target.closest("a.why");
+  if (!link) return;
+  ev.preventDefault();
+  showWhy(link.dataset.q, link.dataset.id);
+});
+// ── 테마 ───────────────────────────────────────────────────
+// "시스템"은 data-theme 속성을 지워서 prefers-color-scheme에 맡기는 것이다.
+// 저장에 실패해도(사생활 보호 모드 등) 화면 전환 자체는 되어야 하므로 따로 감싼다.
+function applyTheme(mode) {
+  if (mode === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = mode;
+  try {
+    if (mode === "system") localStorage.removeItem("ui-theme");
+    else localStorage.setItem("ui-theme", mode);
+  } catch (e) { /* 저장 못 해도 이번 세션에는 적용된다 */ }
+  markTheme(mode);
+}
+
+function markTheme(mode) {
+  document.querySelectorAll("[data-theme-set]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  });
+}
+
+(function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem("ui-theme"); } catch (e) { /* 무시 */ }
+  markTheme(saved === "dark" || saved === "light" ? saved : "system");
+  document.querySelector(".theme").onclick = (ev) => {
+    const btn = ev.target.closest("[data-theme-set]");
+    if (btn) applyTheme(btn.dataset.themeSet);
+  };
+})();
+
+$("whyClose").onclick = () => $("why").close();
+$("filters").onclick = (ev) => {
+  const btn = ev.target.closest("[data-group]");
+  if (!btn) return;
+  filters[btn.dataset.group] = btn.dataset.value;
+  applyFilters();
+};
+$("load").onclick = () => loadNotices(false);
+$("refresh").onclick = () => loadNotices(true);
+$("form").onsubmit = (e) => { e.preventDefault(); search(); };
+document.querySelector(".tabs").onclick = (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+  for (const name of ["live", "search", "corpus", "how"]) $("tab-" + name).hidden = btn.dataset.tab !== name;
+};
+
+boot();
+</script>
+</body>
+</html>

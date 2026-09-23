@@ -1,6 +1,6 @@
 import type { Env } from "../config/env.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
-import { fetchAllLicenseLimitGroups } from "../api/licenseLimitApi.js";
+import { fetchAllLicenseLimitGroups, type LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import { logger } from "../logger.js";
 import { evaluateQualifications } from "./qualificationFilter.js";
 import type { MatchedNotice } from "./types.js";
@@ -13,11 +13,17 @@ export async function applyQualificationFilter(
   env: Env,
   appConfig: AppConfig,
   matches: MatchedNotice[],
-  window: { begin: Date; end: Date }
+  window: { begin: Date; end: Date },
+  /**
+   * 이미 시작해둔 면허제한정보 조회. 이 조회는 어떤 공고가 매칭됐는지와 무관하게
+   * 조회기간 전체를 받아오므로, 공고 조회와 **동시에** 시작할 수 있다.
+   * 넘기지 않으면 여기서 직접 받아온다(기존 동작).
+   */
+  licenseGroupsPromise?: Promise<Map<string, LicenseLimitGroup[]>>
 ): Promise<MatchedNotice[]> {
   if (matches.length === 0) return matches;
 
-  const groupsByNotice = await fetchAllLicenseLimitGroups(env, window);
+  const groupsByNotice = await (licenseGroupsPromise ?? fetchAllLicenseLimitGroups(env, window));
 
   const kept: MatchedNotice[] = [];
   let excludedCount = 0;

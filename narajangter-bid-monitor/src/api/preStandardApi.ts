@@ -20,6 +20,7 @@ export async function fetchPreStandardNotices(env: Env, window: FetchWindow): Pr
     maxRetries: env.apiMaxRetries,
     retryDelayMs: env.apiRetryDelayMs,
     requestIntervalMs: env.apiRequestIntervalMs,
+    pageConcurrency: env.apiPageConcurrency,
   });
   return dedupeNotices(results);
 }

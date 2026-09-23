@@ -259,6 +259,7 @@ narajangter-bid-monitor/
 | 환경변수 로드/검증 | `src/config/env.ts` |
 | `config/*.json` 로드/검증 | `src/config/loadJsonConfig.ts` |
 | data.go.kr API 응답 필드명 후보 | `src/api/fieldCandidates.ts` |
+| 공동수급(공동이행/분담이행) 허용 여부 조회 | `src/api/jointBidApi.ts` — g2b.go.kr 비공식 API, **표시 전용**(필터·등급에 영향 없음), 본공고만 해당 |
 | 이메일 발송 (리포트/실패 알림) | `src/email/sendReportEmail.ts`, `src/email/mailer.ts` |
 | 전체 실행 순서 | `src/index.ts` |
 

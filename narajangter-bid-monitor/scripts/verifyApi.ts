@@ -15,6 +15,8 @@ import {
   LICENSE_LIMIT_OPERATION,
   PRE_STANDARD_OPERATIONS,
 } from "../src/api/endpoints.js";
+import { BID_NOTICE_FIELD_CANDIDATES } from "../src/api/fieldCandidates.js";
+import { pickString } from "../src/api/fieldResolver.js";
 import type { BusinessType } from "../src/api/types.js";
 import { fetchAllLicenseLimitGroups } from "../src/api/licenseLimitApi.js";
 
@@ -42,6 +44,17 @@ async function verifyOne(label: string, baseUrl: string, operation: string, serv
     if (items.length > 0) {
       console.log("  첫 항목 필드 목록:", Object.keys(items[0] as object));
       console.log("  첫 항목 원본:", JSON.stringify(items[0], null, 2));
+
+      // 낙찰방법 필드명은 아직 미검증 후보라(fieldCandidates.ts 참고), 여기서 바로 확인.
+      const bidMethod = pickString(items[0] as Record<string, unknown>, BID_NOTICE_FIELD_CANDIDATES.bidMethod, "MthdNm");
+      if (bidMethod) {
+        console.log(`  ✓ 낙찰방법 필드 매칭됨: "${bidMethod}" (후보 목록 유효 — fieldCandidates.ts 그대로 두면 됨)`);
+      } else {
+        console.log(
+          "  ⚠ 낙찰방법 후보 필드명이 전부 빗나감. 위 '첫 항목 필드 목록'에서 낙찰방법/계약방법 관련 필드를 찾아 " +
+            "src/api/fieldCandidates.ts의 bidMethod 배열 맨 앞에 추가하세요."
+        );
+      }
     } else {
       console.log("  (조회 기간 내 데이터 없음 - 정상일 수 있음. 기간을 늘려 재시도해보세요)");
     }

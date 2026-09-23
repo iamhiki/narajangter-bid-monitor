@@ -40,6 +40,7 @@ export interface Env {
   apiMaxRetries: number;
   apiRetryDelayMs: number;
   apiRequestIntervalMs: number;
+  apiPageConcurrency: number;
 
   sendEmptyReport: boolean;
   alertEmailOnFailure: boolean;
@@ -52,6 +53,17 @@ export interface Env {
   smtpUser?: string;
   smtpPass?: string;
   smtpFrom: string;
+
+  /** 텔레그램 봇 토큰. 토큰과 chat_id가 모두 있어야 텔레그램 발송이 켜진다. */
+  telegramBotToken?: string;
+  telegramChatIds: string[];
+  telegramEnabled: boolean;
+
+  /** 구글 서비스 계정 키 JSON 전문. 시트 ID와 함께 있어야 피드백 시트 기록이 켜진다. */
+  googleServiceAccountJson?: string;
+  feedbackSheetId?: string;
+  feedbackSheetName: string;
+  feedbackSheetEnabled: boolean;
 }
 
 let cached: Env | null = null;
@@ -79,6 +91,37 @@ export function loadEnv(): Env {
     if (!smtpPass) errors.push("SMTP_PASS가 설정되지 않았습니다.");
   }
 
+  const telegramBotToken = e.TELEGRAM_BOT_TOKEN?.trim() || undefined;
+  const telegramChatIds = (e.TELEGRAM_CHAT_IDS ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
+  // 둘 중 하나만 채워져 있으면 거의 확실히 설정 실수다 - 조용히 발송을 건너뛰지 않고 즉시 알려준다.
+  if (telegramBotToken && telegramChatIds.length === 0) {
+    errors.push("TELEGRAM_BOT_TOKEN은 있는데 TELEGRAM_CHAT_IDS가 비어 있습니다. (쉼표로 구분해 하나 이상 넣으세요)");
+  }
+  if (!telegramBotToken && telegramChatIds.length > 0) {
+    errors.push("TELEGRAM_CHAT_IDS는 있는데 TELEGRAM_BOT_TOKEN이 비어 있습니다.");
+  }
+  // 토큰과 수신자가 모두 있으면 자동으로 켜진다. TELEGRAM_ENABLED=false로 명시적으로 끌 수 있다.
+  const telegramEnabled =
+    parseBool(e.TELEGRAM_ENABLED, true) && Boolean(telegramBotToken) && telegramChatIds.length > 0;
+
+  const googleServiceAccountJson = e.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || undefined;
+  const feedbackSheetId = e.FEEDBACK_SHEET_ID?.trim() || undefined;
+  const feedbackSheetName = e.FEEDBACK_SHEET_NAME?.trim() || "피드백";
+  // 텔레그램과 같은 규칙: 둘 중 하나만 채워져 있으면 설정 실수이므로 조용히 넘어가지 않는다.
+  if (googleServiceAccountJson && !feedbackSheetId) {
+    errors.push("GOOGLE_SERVICE_ACCOUNT_JSON은 있는데 FEEDBACK_SHEET_ID가 비어 있습니다.");
+  }
+  if (!googleServiceAccountJson && feedbackSheetId) {
+    errors.push("FEEDBACK_SHEET_ID는 있는데 GOOGLE_SERVICE_ACCOUNT_JSON이 비어 있습니다.");
+  }
+  const feedbackSheetEnabled =
+    parseBool(e.FEEDBACK_SHEET_ENABLED, true) &&
+    Boolean(googleServiceAccountJson) &&
+    Boolean(feedbackSheetId);
+
   // 기본값은 각 parseInt_ 호출의 두 번째 인자 한 곳에만 정의한다 (여기 선언은 타입만 확보하는 용도).
   // try 블록이 끝까지 성공해야만(=errors가 비어야만) 아래 cached 조립에서 실제로 쓰이므로,
   // 이 시점의 초기값 자체는 의미가 없다 - 두 곳에 기본값을 따로 적어두면 한쪽만 고치는 실수가 나기 쉽다.
@@ -91,17 +134,22 @@ export function loadEnv(): Env {
   let apiMaxRetries!: number;
   let apiRetryDelayMs!: number;
   let apiRequestIntervalMs!: number;
+  let apiPageConcurrency!: number;
   let smtpPort!: number;
   let logLevel!: Env["logLevel"];
 
   try {
     lookbackDays = parseInt_(e.LOOKBACK_DAYS, 7, "LOOKBACK_DAYS", 1, 90);
-    apiNumOfRows = parseInt_(e.API_NUM_OF_ROWS, 500, "API_NUM_OF_ROWS", 1, 999);
+    // 999가 API 허용 상한이다. 500이면 페이지 수가 두 배가 되고 그만큼 왕복이 늘어난다
+    // (2026-09-17 실측: 500 -> 999로 올려 전체 소요 23초 -> 14초, 수집 건수는 동일).
+    apiNumOfRows = parseInt_(e.API_NUM_OF_ROWS, 999, "API_NUM_OF_ROWS", 1, 999);
     apiMaxPages = parseInt_(e.API_MAX_PAGES, 40, "API_MAX_PAGES", 1, 500);
     apiTimeoutMs = parseInt_(e.API_TIMEOUT_MS, 30000, "API_TIMEOUT_MS", 1000, 120000);
     apiMaxRetries = parseInt_(e.API_MAX_RETRIES, 4, "API_MAX_RETRIES", 0, 10);
     apiRetryDelayMs = parseInt_(e.API_RETRY_DELAY_MS, 1500, "API_RETRY_DELAY_MS", 0, 60000);
     apiRequestIntervalMs = parseInt_(e.API_REQUEST_INTERVAL_MS, 300, "API_REQUEST_INTERVAL_MS", 0, 60000);
+    // data.go.kr TPS 제한이 있어 무한정 올릴 수 없다. 1이면 예전처럼 한 장씩 순차 조회.
+    apiPageConcurrency = parseInt_(e.API_PAGE_CONCURRENCY, 4, "API_PAGE_CONCURRENCY", 1, 16);
     smtpPort = parseInt_(e.SMTP_PORT, 587, "SMTP_PORT", 1, 65535);
     logLevel = parseLogLevel(e.LOG_LEVEL);
   } catch (err) {
@@ -127,6 +175,7 @@ export function loadEnv(): Env {
     apiMaxRetries,
     apiRetryDelayMs,
     apiRequestIntervalMs,
+    apiPageConcurrency,
 
     sendEmptyReport: parseBool(e.SEND_EMPTY_REPORT, true),
     alertEmailOnFailure: parseBool(e.ALERT_EMAIL_ON_FAILURE, true),
@@ -139,6 +188,15 @@ export function loadEnv(): Env {
     smtpUser,
     smtpPass,
     smtpFrom,
+
+    telegramBotToken,
+    telegramChatIds,
+    telegramEnabled,
+
+    googleServiceAccountJson,
+    feedbackSheetId,
+    feedbackSheetName,
+    feedbackSheetEnabled,
   };
 
   return cached;

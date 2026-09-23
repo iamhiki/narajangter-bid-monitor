@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { ConfigError } from "../errors.js";
+import type { BusinessType } from "../api/types.js";
 
 // npm 스크립트는 항상 프로젝트 루트(narajangter-bid-monitor/)에서 실행되므로 cwd 기준으로 찾는다.
 // (tsx로 src에서 직접 실행하든, tsc로 컴파일된 dist에서 실행하든 경로가 흔들리지 않도록 하기 위함)
@@ -20,10 +21,27 @@ const codeEntrySchema = z.object({
   name: z.string().trim().min(1, "name은 비어있을 수 없습니다"),
 });
 
+/**
+ * 수집할 업무구분. 나라장터는 공고를 물품/용역/공사로 나누고 각각 별도 오퍼레이션으로 제공한다.
+ * 여기서 뺀 구분은 애초에 조회하지 않으므로, 결과에서 안 보일 뿐 아니라 조회도 그만큼 빨라진다.
+ */
+const businessTypeSchema = z.enum(["물품", "용역", "공사"]);
+
 const keywordsFileSchema = z.object({
   keywords: z.array(z.string().trim().min(1)).min(1, "keywords 배열이 비어있습니다"),
   excludeKeywords: z.array(z.string().trim().min(1)).default([]),
   minBudgetAmount: z.number().nonnegative().nullable().default(null),
+  businessTypes: z
+    .array(businessTypeSchema)
+    .min(1, "businessTypes 배열이 비어있습니다 (최소 1개 필요)")
+    .default(["물품", "용역", "공사"]),
+  /**
+   * 낙찰방법이 "협상에 의한 계약"인 공고만 남길지. 낙찰방법을 아직 알 수 없는 공고
+   * (bidMethod가 null — 사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이
+   * 빗나가면 null일 수 있음)는 fail-open으로 거르지 않는다 — 걸러도 되는지 판단할
+   * 근거가 없는데 지운다면 실제 기회를 놓칠 수 있기 때문이다 (matching/bidMethod.ts 참고).
+   */
+  requireNegotiatedContract: z.boolean().default(false),
 });
 
 const codesFileSchema = z.object({
@@ -84,6 +102,8 @@ export interface AppConfig {
   keywords: string[];
   excludeKeywords: string[];
   minBudgetAmount: number | null;
+  businessTypes: BusinessType[];
+  requireNegotiatedContract: boolean;
   productCodes: CodeEntry[];
   industryCodes: CodeEntry[];
   recipients: string[];
@@ -150,6 +170,8 @@ export function loadAppConfig(): AppConfig {
     keywords: keywordsData.keywords,
     excludeKeywords: keywordsData.excludeKeywords,
     minBudgetAmount: keywordsData.minBudgetAmount,
+    businessTypes: keywordsData.businessTypes,
+    requireNegotiatedContract: keywordsData.requireNegotiatedContract,
     productCodes: codesData.productCodes,
     industryCodes: codesData.industryCodes,
     recipients: recipientsData.recipients,

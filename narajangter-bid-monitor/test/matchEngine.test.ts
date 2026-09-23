@@ -19,6 +19,7 @@ function makeNotice(overrides: Partial<NormalizedNotice> = {}): NormalizedNotice
     industryText: null,
     productClsfcNo: null,
     productClsfcName: null,
+    bidMethod: null,
     raw: {},
     ...overrides,
   };
@@ -28,6 +29,8 @@ const config: AppConfig = {
   keywords: ["도서관", "전시"],
   excludeKeywords: ["구입", "정비"],
   minBudgetAmount: null,
+  businessTypes: ["물품", "용역", "공사"],
+  requireNegotiatedContract: false,
   productCodes: [{ code: "5512190301", name: "안내전광판" }],
   industryCodes: [{ code: "6815", name: "전시사업자" }],
   recipients: ["a@example.com"],
@@ -180,6 +183,44 @@ describe("최소 예산금액 필터", () => {
   });
 });
 
+describe("낙찰방법 필터 (requireNegotiatedContract)", () => {
+  const negotiatedConfig: AppConfig = { ...config, requireNegotiatedContract: true };
+
+  function negotiatedNotice(overrides: Partial<NormalizedNotice> = {}): NormalizedNotice {
+    return makeNotice({
+      businessType: "물품",
+      productClsfcNo: "5512190301",
+      title: "전시 안내전광판 설치",
+      ...overrides,
+    });
+  }
+
+  it("낙찰방법이 '협상에 의한 계약'이면 매칭된다", () => {
+    const notice = negotiatedNotice({ bidMethod: "협상에 의한 계약" });
+    expect(evaluateNotice(notice, negotiatedConfig)).not.toBeNull();
+  });
+
+  it("뒤에 붙는 말이 달라도(예: 협상에 의한 낙찰자 결정) 매칭된다", () => {
+    const notice = negotiatedNotice({ bidMethod: "협상에의한계약-협상에 의한 낙찰자 결정" });
+    expect(evaluateNotice(notice, negotiatedConfig)).not.toBeNull();
+  });
+
+  it("낙찰방법이 협상에 의한 계약이 아니면 코드/키워드가 맞아도 제외된다", () => {
+    const notice = negotiatedNotice({ bidMethod: "적격심사제-관리규정외 수기심사(총점입력)" });
+    expect(evaluateNotice(notice, negotiatedConfig)).toBeNull();
+  });
+
+  it("낙찰방법을 아직 모르면(null) fail-open으로 거르지 않는다 — 사전규격이 이 경우다", () => {
+    const notice = negotiatedNotice({ bidMethod: null });
+    expect(evaluateNotice(notice, negotiatedConfig)).not.toBeNull();
+  });
+
+  it("옵션이 꺼져 있으면(기본값) 낙찰방법과 무관하게 매칭된다", () => {
+    const notice = negotiatedNotice({ bidMethod: "적격심사제-관리규정외 수기심사(총점입력)" });
+    expect(evaluateNotice(notice, config)).not.toBeNull();
+  });
+});
+
 describe("evaluateNotice / confidence", () => {
   it("코드+키워드 모두 매칭되면 강력추천이다", () => {
     const notice = makeNotice({
@@ -221,6 +262,66 @@ describe("evaluateNotice / confidence", () => {
     const result = evaluateNotices(notices, config);
     expect(result).toHaveLength(1);
     expect(result[0]?.notice.noticeNo).toBe("A");
+  });
+});
+
+describe("evaluateNotice / 해외 개최 판별(③-b) 통합", () => {
+  it("전시회+한국관 매칭 & 몽골 키워드 없으면 자동배제(null)된다", () => {
+    const notice = makeNotice({
+      title: "2026 독일 프랑크푸르트 소비재 전시회 한국관 전시관 설치공사",
+      businessType: "물품",
+      productClsfcNo: null,
+    });
+    // "전시관" 키워드가 있어 기존 로직상으로는 매칭 대상이었을 것이나, 해외 개최 자동배제가 우선한다.
+    expect(evaluateNotice(notice, config, [])).toBeNull();
+  });
+
+  it("전시회+한국관 매칭 & 몽골 키워드가 있으면 배제하지 않고 플래그만 남긴다", () => {
+    const notice = makeNotice({
+      title: "2026 몽골 울란바토르 전시회 한국관 전시관 설치공사",
+      businessType: "물품",
+      productClsfcNo: null,
+    });
+    const result = evaluateNotice(notice, config, ["몽골", "울란바토르"]);
+    expect(result).not.toBeNull();
+    expect(result?.overseasVenueFlag).toEqual({ matchedMongoliaKeyword: "몽골" });
+  });
+
+  it("기존 국내 키워드가 하나도 없어도, 몽골 관련 해외 개최면 그 자체로 매칭된다 (독립 트리거)", () => {
+    // 실제 해외 부스 시공 공고 상당수는 "박물관"/"전시관" 같은 기존 키워드를 전혀 포함하지 않는다
+    // (예: "2026 몽골 국제박람회 한국관 설치공사"). 이 경우도 몽골이면 놓치지 않아야 한다.
+    const notice = makeNotice({
+      title: "2026 몽골 국제박람회 한국관 설치공사",
+      businessType: "용역",
+      productClsfcNo: null,
+      industryText: null,
+    });
+    expect(matchKeywords(notice, config.keywords)).toEqual([]); // 국내 키워드는 정말 없음(전제 확인)
+    const result = evaluateNotice(notice, config, ["몽골"]);
+    expect(result).not.toBeNull();
+    expect(result?.overseasVenueFlag).toEqual({ matchedMongoliaKeyword: "몽골" });
+    expect(result?.confidence).toBe("참고용");
+  });
+
+  it("기존 국내 키워드가 없고 몽골도 아닌 해외 개최는 원래도 null이었고 지금도 null이다", () => {
+    const notice = makeNotice({
+      title: "2026 독일 프랑크푸르트 소비재 전시회 한국관 설치공사",
+      businessType: "용역",
+      productClsfcNo: null,
+      industryText: null,
+    });
+    expect(evaluateNotice(notice, config, [])).toBeNull();
+  });
+
+  it("해외 개최 키워드가 없는 일반 공고는 overseasVenueFlag가 null이다", () => {
+    const notice = makeNotice({ title: "도서관 리모델링", businessType: "물품", productClsfcNo: null });
+    const result = evaluateNotice(notice, config, ["몽골"]);
+    expect(result?.overseasVenueFlag).toBeNull();
+  });
+
+  it("mongoliaKeywords를 넘기지 않으면(기본값 []) 해외 개최 매칭 시 항상 자동배제된다", () => {
+    const notice = makeNotice({ title: "2026 몽골 전시회 한국관 전시관 설치공사", businessType: "물품" });
+    expect(evaluateNotice(notice, config)).toBeNull();
   });
 });
 

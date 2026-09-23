@@ -30,11 +30,29 @@ export class ApiResultError extends ApiError {
   }
 }
 
+/** 텔레그램 발송 실패 */
+export class TelegramError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "TelegramError";
+    this.cause = cause;
+  }
+}
+
 /** 이메일 발송 실패 */
 export class EmailError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "EmailError";
+    this.cause = cause;
+  }
+}
+
+/** 구글 시트 기록 실패 */
+export class SheetsError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "SheetsError";
     this.cause = cause;
   }
 }

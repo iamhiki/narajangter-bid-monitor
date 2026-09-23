@@ -182,41 +182,114 @@ async function callWithRetry(options: ApiCallOptions, extraParams: Record<string
   throw lastError instanceof Error ? lastError : new ApiError(options.label, String(lastError));
 }
 
-/** 페이지네이션을 모두 순회하며 전체 결과를 수집한다. totalCount 및 안전장치(maxPages)로 무한루프를 방지한다. */
+/**
+ * 작업들을 최대 concurrency개씩만 동시에 돌린다. 결과는 입력 순서를 유지한다.
+ *
+ * data.go.kr에는 TPS 제한이 있어 전부 한꺼번에 던지면 오히려 오류가 늘어난다.
+ * 그래서 "전부 병렬"이 아니라 "정해진 개수만 병렬"이다.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]!, index);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
+/**
+ * 페이지네이션을 모두 순회하며 전체 결과를 수집한다.
+ * totalCount 및 안전장치(maxPages)로 무한루프를 방지한다.
+ *
+ * 1페이지를 먼저 받아 totalCount를 확인한 뒤, 나머지 페이지는 동시에 받는다.
+ * 한 장씩 순차로 받으면 면허제한정보(8천여 건 = 18페이지)에만 70초 넘게 걸린다.
+ * totalCount를 못 믿는 응답(0 또는 누락)일 때는 기존처럼 한 장씩 끝까지 따라간다.
+ */
 export async function fetchAllPages(
   options: ApiCallOptions,
-  pageParams: { numOfRows: number; maxPages: number; requestIntervalMs: number }
+  pageParams: {
+    numOfRows: number;
+    maxPages: number;
+    requestIntervalMs: number;
+    /** 2페이지 이후를 동시에 받을 개수. 1이면 기존과 같은 순차 동작. */
+    pageConcurrency?: number;
+  }
 ): Promise<RawItem[]> {
-  const all: RawItem[] = [];
-  let pageNo = 1;
-
-  while (pageNo <= pageParams.maxPages) {
-    const envelope = await callWithRetry(options, {
+  const fetchPage = (pageNo: number) =>
+    callWithRetry(options, {
       pageNo: String(pageNo),
       numOfRows: String(pageParams.numOfRows),
     });
 
+  const firstPage = await fetchPage(1);
+  const all: RawItem[] = [...firstPage.items];
+
+  const firstPageWasLast =
+    firstPage.items.length === 0 ||
+    firstPage.items.length < pageParams.numOfRows ||
+    all.length >= firstPage.totalCount;
+  if (firstPageWasLast) return all;
+
+  const concurrency = Math.max(1, pageParams.pageConcurrency ?? 1);
+  const totalPagesByCount =
+    firstPage.totalCount > 0 ? Math.ceil(firstPage.totalCount / pageParams.numOfRows) : 0;
+
+  // totalCount를 신뢰할 수 있을 때만 남은 페이지를 한꺼번에 계획할 수 있다.
+  if (totalPagesByCount > 1 && concurrency > 1) {
+    const lastPage = Math.min(totalPagesByCount, pageParams.maxPages);
+    const remaining = Array.from({ length: lastPage - 1 }, (_, i) => i + 2);
+
+    const pages = await mapWithConcurrency(remaining, concurrency, async (pageNo, index) => {
+      // 동시 실행 묶음 안에서도 요청이 한 순간에 몰리지 않도록 살짝 흩뜨린다.
+      if (pageParams.requestIntervalMs > 0 && index >= concurrency) {
+        await sleep(pageParams.requestIntervalMs);
+      }
+      return fetchPage(pageNo);
+    });
+
+    for (const page of pages) all.push(...page.items);
+
+    if (totalPagesByCount > pageParams.maxPages) {
+      logger.warn(
+        `최대 페이지 수(${pageParams.maxPages})에 도달해 조회를 중단했습니다. 일부 데이터가 누락될 수 있습니다.`,
+        { label: options.label, collected: all.length, totalCount: firstPage.totalCount }
+      );
+    }
+    return all;
+  }
+
+  // 순차 경로 (pageConcurrency=1 이거나 totalCount를 믿을 수 없는 경우)
+  let pageNo = 2;
+  while (pageNo <= pageParams.maxPages) {
+    if (pageParams.requestIntervalMs > 0) await sleep(pageParams.requestIntervalMs);
+
+    const envelope = await fetchPage(pageNo);
     all.push(...envelope.items);
 
-    const gotAllByCount = all.length >= envelope.totalCount;
-    const gotPartialPage = envelope.items.length < pageParams.numOfRows;
-
-    if (gotAllByCount || gotPartialPage || envelope.items.length === 0) {
-      break;
+    if (
+      envelope.items.length === 0 ||
+      envelope.items.length < pageParams.numOfRows ||
+      all.length >= envelope.totalCount
+    ) {
+      return all;
     }
-
     pageNo += 1;
-    if (pageParams.requestIntervalMs > 0) {
-      await sleep(pageParams.requestIntervalMs);
-    }
   }
 
-  if (pageNo > pageParams.maxPages) {
-    logger.warn(`최대 페이지 수(${pageParams.maxPages})에 도달해 조회를 중단했습니다. 일부 데이터가 누락될 수 있습니다.`, {
-      label: options.label,
-      collected: all.length,
-    });
-  }
-
+  logger.warn(
+    `최대 페이지 수(${pageParams.maxPages})에 도달해 조회를 중단했습니다. 일부 데이터가 누락될 수 있습니다.`,
+    { label: options.label, collected: all.length }
+  );
   return all;
 }

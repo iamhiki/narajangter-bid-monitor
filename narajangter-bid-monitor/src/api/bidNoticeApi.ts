@@ -20,6 +20,7 @@ export async function fetchBidNotices(env: Env, window: FetchWindow): Promise<Fe
     maxRetries: env.apiMaxRetries,
     retryDelayMs: env.apiRetryDelayMs,
     requestIntervalMs: env.apiRequestIntervalMs,
+    pageConcurrency: env.apiPageConcurrency,
   });
   return dedupeNotices(results);
 }

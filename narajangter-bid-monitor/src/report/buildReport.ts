@@ -1,6 +1,7 @@
 import type { FetchResult } from "../api/types.js";
 import type { MatchedNotice } from "../matching/types.js";
 import { sortMatches } from "../matching/matchEngine.js";
+import { HIGH_BAND, LOW_BAND } from "../similarity/calibrate.js";
 import { escapeHtml, formatBudget, formatDateForSubject, formatDisplayValue } from "./format.js";
 
 export interface ReportSource {
@@ -29,6 +30,63 @@ const CONFIDENCE_STYLE: Record<string, { bg: string; fg: string }> = {
   참고용: DEFAULT_CONFIDENCE_STYLE,
 };
 
+function renderOverseasVenueBadgeHtml(m: MatchedNotice): string {
+  if (!m.overseasVenueFlag) return "";
+  const tooltip = escapeHtml(`몽골 관련 해외 개최 의심 (매칭 키워드: ${m.overseasVenueFlag.matchedMongoliaKeyword})`);
+  return `<span title="${tooltip}" style="display:inline-block;padding:2px 8px;border-radius:10px;background:#ecfdf5;color:#047857;font-size:12px;font-weight:600;margin-right:6px;">🌐 해외의심(몽골)</span>`;
+}
+
+/**
+ * ④ 싱크로율 배지 — 과거 수행사업과 얼마나 겹치는지.
+ *
+ * 숫자만 띄우면 담당자가 믿을 근거가 없으므로 가장 비슷한 과거사업 이름을 함께 적는다.
+ * 코퍼스가 없는 환경에서는 필드 자체가 없고, 그때는 배지를 그리지 않는다 —
+ * "0%"로 표시하면 "안 비슷하다"는 판단처럼 보이지만 실제로는 "비교할 자료가 없다"는 뜻이다.
+ *
+ * 기준선(0.35 / 0.20)은 아직 가설이라 색으로만 구분하고 걸러내지는 않는다.
+ */
+function renderSimilarityHtml(m: MatchedNotice): string {
+  if (!m.similarity) return "";
+  // 표시값(보정)을 쓴다. 원점수는 사람이 읽는 눈금이 아니다 — calibrate.ts 참고.
+  const { shown, top } = m.similarity;
+  const percent = Math.round(shown * 100);
+  const tone =
+    shown >= HIGH_BAND
+      ? { bg: "#dcfce7", fg: "#14532d" }
+      : shown >= LOW_BAND
+        ? { bg: "#fef3c7", fg: "#78350f" }
+        : { bg: "#f3f4f6", fg: "#4b5563" };
+  const best = top[0];
+  const detail = best && best.score > 0.02 ? ` · ${escapeHtml(`${best.year} ${best.name}`)}` : "";
+  return (
+    `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${tone.bg};` +
+    `color:${tone.fg};font-size:12px;font-weight:600;margin-right:6px;">싱크로율 ${percent}%</span>` +
+    `<span style="font-size:12px;color:#6b7280;">${detail}</span>`
+  );
+}
+
+function renderSimilarityText(m: MatchedNotice): string | undefined {
+  if (!m.similarity) return undefined;
+  const best = m.similarity.top[0];
+  const detail = best && best.score > 0.02 ? ` (유사: ${best.year} ${best.name})` : "";
+  return `  싱크로율: ${Math.round(m.similarity.shown * 100)}%${detail}`;
+}
+
+/**
+ * 공동수급 허용 여부 — 표시 전용 부가 정보. 조회를 안 켰거나(withJointBidStatus 꺼짐),
+ * 비공식 API 호출이 실패했거나, 사전규격이라 대상이 아니면 필드 자체가 없으므로
+ * 그때는 아무것도 그리지 않는다("확인 안 됨"을 "공동수급불허"로 오해하면 안 된다).
+ */
+function renderJointBidHtml(m: MatchedNotice): string {
+  if (!m.jointBidStatus) return "";
+  return `<br/>공동수급: ${escapeHtml(m.jointBidStatus)}`;
+}
+
+function renderJointBidText(m: MatchedNotice): string | undefined {
+  if (!m.jointBidStatus) return undefined;
+  return `  공동수급: ${m.jointBidStatus}`;
+}
+
 function renderMatchCardHtml(m: MatchedNotice): string {
   const n = m.notice;
   const style = CONFIDENCE_STYLE[m.confidence] ?? DEFAULT_CONFIDENCE_STYLE;
@@ -54,6 +112,8 @@ function renderMatchCardHtml(m: MatchedNotice): string {
   <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;margin-bottom:10px;">
     <div style="margin-bottom:6px;">
       <span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${style.bg};color:${style.fg};font-size:12px;font-weight:600;margin-right:6px;">${m.confidence}</span>
+      ${renderOverseasVenueBadgeHtml(m)}
+      ${renderSimilarityHtml(m)}
       <span style="font-size:13px;color:#6b7280;">[${n.businessType}]</span>
     </div>
     <div style="font-size:15px;font-weight:600;margin-bottom:6px;">${titleHtml}</div>
@@ -61,7 +121,7 @@ function renderMatchCardHtml(m: MatchedNotice): string {
       기관: ${escapeHtml(formatDisplayValue(n.institution))}<br/>
       예산: ${escapeHtml(formatBudget(n.budgetAmount))}<br/>
       마감/일정: ${escapeHtml(formatDisplayValue(n.deadline))}<br/>
-      공고번호: ${escapeHtml(n.noticeNo)}
+      공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderJointBidHtml(m)}
     </div>
     <div style="margin-top:8px;">${badges}</div>
   </div>`;
@@ -74,11 +134,16 @@ function renderMatchCardText(m: MatchedNotice): string {
     ...m.matchedIndustryCodes.map((c) => `업종:${c.name}(${c.code})`),
     ...m.matchedKeywords.map((k) => `키워드:${k}`),
   ].join(", ");
+  const overseasVenueTag = m.overseasVenueFlag
+    ? ` [🌐 해외의심(몽골): 매칭 키워드=${m.overseasVenueFlag.matchedMongoliaKeyword}]`
+    : "";
   return [
-    `- [${m.confidence}][${n.businessType}] ${n.title}`,
+    `- [${m.confidence}][${n.businessType}]${overseasVenueTag} ${n.title}`,
     `  기관: ${formatDisplayValue(n.institution)} / 예산: ${formatBudget(n.budgetAmount)} / 마감: ${formatDisplayValue(n.deadline)}`,
-    `  공고번호: ${n.noticeNo}`,
+    `  공고번호: ${n.noticeNo}${n.bidMethod ? ` / 낙찰방법: ${n.bidMethod}` : ""}`,
     `  매칭: ${badges}`,
+    renderSimilarityText(m),
+    renderJointBidText(m),
     n.detailUrl ? `  링크: ${n.detailUrl}` : undefined,
   ]
     .filter(Boolean)

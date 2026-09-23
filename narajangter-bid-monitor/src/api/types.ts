@@ -16,6 +16,14 @@ export interface NormalizedNotice {
   industryText: string | null;
   productClsfcNo: string | null;
   productClsfcName: string | null;
+  /**
+   * 낙찰방법명 원문(예: "적격심사제-...", "소액수의견적-...", "협상에 의한 계약").
+   * `sucsfbidMthdNm` 필드로 온다는 것을 본공고 3종에서 실측 확인함(2026-09-16,
+   * src/api/fieldCandidates.ts 참고). 사전규격은 이 단계에서 낙찰방법이 아직 정해지지
+   * 않아 값이 없는 게 정상이라 항상 null이다. 후보가 빗나가는 경우를 포함해 null이면
+   * matching/bidMethod.ts는 fail-open(판단 불가 시 걸러내지 않음)으로 동작한다.
+   */
+  bidMethod: string | null;
   /** 필드 매핑 실패 시 디버깅용으로 원본 보존 */
   raw: Record<string, unknown>;
 }

@@ -17,6 +17,13 @@ export interface FieldCandidates {
   /** 세부품명번호 (물품) */
   productClsfcNo: string[];
   productClsfcName: string[];
+  /**
+   * 낙찰방법명(예: "적격심사제-...", "소액수의견적-...", "협상에 의한 계약"). `sucsfbidMthdNm`이
+   * 본공고(물품/용역/공사) 3종 전부에서 `npm run verify:api`로 실측 확인됨(2026-09-16,
+   * 예: "소액수의견적-소액수의견적(2인 이상 견적 제출)", "적격심사제-관리규정외 수기심사(총점입력)").
+   * 나머지 후보는 실제 필드명이 바뀌는 경우를 대비한 보조 후보(미검증).
+   */
+  bidMethod: string[];
 }
 
 export const BID_NOTICE_FIELD_CANDIDATES: FieldCandidates = {
@@ -27,9 +34,19 @@ export const BID_NOTICE_FIELD_CANDIDATES: FieldCandidates = {
   deadline: ["bidClseDate", "bidClseDt", "opengDate", "opengDt"],
   budgetAmount: ["asignBdgtAmt", "presmptPrce", "bssamt", "bssAmt"],
   detailUrl: ["bidNtceDtlUrl", "bidNtceUrl"],
-  industryText: ["bidprcPsblIndstrytyNm", "indstrytyLmtYn"],
-  productClsfcNo: ["prdctClsfcNo"],
-  productClsfcName: ["prdctClsfcNoNm"],
+  // 실측(2026-09-22): 세부품명번호의 실제 필드명은 `dtilPrdctClsfcNo`다.
+  // 기존 후보 `prdctClsfcNo`는 응답에 존재하지 않아 **7,376건 전부 null**이었고,
+  // 그 결과 코드 매칭이 한 건도 일어나지 않아 "강력추천"(코드 AND 키워드) 등급이
+  // 구조적으로 0건이었다. purchsObjPrdctList는 `[1^3911160501^LED경관조명기구]` 형태로
+  // 복수 품목을 담는 보조 후보다.
+  productClsfcNo: ["dtilPrdctClsfcNo", "prdctClsfcNo"],
+  productClsfcName: ["dtilPrdctClsfcNoNm", "prdctClsfcNoNm"],
+  // `indstrytyLmtYn`은 업종제한 **여부**(Y/N)이지 업종명이 아니다. 후보에 남겨두면
+  // 업종명 필드가 없을 때 "Y"/"N"으로 폴백해서, 업종코드 매칭이 무의미한 문자열을
+  // 대상으로 돌아간다(실측: 7,376건 중 4,648건이 "Y"/"N"이었다). 그래서 뺐다.
+  industryText: ["bidprcPsblIndstrytyNm", "indstrytyNm", "pubPrcrmntClsfcNm"],
+  // sucsfbidMthdNm 실측 확인됨(2026-09-16, 본공고 물품/용역/공사 3종 전부).
+  bidMethod: ["sucsfbidMthdNm", "bidwinrDcsnMthdNm", "cntrctCnclsMthdNm", "cntrctMthdNm", "bidMethdNm"],
 };
 
 /** getBidPblancListInfoLicenseLimit (면허제한정보조회) 응답 필드 후보 */
@@ -59,7 +76,12 @@ export const PRE_STANDARD_FIELD_CANDIDATES: FieldCandidates = {
   deadline: ["opninRgstClseDt", "opninRgstClseDate", "bfSpecClseDt"],
   budgetAmount: ["asignBdgtAmt", "presmptPrce"],
   detailUrl: ["bfSpecDocFileUrl1", "specDocFileUrl1", "bfSpecRgstUrl"],
-  industryText: ["bidprcPsblIndstrytyNm"],
-  productClsfcNo: ["prdctClsfcNo"],
-  productClsfcName: ["prdctClsfcNoNm"],
+  // 본공고와 같은 이유로 `dtilPrdctClsfcNo`를 먼저 본다 (위 주석 참고).
+  industryText: ["bidprcPsblIndstrytyNm", "indstrytyNm", "pubPrcrmntClsfcNm"],
+  productClsfcNo: ["dtilPrdctClsfcNo", "prdctClsfcNo"],
+  productClsfcName: ["dtilPrdctClsfcNoNm", "prdctClsfcNoNm"],
+  // 사전규격 3종(물품/용역/공사) 전부에서 낙찰방법 관련 필드 자체가 없음을 실측 확인함
+  // (2026-09-16, 본공고와 달리 아직 낙찰방법이 확정되지 않는 단계라 당연한 결과 — 버그 아님).
+  // 그래도 후보는 남겨둔다(향후 API 개정으로 필드가 추가될 가능성 대비).
+  bidMethod: ["sucsfbidMthdNm", "bidwinrDcsnMthdNm", "cntrctCnclsMthdNm", "cntrctMthdNm", "bidMethdNm"],
 };

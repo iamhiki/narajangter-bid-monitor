@@ -12,13 +12,28 @@
     "report": "tsx src/index.ts",
     "report:dry-run": "cross-env DRY_RUN=true tsx src/index.ts",
     "verify:api": "tsx scripts/verifyApi.ts",
+    "validate:overseas-venue": "tsx scripts/validateOverseasVenueFilter.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:telegram": "tsx scripts/testTelegram.ts",
+    "test:sheets": "tsx scripts/testSheets.ts",
+    "check:env": "tsx scripts/checkEnv.ts",
+    "setup:sheets": "tsx scripts/setupSheets.ts",
+    "bot": "tsx scripts/telegramBot.ts",
+    "build:corpus": "tsx scripts/buildCorpus.ts",
+    "similar": "tsx scripts/findSimilar.ts",
+    "read": "tsx scripts/readDocument.ts",
+    "ui": "tsx scripts/ui.ts",
+    "eval": "tsx scripts/evaluate.ts"
   },
   "dependencies": {
+    "cfb": "^1.2.2",
     "dotenv": "^16.4.5",
     "fast-xml-parser": "^5.10.1",
+    "fflate": "^0.8.3",
+    "google-auth-library": "^11.1.0",
     "nodemailer": "^9.0.3",
+    "pdfjs-dist": "^6.3.289",
     "zod": "^3.23.8"
   },
   "devDependencies": {
