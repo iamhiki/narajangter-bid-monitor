@@ -11,6 +11,7 @@ import { calibrate } from "./similarity/calibrate.js";
 import { fetchNoticeBodies, type NoticeBody } from "./api/noticeBody.js";
 import { fetchJointBidStatuses } from "./api/jointBidApi.js";
 import { loadMongoliaKeywords } from "./matching/overseasVenueFilter.js";
+import { excludeExpiredNotices } from "./matching/deadline.js";
 import { applyQualificationFilter } from "./matching/applyQualificationFilter.js";
 import { fetchAllLicenseLimitGroups } from "./api/licenseLimitApi.js";
 import type { ReportInput } from "./report/buildReport.js";
@@ -94,11 +95,12 @@ export async function collectReportInput(
   await notify(`공고 ${fetchedCount.toLocaleString("ko-KR")}건 수집 완료 · 조건 매칭 중…`);
 
   const mongoliaKeywords = loadMongoliaKeywords();
-  const bidMatchesBeforeQualificationFilter = evaluateNotices(
+  const { open: openBidNotices, expiredCount } = excludeExpiredNotices(
     bidResults.flatMap((r) => r.notices),
-    appConfig,
-    mongoliaKeywords
+    now
   );
+  logger.info("마감 지난 본공고 제외", { 제외: expiredCount });
+  const bidMatchesBeforeQualificationFilter = evaluateNotices(openBidNotices, appConfig, mongoliaKeywords);
   const preStandardMatches = evaluateNotices(
     preStandardResults.flatMap((r) => r.notices),
     appConfig,

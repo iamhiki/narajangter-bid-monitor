@@ -220,12 +220,36 @@ function renderSummaryBlock(input: ReportInput, tally: ReportTally): string {
   return lines.join("\n");
 }
 
-/** 리포트를 텔레그램 HTML 메시지 배열로 만든다 (4096자 상한 때문에 여러 건이 될 수 있다). */
-export function buildTelegramMessages(input: ReportInput): string[] {
+/** 매시간 확인에서 새로 나온 공고만 보낼 때의 머리말. 정기 보고서처럼 조회기간을 늘어놓지 않는다. */
+function renderNewNoticesBlock(input: ReportInput, tally: ReportTally): string {
+  const d = input.generatedAt;
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const lines = [
+    `🆕 <b>새 공고 ${tally.total}건</b>`,
+    escapeTelegramHtml(`${formatDateForSubject(d)} ${time} 확인 · 강력추천 ${tally.priority}건 · 참고용 ${tally.brief}건`),
+  ];
+  const failures = collectFailures(input);
+  if (failures.length > 0) {
+    lines.push("", `⚠️ <b>일부 조회 실패</b>: ${escapeTelegramHtml(truncate(failures.join(", "), 200))}`);
+    lines.push("<i>빠진 공고는 다음 확인 때 다시 조회합니다.</i>");
+  }
+  return lines.join("\n");
+}
+
+export type TelegramMessageKind = "report" | "new";
+
+/**
+ * 리포트를 텔레그램 HTML 메시지 배열로 만든다 (4096자 상한 때문에 여러 건이 될 수 있다).
+ *
+ * kind "new"는 매시간 확인에서 새로 나온 공고만 보낼 때 쓴다 — 머리말과 끝맺음만 다르고
+ * 공고 목록 모양은 같다.
+ */
+export function buildTelegramMessages(input: ReportInput, options: { kind?: TelegramMessageKind } = {}): string[] {
+  const kind = options.kind ?? "report";
   const tally = tallyReport(input);
   const { priority, brief } = splitByConfidence(input);
 
-  const blocks: string[] = [renderSummaryBlock(input, tally)];
+  const blocks: string[] = [kind === "new" ? renderNewNoticesBlock(input, tally) : renderSummaryBlock(input, tally)];
 
   if (priority.length > 0) {
     blocks.push(
@@ -248,9 +272,11 @@ export function buildTelegramMessages(input: ReportInput): string[] {
   }
 
   blocks.push(
-    tally.total > 0
-      ? "<i>첨부된 HTML 파일에서 전체 내용을 확인하실 수 있습니다.\n※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>"
-      : "<i>※ 조건에 맞는 공고가 없어도 원문 공고를 직접 확인하실 수 있습니다.</i>"
+    kind === "new"
+      ? "<i>※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>"
+      : tally.total > 0
+        ? "<i>첨부된 HTML 파일에서 전체 내용을 확인하실 수 있습니다.\n※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>"
+        : "<i>※ 조건에 맞는 공고가 없어도 원문 공고를 직접 확인하실 수 있습니다.</i>"
   );
 
   return packIntoMessages(blocks);

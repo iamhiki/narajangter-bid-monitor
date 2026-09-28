@@ -27,7 +27,17 @@ function parseLogLevel(raw: string | undefined): "debug" | "info" | "warn" | "er
   throw new ConfigError(`LOG_LEVEL은 debug|info|warn|error 중 하나여야 합니다. 현재 값: "${raw}"`);
 }
 
+export type RunMode = "weekly" | "hourly";
+
 export interface Env {
+  /**
+   * weekly: 기간 전체를 모아 이메일 리포트 발송 (텔레그램 보고서는 보내지 않음).
+   * hourly: 새로 나온 공고만 골라 텔레그램으로 즉시 알림 (이메일은 보내지 않음).
+   */
+  runMode: RunMode;
+  /** hourly 모드에서 이미 알린 공고를 기억하는 파일 */
+  notifiedStatePath: string;
+
   naraBidServiceKey: string;
   naraPrestdServiceKey: string;
   naraBidBaseUrl?: string;
@@ -82,10 +92,17 @@ export function loadEnv(): Env {
   }
   const naraPrestdServiceKey = (e.NARA_PRESTD_SERVICE_KEY ?? "").trim() || naraBidServiceKey;
 
+  const runModeRaw = (e.RUN_MODE ?? "weekly").trim().toLowerCase();
+  if (runModeRaw !== "weekly" && runModeRaw !== "hourly") {
+    errors.push(`RUN_MODE는 weekly 또는 hourly여야 합니다. 현재 값: "${e.RUN_MODE}"`);
+  }
+  const runMode: RunMode = runModeRaw === "hourly" ? "hourly" : "weekly";
+
   const smtpHost = e.SMTP_HOST?.trim() || undefined;
   const smtpUser = e.SMTP_USER?.trim() || undefined;
   const smtpPass = e.SMTP_PASS || undefined;
-  if (!dryRun) {
+  // hourly 모드는 이메일을 보내지 않으므로 SMTP 설정을 요구하지 않는다.
+  if (!dryRun && runMode === "weekly") {
     if (!smtpHost) errors.push("SMTP_HOST가 설정되지 않았습니다.");
     if (!smtpUser) errors.push("SMTP_USER가 설정되지 않았습니다.");
     if (!smtpPass) errors.push("SMTP_PASS가 설정되지 않았습니다.");
@@ -156,6 +173,10 @@ export function loadEnv(): Env {
     errors.push(err instanceof ConfigError ? err.message : String(err));
   }
 
+  if (runMode === "hourly" && !dryRun && !telegramEnabled) {
+    errors.push("RUN_MODE=hourly는 텔레그램으로 알리는 모드입니다. TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_IDS를 설정하세요.");
+  }
+
   if (errors.length > 0) {
     throw new ConfigError(`환경변수 검증 실패:\n${errors.map((m) => `  - ${m}`).join("\n")}`);
   }
@@ -163,6 +184,8 @@ export function loadEnv(): Env {
   const smtpFrom = e.SMTP_FROM?.trim() || smtpUser || "";
 
   cached = {
+    runMode,
+    notifiedStatePath: e.NOTIFIED_STATE_PATH?.trim() || "cache/notified.json",
     naraBidServiceKey,
     naraPrestdServiceKey,
     naraBidBaseUrl: e.NARA_BID_BASE_URL?.trim() || undefined,

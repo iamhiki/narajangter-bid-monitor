@@ -159,6 +159,13 @@ describe("buildTelegramMessages — 등급별 섹션", () => {
     expect(buildTelegramMessages(input).join("\n")).not.toContain("낙찰방법");
   });
 
+  it("새 공고 알림은 '새 공고 N건' 머리말로 시작하고 첨부 파일 안내를 넣지 않는다", () => {
+    const joined = buildTelegramMessages(makeInput(), { kind: "new" }).join("\n");
+    expect(joined).toContain("🆕 <b>새 공고 1건</b>");
+    expect(joined).not.toContain("입찰 모니터링 보고서");
+    expect(joined).not.toContain("첨부된 HTML");
+  });
+
   it("공동수급 조회 값이 있으면 강력추천 항목에 표시한다", () => {
     const input = makeInput({
       bid: { matches: [makeMatch({ jointBidStatus: "(전자)분담이행" })], failures: [] },
