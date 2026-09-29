@@ -241,12 +241,7 @@ body {
 .badge.pstat.muted { background: var(--line); color: var(--muted); border-color: var(--line); }
 .qtip li.miss { color: var(--urgent); }
 .qtip li.fixable { color: var(--warn); }
-.qtip .cls { font-size: 12px; color: var(--ink); }
-.qtip .cls .miss { color: var(--urgent); }
-.qtip .fixline { display: block; font-size: 12px; color: var(--ink); margin: 3px 0 0 14px; }
 .qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; }
-.qtip .clspath { display: block; font-size: 11.5px; color: var(--faint); margin: 2px 0 0 14px; }
-.qtip .rel { display: block; font-size: 11.5px; color: var(--muted); margin: 2px 0 0 14px; }
 .qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
 .qtip h4.sub-h { margin-top: 12px; }
 
@@ -1315,7 +1310,7 @@ function qualBadge(n, doc) {
       const label = !q ? "자격 확인 안 됨" : q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음";
       return `<span class="badge qual ${q && q.status === "조회실패" ? "fail" : ""}" tabindex="0">${label}${tip(
         head,
-        `<p>${where} 첨부에서도 참가자격 항목을 찾지 못했습니다. 원문을 직접 확인하세요.</p>${doc ? docSection : ""}`
+        `<p>${where}에서 참가자격을 찾지 못했습니다. 원문을 확인하세요.</p>${doc ? docSection : ""}`
       )}</span>`;
     }
     if (doc.sectionFound === false || (!doc.requirements.length && (doc.classifiedItems || []).length)) {
@@ -1360,118 +1355,49 @@ function qualBadge(n, doc) {
   )}</span>`;
 }
 
-/** 공고문 판독 결과 중 참가에 걸리는 것만 — 미보유 요건, 미보유 분류 품목, 지명경쟁·지역제한 */
-function docIssues(doc) {
-  if (doc.sectionFound === false) return "";
-  const missing = doc.requirements.filter((r) => !r.held);
-  const heldCodes = new Set(doc.requirements.filter((r) => r.held && r.code).map((r) => r.code));
-  const cls = (doc.classifiedItems || []).filter((i) => !i.held && !heldCodes.has(i.code));
-  const warns = [
-    doc.designated && !doc.jiilDesignated ? "⚠ 지명경쟁·조합추천 — 명단에 지일 없음, 참가 불가 가능성 높음" : "",
-    doc.region ? `⚠ 지역제한 — 본점 소재지 ${esc(doc.region)}` : "",
-  ].filter(Boolean);
-  if (!missing.length && !cls.length && !warns.length) return "";
-  const rows = missing
+/** 요건 종류를 짧은 태그로 — 자세한 해결 방법 설명은 팝업이 길어져서 뺐다 */
+const BASIS_TAG = { 등록: "등록 추가", 직접생산: "직접생산 증명 필요", 면허: "면허 필요" };
+
+/** 미보유 요건 + 미보유 분류 품목, 한 줄씩 */
+function missingRows(doc) {
+  const reqCodes = new Set(doc.requirements.filter((r) => r.code).map((r) => r.code));
+  const rows = doc.requirements
+    .filter((r) => !r.held)
     .map((r) => {
       const nm = r.name || r.docName;
       const label = nm ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}` : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
-      const c = r.code ? (doc.classes || {})[r.code] : null;
-      const fixable = (r.bases || []).length === 1 && r.bases[0] === "등록";
-      return `<li class="${fixable ? "fixable" : "miss"}">✗ 미보유 ${label}${c ? classPath(c) : ""}${howToFix(r, doc)}</li>`;
-    })
-    .join("");
-  const clsLine = cls.length
-    ? `<p class="cls">공고 분류 세부품명: ${cls.map((i) => `<span class="miss">✗ ${esc(i.name)}(${esc(i.code)})</span>`).join(", ")}</p>`
-    : "";
-  return (rows ? `<ul>${rows}</ul>` : "") + clsLine + (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") + `<p>출처: ${esc(doc.sourceFile)}</p>`;
-}
-
-/**
- * 미보유 요건을 어떻게 풀 수 있는지. 공고문이 "등록한 업체"만 요구하면 나라장터 입찰참가자격 등록에
- * 세부품명을 추가하면 되고(등록 마감 전까지), 직접생산확인증명서나 업종 면허를 요구하면 공고 기간 안에
- * 갖추기 어렵다. 요건 종류는 공고문 문장에서 읽은 것이라 원문 확인이 필요하다.
- */
-function howToFix(r, doc) {
-  const bases = r.bases || []; // 이 필드가 생기기 전 결과에도 깨지지 않게
-  const due = doc.registrationDeadline ? ` — 등록 마감 <b>${esc(doc.registrationDeadline.slice(5, 16).replace("-", "/"))}</b>까지` : "";
-  const lines = [];
-  if (bases.includes("등록")) lines.push(`→ 나라장터 입찰참가자격 등록에 이 세부품명을 추가하면 해결됩니다${due}`);
-  if (bases.includes("직접생산")) lines.push("→ 직접생산확인증명서가 필요합니다 (SMPP 신청·현장 실사 — 공고 기간 안에 갖추기 어려움)");
-  if (bases.includes("면허")) lines.push("→ 법령상 업종 등록·면허가 필요합니다 (단기간 취득 불가)");
-  return lines.map((l) => `<span class="fixline">${l}</span>`).join("");
-}
-
-/** 조달청 분류 경로 한 줄 + 해설. 대분류(2자리)는 너무 넓어서 빼고 중분류부터 보여준다. */
-function classPath(cls) {
-  const lv = (cls.levels || []).filter((l) => l.digits >= 4 && l.digits <= 8);
-  const leaf = (cls.levels || []).find((l) => l.digits === 10);
-  const route = lv.map((l) => esc(l.name)).join(" › ");
-  const desc = leaf && leaf.description ? ` — ${esc(leaf.description)}` : "";
-  return route ? `<span class="clspath">분류: ${route}${desc}</span>` : "";
-}
-
-/** "같은 중분류" 같은 단계 이름에 맞는 실제 분류 이름 (8·6·4자리) */
-function classLevelName(cls, level) {
-  const digits = { "같은 품명": 8, "같은 소분류": 6, "같은 중분류": 4 }[level];
-  const hit = (cls.levels || []).find((l) => l.digits === digits);
-  return hit ? hit.name : "";
-}
-
-function docTipBody(doc) {
-  // 공고가 분류된 세부품명 (사전규격 prdctDtlList / 본공고 dtilPrdctClsfcNo) — 참가자격 문구가 없어도 알 수 있다
-  const heldCodes = new Set(doc.requirements.filter((r) => r.held && r.code).map((r) => r.code));
-  const cls = (doc.classifiedItems || []).filter((i) => !heldCodes.has(i.code) || !i.held);
-  const classified = cls.length
-    ? `<p class="cls">공고 분류 세부품명: ${cls
-        .map((i) => `<span class="${i.held ? "" : "miss"}">${i.held ? "✓" : "✗"} ${esc(i.name)}(${esc(i.code)})</span>${!i.held && (doc.classes || {})[i.code] ? classPath(doc.classes[i.code]) : ""}`)
-        .join(", ")}</p>`
-    : "";
-  // 분류 품목이 미보유일 때 할 일 — 코드 제한이 없는 공고는 보통 그 세부품명으로 입찰참가자격을 등록해 두면 된다
-  const classFix = cls.some((i) => !i.held)
-    ? `<span class="fixline">→ 나라장터 입찰참가자격 등록에 이 세부품명을 추가하면 참가할 수 있을 가능성이 큽니다 — 본공고의 참가자격 문구로 최종 확인하세요</span>`
-    : "";
-  const linked = doc.linkedBidNo ? `<p>본공고가 이미 나왔습니다: <b>${esc(doc.linkedBidNo)}</b> — 본공고 쪽 판정을 기준으로 보세요.</p>` : "";
-  if (doc.sectionFound === false) {
-    return classified + classFix + linked + "<p>첨부에서 참가자격 항목은 찾지 못해, 공고가 분류된 품목만 보여줍니다.</p>";
+      const bases = r.bases || [];
+      const fixable = bases.length === 1 && bases[0] === "등록";
+      return `<li class="${fixable ? "fixable" : "miss"}">✗ ${label} <span class="grp">${bases.map((b) => BASIS_TAG[b] || b).join(" · ")}</span></li>`;
+    });
+  for (const i of doc.classifiedItems || []) {
+    if (!i.held && !reqCodes.has(i.code)) rows.push(`<li class="fixable">✗ ${esc(i.name)}(${esc(i.code)}) <span class="grp">분류 품목 · 등록 추가</span></li>`);
   }
-  if (!doc.requirements.length && cls.length) {
-    return (
-      classified +
-      classFix +
-      linked +
-      `<p>참가자격에 업종코드·세부품명번호 제한이 없고 "나라장터에 입찰참가자격을 등록한 자"만 요구합니다. 그래서 공고가 분류된 세부품명으로 판단했습니다.</p>` +
-      `<p>출처: ${esc(doc.sourceFile)}</p>`
-    );
-  }
-  const rows = doc.requirements.length
-    ? `<ul>${doc.requirements
-        .map((r) => {
-          // 보유 목록 이름 > 공고문에 적힌 이름 > 코드 종류 순으로 쓴다
-          const nm = r.name || r.docName;
-          const label = nm
-            ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}`
-            : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
-          const cls = r.code ? (doc.classes || {})[r.code] : null;
-          const levelName = r.related && cls ? classLevelName(cls, r.related.level) : "";
-          const rel = r.related
-            ? `<span class="rel">${esc(r.related.level)}${levelName ? `(${esc(levelName)})` : ""}에 보유: ${r.related.items.map((i) => `${esc(i.name)}(${esc(i.code)})`).join(", ")} — 세부품명이 달라 보유로 치지 않음</span>`
-            : "";
-          const path = !r.held && cls ? classPath(cls) : "";
-          return `<li class="${r.held ? "" : (r.bases || []).includes("등록") && (r.bases || []).length === 1 ? "fixable" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}${path}${r.held ? "" : howToFix(r, doc)}${rel}</li>`;
-        })
-        .join("")}</ul>`
-    : "<p>공고문에서 업종코드·세부품명번호를 찾지 못했습니다.</p>";
+  return rows;
+}
+
+/** 참가를 막는 경고와 출처 */
+function docFooter(doc) {
   const warns = [
-    doc.designated ? `⚠ 지명경쟁·조합추천 — ${doc.jiilDesignated ? "명단에 지일 있음" : "명단에 지일 없음, 참가 불가 가능성 높음"}` : "",
-    doc.region ? `⚠ 지역제한 — 본점 소재지 ${esc(doc.region)}` : "",
+    doc.designated && !doc.jiilDesignated ? "⚠ 지명경쟁 — 명단에 지일 없음" : "",
+    doc.region ? `⚠ 지역제한 — ${esc(doc.region)}` : "",
+    doc.linkedBidNo ? `본공고 게시됨: ${esc(doc.linkedBidNo)}` : "",
   ].filter(Boolean);
-  return (
-    rows +
-    classified +
-    linked +
-    (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") +
-    `<p>출처: ${esc(doc.sourceFile)}<br>공고문 문장을 기계적으로 읽은 결과입니다. "A 또는 B" 같은 조건은 원문으로 확인하세요.</p>`
-  );
+  return (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") + (doc.sourceFile ? `<p>출처: ${esc(doc.sourceFile)}</p>` : "");
+}
+
+/** 자격충족 팝업에 덧붙일 것 — 걸리는 게 없으면 빈 문자열 */
+function docIssues(doc) {
+  const rows = missingRows(doc);
+  const footer = docFooter(doc);
+  if (!rows.length && !/warnline/.test(footer)) return "";
+  return (rows.length ? `<ul>${rows.join("")}</ul>` : "") + footer;
+}
+
+/** 미보유 품명과 출처만 */
+function docTipBody(doc) {
+  const rows = missingRows(doc);
+  return (rows.length ? `<ul>${rows.join("")}</ul>` : "<p>미보유 없음</p>") + docFooter(doc);
 }
 
 // ── 참가여부 · 담당자 · 대화 (같은 링크로 보는 사람 모두 공유) ────────────────
