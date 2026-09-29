@@ -533,6 +533,8 @@ const server = createServer((req, res) => {
         const project = byId.get(m.id);
         return {
           ...m,
+          // 화면에는 담당자가 읽는 싱크로율(%)만 쓴다 — 원점수는 보이지 않는다
+          shown: calibrate(m.score, result.basis),
           budgetAmount: project?.budgetAmount ?? null,
           // 발췌는 앞 600자만. 전체 본문을 브라우저로 넘기면 화면이 무거워지고,
           // 사람이 "이 사업이 맞나" 확인하는 데는 과업개요만 있으면 된다.
