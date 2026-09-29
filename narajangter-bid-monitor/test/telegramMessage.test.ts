@@ -142,9 +142,24 @@ describe("buildTelegramMessages — 등급별 섹션", () => {
 
   it("강력추천 섹션이 참고용 섹션보다 먼저 온다", () => {
     const joined = buildTelegramMessages(twoTierInput()).join("\n");
-    expect(joined).toContain("🔴 강력추천 1건");
-    expect(joined).toContain("⚪ 참고용 1건");
-    expect(joined.indexOf("🔴 강력추천 1건")).toBeLessThan(joined.indexOf("⚪ 참고용 1건"));
+    expect(joined).toContain("🔴 <b>강력추천 1건</b>");
+    expect(joined).toContain("⚪ <b>참고용 1건</b>");
+    expect(joined.indexOf("🔴 <b>강력추천 1건</b>")).toBeLessThan(joined.indexOf("⚪ <b>참고용 1건</b>"));
+  });
+
+  it("사전규격은 본공고와 다른 구역에, 본공고 뒤에 둔다", () => {
+    const input = twoTierInput();
+    const moved = { ...input.bid.matches[1]!, notice: { ...input.bid.matches[1]!.notice, sourceType: "사전규격" as const } };
+    const split = {
+      ...input,
+      bid: { ...input.bid, matches: [input.bid.matches[0]!] },
+      preStandard: { ...input.preStandard, matches: [moved] },
+    };
+    const joined = buildTelegramMessages(split, { kind: "new" }).join("\n");
+    expect(joined).toContain("━━ 📢 본공고 1건 ━━");
+    expect(joined).toContain("━━ 📝 사전규격 1건 ━━");
+    expect(joined.indexOf("📢 본공고")).toBeLessThan(joined.indexOf("📝 사전규격"));
+    expect(joined).toContain("본공고 1건 · 사전규격 1건");
   });
 
   it("강력추천 항목에는 낙찰방법과 매칭근거를 싣는다", () => {

@@ -61,13 +61,18 @@ function overseasTag(m: MatchedNotice): string {
     : "";
 }
 
+/** 사전규격의 마감은 입찰 마감이 아니라 규격 의견 등록 마감이다. */
+function deadlineLabel(n: MatchedNotice["notice"]): string {
+  return n.sourceType === "사전규격" ? "의견마감" : "마감";
+}
+
 /** 강력추천 항목 — 판단에 필요한 정보를 모두 담는다. */
 function renderPriorityItem(m: MatchedNotice, index: number): string {
   const n = m.notice;
   const lines = [
     `<b>${index}.</b> ${titleLink(m)}${overseasTag(m)}`,
     escapeTelegramHtml(
-      `${formatDisplayValue(n.institution)} · ${formatBudget(n.budgetAmount)} · 마감 ${formatDisplayValue(n.deadline)}`
+      `${formatDisplayValue(n.institution)} · ${formatBudget(n.budgetAmount)} · ${deadlineLabel(n)} ${formatDisplayValue(n.deadline)}`
     ),
   ];
   if (n.bidMethod) {
@@ -79,7 +84,7 @@ function renderPriorityItem(m: MatchedNotice, index: number): string {
   if (sync) lines.push(sync);
   const jointBid = jointBidLine(m);
   if (jointBid) lines.push(jointBid);
-  lines.push(`<code>${escapeTelegramHtml(n.noticeNo)}</code> · ${escapeTelegramHtml(n.sourceType)}`);
+  lines.push(`<code>${escapeTelegramHtml(n.noticeNo)}</code>`);
   return lines.join("\n");
 }
 
@@ -116,7 +121,7 @@ function renderBriefItem(m: MatchedNotice, index: number): string {
   return [
     `<b>${index}.</b> ${titleLink(m)}${overseasTag(m)}`,
     escapeTelegramHtml(
-      `${formatDisplayValue(n.institution)} · ${formatBudget(n.budgetAmount)} · ~${shortDeadline(n.deadline)} · ${n.sourceType}`
+      `${formatDisplayValue(n.institution)} · ${formatBudget(n.budgetAmount)} · ${n.sourceType === "사전규격" ? "의견 " : ""}~${shortDeadline(n.deadline)}`
     ),
   ].join("\n");
 }
@@ -177,13 +182,22 @@ export function tallyReport(input: ReportInput): ReportTally {
   };
 }
 
-/** 본공고/사전규격을 합쳐 추천등급 기준으로 다시 묶는다 (보고서는 중요도 순으로 읽힌다). */
-function splitByConfidence(input: ReportInput): { priority: MatchedNotice[]; brief: MatchedNotice[] } {
-  const sorted = sortMatches([...input.bid.matches, ...input.preStandard.matches]);
-  return {
-    priority: sorted.filter((m) => m.confidence === "강력추천"),
-    brief: sorted.filter((m) => m.confidence !== "강력추천"),
-  };
+/** 구역 하나(본공고 또는 사전규격). 안에서 강력추천은 자세히, 참고용은 두 줄로. 비어 있으면 아무것도 안 만든다. */
+function renderSourceSection(title: string, note: string, matches: MatchedNotice[]): string[] {
+  if (matches.length === 0) return [];
+  const sorted = sortMatches(matches);
+  const priority = sorted.filter((m) => m.confidence === "강력추천");
+  const brief = sorted.filter((m) => m.confidence !== "강력추천");
+  const blocks = [`<b>━━ ${title} ${matches.length}건 ━━</b>\n<i>${note}</i>`];
+  if (priority.length > 0) {
+    blocks.push(`🔴 <b>강력추천 ${priority.length}건</b> <i>— 품목·업종 코드와 키워드가 모두 맞음</i>`);
+    blocks.push(...priority.map((m, i) => renderPriorityItem(m, i + 1)));
+  }
+  if (brief.length > 0) {
+    blocks.push(`⚪ <b>참고용 ${brief.length}건</b> <i>— 한쪽만 맞음, 확인 필요</i>`);
+    blocks.push(...brief.map((m, i) => renderBriefItem(m, i + 1)));
+  }
+  return blocks;
 }
 
 function renderSummaryBlock(input: ReportInput, tally: ReportTally): string {
@@ -236,7 +250,7 @@ function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTot
   const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const lines = [
     `🆕 <b>새 공고 ${tally.total}건</b>`,
-    escapeTelegramHtml(`${formatDateForSubject(d)} ${time} 확인 · 강력추천 ${tally.priority}건 · 참고용 ${tally.brief}건`),
+    escapeTelegramHtml(`${formatDateForSubject(d)} ${time} 확인 · 본공고 ${tally.bid}건 · 사전규격 ${tally.preStandard}건`),
   ];
   if (windowTotal) {
     lines.push(
@@ -265,29 +279,18 @@ export function buildTelegramMessages(
 ): string[] {
   const kind = options.kind ?? "report";
   const tally = tallyReport(input);
-  const { priority, brief } = splitByConfidence(input);
-
   const blocks: string[] = [kind === "new" ? renderNewNoticesBlock(input, tally, options.windowTotal) : renderSummaryBlock(input, tally)];
 
-  if (priority.length > 0) {
-    blocks.push(
-      [
-        `<b>━━ 🔴 강력추천 ${priority.length}건 ━━</b>`,
-        "<i>등록 품목·업종 코드와 제목 키워드가 <b>모두</b> 맞은 공고입니다. 우선 검토 대상입니다.</i>",
-      ].join("\n")
-    );
-    blocks.push(...priority.map((m, i) => renderPriorityItem(m, i + 1)));
-  }
-
-  if (brief.length > 0) {
-    blocks.push(
-      [
-        `<b>━━ ⚪ 참고용 ${brief.length}건 ━━</b>`,
-        "<i>키워드나 코드 중 한쪽만 맞은 공고입니다. 해당 여부는 확인이 필요합니다.</i>",
-      ].join("\n")
-    );
-    blocks.push(...brief.map((m, i) => renderBriefItem(m, i + 1)));
-  }
+  // 본공고와 사전규격은 할 일이 다르다 — 본공고는 지금 입찰, 사전규격은 아직 규격 공개 단계(의견 등록만).
+  // 섞어 두면 사전규격을 입찰로 착각하므로 구역을 나누고, 구역 안에서 강력추천 → 참고용 순으로 둔다.
+  blocks.push(...renderSourceSection("📢 본공고", "지금 입찰할 수 있는 공고입니다.", input.bid.matches));
+  blocks.push(
+    ...renderSourceSection(
+      "📝 사전규격",
+      "입찰 전 규격 공개 단계입니다. 마감은 의견 등록 마감이고, 본공고가 올라오면 따로 알립니다.",
+      input.preStandard.matches
+    )
+  );
 
   blocks.push(
     kind === "new"
