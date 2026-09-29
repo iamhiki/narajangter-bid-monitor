@@ -8,7 +8,8 @@ import { SimilarityIndex } from "./index.js";
  * 과거사업 코퍼스를 읽어 유사도 인덱스를 만든다. 없으면 **빈 인덱스**를 돌려준다.
  *
  * 코퍼스 파일(data/past-projects.json)은 과업지시서 본문과 발주기관 담당자 연락처가 들어 있어
- * 저장소에 올리지 않는다(.gitignore). 그래서 GitHub Actions에는 이 파일이 없다.
+ * 평문은 저장소에 올리지 않는다(.gitignore). GitHub Actions는 암호화본(corpus/past-projects.enc)을
+ * CORPUS_PASSPHRASE Secret으로 풀어 쓴다(scripts/corpusCrypto.ts). Secret이 없으면 파일도 없다.
  *
  * 파일이 없다고 주간 리포트가 실패하면 안 된다 — 유사도는 **부가 정보**이지 공고를 걸러내는
  * 기준이 아니기 때문이다. 없으면 싱크로율 칸이 비는 채로 나머지 파이프라인이 그대로 돈다.

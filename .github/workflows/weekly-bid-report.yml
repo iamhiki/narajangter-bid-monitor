@@ -37,6 +37,11 @@ jobs:
       - name: 타입체크
         run: npm run typecheck
 
+      - name: 과거사업 코퍼스 풀기 (싱크로율용 — 암호 파일은 저장소, 비밀번호는 Secret)
+        env:
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: npm run corpus:decrypt
+
       - name: 주간 리포트 실행 (시트 기록 + 이메일 발송)
         env:
           # 조회 기간과 마감 시각을 한국 시간으로 계산한다. 없으면 UTC로 돌아 9시간 어긋난다.

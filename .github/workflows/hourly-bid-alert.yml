@@ -48,6 +48,11 @@ jobs:
           key: notified-${{ github.run_id }}
           restore-keys: notified-
 
+      - name: 과거사업 코퍼스 풀기 (싱크로율용 — 암호 파일은 저장소, 비밀번호는 Secret)
+        env:
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: npm run corpus:decrypt
+
       - name: 새 공고 확인 및 텔레그램 알림
         env:
           TZ: Asia/Seoul

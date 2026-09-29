@@ -24,7 +24,9 @@
     "similar": "tsx scripts/findSimilar.ts",
     "read": "tsx scripts/readDocument.ts",
     "ui": "tsx scripts/ui.ts",
-    "eval": "tsx scripts/evaluate.ts"
+    "eval": "tsx scripts/evaluate.ts",
+    "corpus:encrypt": "tsx scripts/corpusCrypto.ts encrypt",
+    "corpus:decrypt": "tsx scripts/corpusCrypto.ts decrypt"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

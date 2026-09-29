@@ -36,6 +36,11 @@ jobs:
       - name: 의존성 설치
         run: npm ci
 
+      - name: 과거사업 코퍼스 풀기 (싱크로율용 — 암호 파일은 저장소, 비밀번호는 Secret)
+        env:
+          CORPUS_PASSPHRASE: ${{ secrets.CORPUS_PASSPHRASE }}
+        run: npm run corpus:decrypt
+
       - name: 마감 임박 입찰 확인 및 텔레그램 보고
         env:
           TZ: Asia/Seoul
