@@ -138,6 +138,19 @@ export interface QualificationDocResult {
 const INDICATORS = /업종\s*코드|세부\s*품명|물품\s*분류\s*번호|등록|면허|소재지|직접생산/g;
 
 /**
+ * 코드 없이 법령 이름으로만 거는 면허 중 지일이 없는 것. 설계공모는 업종코드 대신
+ * "「건축사법」 제7조에 따른 건축사 면허 … 건축사사무소를 개설하고 있는 자"라고만 쓴다.
+ * 참가자격 앞부분(첫 항목)에서만 본다 — 뒤쪽에는 "당선자가 전기·소방 설계 자격이 없으면 공동수급"
+ * 같은 부수 조건이 섞여 있어 그것까지 요건으로 잡으면 오탐이다.
+ */
+const NAMED_LICENSES: { pattern: RegExp; name: string }[] = [
+  { pattern: /건\s*축\s*사\s*(면허|사무소)|「\s*건\s*축\s*사\s*법\s*」/, name: "건축사사무소 개설(건축사법)" },
+  { pattern: /엔지니어링\s*사업자/, name: "엔지니어링사업자" },
+  { pattern: /(문화재|국가유산)\s*수리\s*업/, name: "문화재수리업" },
+];
+const NAMED_LICENSE_SPAN = 400;
+
+/**
  * 공고문 전체에서 참가자격 부분을 고른다. "참가자격"이라는 말은 청렴 서약 문구("참가자격 제한 등의
  * 불이익") 같은 데도 나와서 첫 번째 것을 쓰면 엉뚱한 곳을 잡는다(울산과학관 공고 실측).
  * 등장 위치마다 뒤 1500자 안에 자격 관련 단어가 몇 개인지 세어 가장 많은 곳을 쓴다.
@@ -145,14 +158,16 @@ const INDICATORS = /업종\s*코드|세부\s*품명|물품\s*분류\s*번호|등
 export function findQualificationSection(text: string): string | null {
   const flat = text.replace(/\s+/g, " ");
   let best: { at: number; score: number } | null = null;
-  for (const m of flat.matchAll(/참가\s*자격/g)) {
+  // 설계공모는 "설계 공모 참가자의 자격", "응모자격"으로 쓴다 (거제 지심도 제안공모 실측)
+  for (const m of flat.matchAll(/참가\s*자\s*의\s*자격|참가\s*자격|응모\s*자격/g)) {
     const window = flat.slice(m.index, m.index + 1500);
     let score = window.match(INDICATORS)?.length ?? 0;
     const head = flat.slice(m.index, m.index + 40);
+    const after = head.slice(m[0].length);
     // "참가자격 가.", "참가 자격 (아래…)", "참가자격 ○" 처럼 제목 뒤에 항목이 바로 오면 본문일 가능성이 높다.
-    if (/참가\s*자격\s*[:：]?\s*(\(|가\s*\.|○|①|1\)|◦|-)/.test(head)) score += 3;
-    // "입찰참가자격 제한 처분" — 청렴서약·부정당업자 문구
-    if (/참가\s*자격\s*(제한|이\s*없|을\s*제한|미등록)/.test(head)) score -= 5;
+    if (/^\s*[:：]?\s*(\(|가\s*\.|○|①|1\)|◦|-)/.test(after)) score += 3;
+    // "입찰참가자격 제한 처분" — 청렴서약·부정당업자 문구, "참가자격은 박탈된다" — 중복응모 벌칙
+    if (/^\s*(은|을|이)?\s*(제한|없|미등록|박탈|갖추지)/.test(after)) score -= 5;
     if (!best || score > best.score) best = { at: m.index, score };
   }
   if (!best || best.score < 2) return null;
@@ -169,6 +184,17 @@ const REGIONS =
 const REGION_PATTERN = new RegExp(`소재지[^.]{0,80}?(${REGIONS})[^.]{0,40}?(있는|소재한|소재하는|업체)`);
 
 const normalize = (s: string): string => s.replace(/[\s·ㆍ.,()（）]/g, "");
+
+/**
+ * 업종 이름이 면허 요건으로 나왔는지. 바로 뒤에 "법"이 붙은 건 법령 이름이라 뺀다 —
+ * 「정보통신공사업법」에 따른 용역업자와 공동도급 같은 문구가 정보통신공사업 보유로 잡혔다(거제 지심도 실측).
+ */
+function mentionsLicense(flat: string, name: string): boolean {
+  for (let at = flat.indexOf(name); at >= 0; at = flat.indexOf(name, at + 1)) {
+    if (flat[at + name.length] !== "법") return true;
+  }
+  return false;
+}
 
 /**
  * @param section 참가자격 부분 (코드는 여기서만 찾는다 — 다른 곳의 숫자는 공고번호·전화번호 등이라 오탐이 난다)
@@ -212,9 +238,15 @@ export function analyzeQualificationText(
   const flat = normalize(section);
   for (const c of heldIndustries) {
     if (seen.has(c.code)) continue;
-    if (flat.includes(normalize(c.name)) && !requirements.some((r) => r.name === c.name)) {
+    if (mentionsLicense(flat, normalize(c.name)) && !requirements.some((r) => r.name === c.name)) {
       requirements.push({ kind: "업종", code: null, name: c.name, held: true, docName: null, related: null, bases: ["면허"] });
       seen.add(c.code);
+    }
+  }
+  const head = section.slice(0, NAMED_LICENSE_SPAN);
+  for (const l of NAMED_LICENSES) {
+    if (l.pattern.test(head)) {
+      requirements.push({ kind: "업종", code: null, name: null, held: false, docName: l.name, related: null, bases: ["면허"] });
     }
   }
 

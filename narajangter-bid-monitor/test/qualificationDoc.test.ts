@@ -194,3 +194,24 @@ describe("pickNoticeDocAttachments", () => {
     expect(pickNoticeDocAttachments(notice).map((a) => a.url)).toEqual(["u4", "u2", "u1"]);
   });
 });
+
+// 2026-09-29 거제 지심도 산마루문화놀이터 제안공모(사전규격) 규격서 발췌
+describe("설계공모 참가자격", () => {
+  const text =
+    "4. 설계 공모 참가자의 자격 가. 공모 공고일 현재 「건 축사법」 제7조에 따른 건축사 면허를 소지하고, 제23조에 의해 건축사사무소(등록업체)를 개설하고 있는 자에 한해 응모할 수 있다. " +
+    "나. 응모신청서 접수일 기준 현재 등록취소, 휴업, 폐업, 업무정지 및 자격정지와 기타 행정관청의 행정처분을 받은 자는 등록 할 수 없다. " +
+    "바. 당선자가 전기·정보 통신·소방 분야의 설계에 대한 자격이 없는 경우 … 「정보통신공사 업법」 제2조제7호에 따른 용역업자 … 설계업을 등록한 자 와 공동도급 " +
+    "아. 단독 또는 공동응모 중 한 가지 방식으로만 참가할 수 있으며, 중복하여 응모한 사실이 확인될 경우 해당 업체의 참가자격은 박탈된다. " +
+    "5. 응모 신청서 등록 및 현장설명회 등록 일시 등록처 등록방법 등록";
+
+  it("'참가자의 자격' 제목을 찾고, '참가자격은 박탈된다' 벌칙 문구는 고르지 않는다", () => {
+    expect(findQualificationSection(text)).toMatch(/^참가자의 자격 가\./);
+  });
+
+  it("코드 없이 건축사 면허만 거는 공고를 미보유 면허 요건으로 잡는다", () => {
+    const r = analyze(findQualificationSection(text)!, text);
+    expect(r.requirements).toEqual([
+      { kind: "업종", code: null, name: null, held: false, docName: "건축사사무소 개설(건축사법)", related: null, bases: ["면허"] },
+    ]);
+  });
+});
