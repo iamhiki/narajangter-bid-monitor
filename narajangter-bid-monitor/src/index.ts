@@ -16,6 +16,7 @@ import {
   loadNotifiedState,
   markNotified,
   saveNotifiedState,
+  recordFailure,
   shouldSendFailureAlert,
   type NotifiedState,
 } from "./state/notifiedStore.js";
@@ -88,6 +89,8 @@ async function runWeekly(env: Env, recipients: string[], reportInput: ReportInpu
 }
 
 async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: NotifiedState): Promise<number> {
+  // 수집까지 왔으면 연결은 살아 있다 — 연속 실패 횟수를 되돌린다 (기록은 아래 저장 때 함께 남는다)
+  state.consecutiveFailures = 0;
   const fetchFailed = hasFetchFailures(reportInput);
   const onlyNew = (source: ReportSource): ReportSource => ({
     ...source,
@@ -191,6 +194,11 @@ async function handleFailure(err: unknown, env: Env | undefined, state: Notified
   if (!env || env.dryRun) return 1;
 
   const now = new Date();
+  if (env.runMode === "hourly" && state) {
+    recordFailure(state);
+    // 알림을 안 보내도 횟수는 남겨야 다음 실행이 "연속"인지 안다
+    saveNotifiedState(env.notifiedStatePath, state, now);
+  }
   // 매시간 모드에서는 장애가 이어지면 같은 알림이 매시간 쌓이므로 6시간에 한 번만 보낸다.
   // 주간·매일 모드는 하루 한 번 이하로 돌기 때문에 매번 알려도 쌓이지 않는다.
   const alertAllowed = env.runMode !== "hourly" || (state !== undefined && shouldSendFailureAlert(state, now));

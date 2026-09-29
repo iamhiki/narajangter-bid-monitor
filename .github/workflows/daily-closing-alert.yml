@@ -21,7 +21,7 @@ defaults:
 jobs:
   alert:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
@@ -45,6 +45,9 @@ jobs:
         env:
           TZ: Asia/Seoul
           RUN_MODE: daily
+          # GitHub 서버(미국)→나라장터 접속이 가끔 1~2분 끊긴다. 재시도를 20·40·80·160·320초 간격으로 벌려 넘긴다
+          API_MAX_RETRIES: "5"
+          API_RETRY_DELAY_MS: "20000"
           LOOKBACK_DAYS: "30"
           NARA_BID_SERVICE_KEY: ${{ secrets.NARA_BID_SERVICE_KEY }}
           NARA_PRESTD_SERVICE_KEY: ${{ secrets.NARA_PRESTD_SERVICE_KEY }}

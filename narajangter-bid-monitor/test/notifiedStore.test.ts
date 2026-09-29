@@ -8,6 +8,7 @@ import {
   loadNotifiedState,
   markNotified,
   saveNotifiedState,
+  recordFailure,
   shouldSendFailureAlert,
 } from "../src/state/notifiedStore.js";
 
@@ -55,12 +56,24 @@ describe("알림 기록", () => {
 });
 
 describe("실패 알림 간격", () => {
-  it("보낸 적이 없으면 보낸다", () => {
-    expect(shouldSendFailureAlert(emptyState(), new Date())).toBe(true);
+  it("한 번 실패로는 알리지 않고, 두 번 연속이면 알린다", () => {
+    const state = emptyState();
+    recordFailure(state);
+    expect(shouldSendFailureAlert(state, new Date())).toBe(false);
+    recordFailure(state);
+    expect(shouldSendFailureAlert(state, new Date())).toBe(true);
+  });
+
+  it("연속 실패 횟수가 저장·복원된다", () => {
+    const path = join(dir, "failures.json");
+    const state = emptyState();
+    recordFailure(state);
+    saveNotifiedState(path, state, new Date());
+    expect(loadNotifiedState(path).consecutiveFailures).toBe(1);
   });
 
   it("6시간 안에는 다시 보내지 않고, 지나면 보낸다", () => {
-    const state = { ...emptyState(), lastFailureAlertAt: "2026-09-28T00:00:00.000Z" };
+    const state = { ...emptyState(), consecutiveFailures: 3, lastFailureAlertAt: "2026-09-28T00:00:00.000Z" };
     expect(shouldSendFailureAlert(state, new Date("2026-09-28T05:59:00Z"))).toBe(false);
     expect(shouldSendFailureAlert(state, new Date("2026-09-28T06:00:00Z"))).toBe(true);
   });
