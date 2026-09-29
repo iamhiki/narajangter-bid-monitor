@@ -48,10 +48,11 @@ describe("buildNoticeMessage", () => {
       qualDoc: {
         sourceFile: "공고문.hwpx",
         excerpt: "참가자격 가. 담당자 홍길동 010-1234-5678 로 문의",
-        requirements: [{ kind: "업종", code: "4444", name: null, held: false, docName: "종합디자인분야", related: null }],
+        requirements: [{ kind: "업종", code: "4444", name: null, held: false, docName: "종합디자인분야", related: null, bases: ["면허"] }],
         region: "경상북도",
         designated: true,
         jiilDesignated: false,
+        registrationDeadline: "2026-10-13 18:00",
       },
       jointBid: "(없음)공동수급불허",
       taskText: null,

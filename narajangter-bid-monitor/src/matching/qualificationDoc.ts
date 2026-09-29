@@ -33,6 +33,30 @@ export interface DocRequirement {
    * 유사 품목 판단에 참고가 된다.
    */
   related: { level: "같은 품명" | "같은 소분류" | "같은 중분류"; items: { code: string; name: string }[] } | null;
+  /**
+   * 공고문이 이 코드를 어떤 요건으로 걸었는지. 미보유일 때 해결 난이도가 전혀 다르다.
+   *   등록     — "…(세부품명번호: 6010999901)로 등록한 업체": 나라장터 입찰참가자격 등록에 세부품명을
+   *              추가하면 된다. 등록 마감(bidQlfctRgstDt) 전까지 가능.
+   *   직접생산 — "직접생산확인증명서[… 세부품명번호 …]": 중소기업 공공구매 종합정보망(SMPP) 신청과
+   *              현장 실사가 필요해 공고 기간 안에 갖추기 어렵다.
+   *   면허     — 업종코드(건설업·산업디자인 등 법령상 등록·면허). 단기간 취득 불가.
+   * 같은 코드가 여러 요건으로 나오면(등록 + 직접생산) 전부 담는다.
+   */
+  bases: RequirementBasis[];
+}
+
+export type RequirementBasis = "등록" | "직접생산" | "면허";
+
+/**
+ * 코드가 나온 문장에서 요건 종류를 읽는다. 앞쪽은 가장 가까운 항목 기호(1), 가., ○, ※)나 문장 끝("다.")
+ * 이후만 본다 — 앞 항목의 "직접생산확인증명서"가 다음 항목 코드에 붙으면 오판한다.
+ */
+export function requirementBasis(section: string, at: number, kind: DocRequirement["kind"]): RequirementBasis {
+  if (kind === "업종") return "면허";
+  const raw = section.slice(Math.max(0, at - 160), at);
+  const boundary = [...raw.matchAll(/(?:\d+\)|[가-하]\s?\.(?!\d)|[○◦※]|다\s?\.)/g)].pop();
+  const before = boundary ? raw.slice(boundary.index! + boundary[0].length) : raw;
+  return /직\s*접\s*생\s*산/.test(before) ? "직접생산" : "등록";
 }
 
 const CLASS_LEVELS = [
@@ -101,6 +125,8 @@ export interface QualificationDocResult {
   designated: boolean;
   /** 지명 명단에 지일이 있는지 (designated일 때만 의미) */
   jiilDesignated: boolean;
+  /** 입찰참가자격 등록 마감 (API bidQlfctRgstDt). 미보유 품목을 추가 등록할 수 있는 기한 */
+  registrationDeadline: string | null;
 }
 
 const INDICATORS = /업종\s*코드|세부\s*품명|물품\s*분류\s*번호|등록|면허|소재지|직접생산/g;
@@ -147,7 +173,7 @@ export function analyzeQualificationText(
   fullText: string,
   heldProducts: CodeEntry[],
   heldIndustries: CodeEntry[]
-): Omit<QualificationDocResult, "sourceFile"> {
+): Omit<QualificationDocResult, "sourceFile" | "registrationDeadline"> {
   const industryName = new Map(heldIndustries.map((c) => [c.code, c.name]));
   const productName = new Map(heldProducts.map((c) => [c.code, c.name]));
   const requirements: DocRequirement[] = [];
@@ -160,12 +186,14 @@ export function analyzeQualificationText(
     if (existing) {
       // 같은 코드가 여러 번 나오면 이름이 적힌 쪽을 쓴다 (첫 등장에 이름이 없을 수 있다)
       existing.docName ??= docName;
+      const basis = requirementBasis(section, at, kind);
+      if (!existing.bases.includes(basis)) existing.bases.push(basis);
       return;
     }
     seen.add(code);
     const name = (kind === "업종" ? industryName : productName).get(code) ?? null;
     const related = kind === "품명" && name === null ? relatedHeldProducts(code, heldProducts) : null;
-    requirements.push({ kind, code, name, held: name !== null, docName, related });
+    requirements.push({ kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind)] });
   };
 
   // "업종코드 4444", "[업종코드 4444]", "(업종코드: 4990)" — 코드 뒤에 "또는 4442"처럼 이어지는 것도 잡는다.
@@ -179,7 +207,7 @@ export function analyzeQualificationText(
   for (const c of heldIndustries) {
     if (seen.has(c.code)) continue;
     if (flat.includes(normalize(c.name)) && !requirements.some((r) => r.name === c.name)) {
-      requirements.push({ kind: "업종", code: null, name: c.name, held: true, docName: null, related: null });
+      requirements.push({ kind: "업종", code: null, name: c.name, held: true, docName: null, related: null, bases: ["면허"] });
       seen.add(c.code);
     }
   }
@@ -221,7 +249,13 @@ export async function readQualificationFromNotice(
       const { text } = await extractDocumentText(path, { ocr: "auto", maxPages: 12 });
       const section = findQualificationSection(text);
       if (!section) continue;
-      return { sourceFile: attachment.name, ...analyzeQualificationText(section, text, held.products, held.industries) };
+      const raw = (notice.raw ?? {}) as Record<string, unknown>;
+      const deadline = typeof raw.bidQlfctRgstDt === "string" && raw.bidQlfctRgstDt.trim() ? raw.bidQlfctRgstDt.trim() : null;
+      return {
+        sourceFile: attachment.name,
+        ...analyzeQualificationText(section, text, held.products, held.industries),
+        registrationDeadline: deadline,
+      };
     } catch (err) {
       logger.debug?.("공고문 참가자격 읽기 실패", { noticeNo: notice.noticeNo, file: attachment.name, error: String(err) });
     }

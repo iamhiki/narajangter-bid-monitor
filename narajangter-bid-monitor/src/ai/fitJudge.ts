@@ -125,8 +125,12 @@ export function buildNoticeMessage(input: FitInput): string {
     const req = d.requirements.map((r) => {
       const label = r.name ?? r.docName ?? (r.kind === "품명" ? "세부품명번호" : "업종코드");
       const rel = r.related ? ` [${r.related.level} 보유: ${r.related.items.map((i) => `${i.name}(${i.code})`).join(", ")}]` : "";
-      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${rel}`;
+      const how = r.held ? "" : ` <요건: ${r.bases.join("+")}>`;
+      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${how}${rel}`;
     });
+    lines.push(
+      `요건 종류 설명: 등록 = 나라장터 입찰참가자격 등록에 세부품명만 추가하면 됨(등록 마감 ${d.registrationDeadline ?? "공고에 없음"}까지) / 직접생산 = 직접생산확인증명서 필요(공고 기간 안에 취득 어려움) / 면허 = 법령상 업종 등록·면허 필요`
+    );
     lines.push(
       `공고문 참가자격에서 찾은 요건: ${req.length ? req.join(", ") : "코드 없음"}`,
       `지역제한: ${d.region ?? "공고문에서 못 찾음"}`,
