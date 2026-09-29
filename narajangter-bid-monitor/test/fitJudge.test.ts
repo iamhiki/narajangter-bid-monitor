@@ -48,7 +48,7 @@ describe("buildNoticeMessage", () => {
       qualDoc: {
         sourceFile: "공고문.hwpx",
         excerpt: "참가자격 가. 담당자 홍길동 010-1234-5678 로 문의",
-        requirements: [{ kind: "업종", code: "4444", name: null, held: false }],
+        requirements: [{ kind: "업종", code: "4444", name: null, held: false, docName: "종합디자인분야", related: null }],
         region: "경상북도",
         designated: true,
         jiilDesignated: false,
@@ -60,7 +60,7 @@ describe("buildNoticeMessage", () => {
     expect(msg).toContain("1,200,000,000원");
     expect(msg).toContain("발주기관: 공고에 없음");
     expect(msg).toContain("공동수급: (없음)공동수급불허");
-    expect(msg).toContain("미보유 업종코드(4444)");
+    expect(msg).toContain("미보유 종합디자인분야(4444)");
     expect(msg).toContain("지역제한: 경상북도");
     expect(msg).toContain("명단에 지일 없음");
     expect(msg).toContain("2024 OO과학관 전시 (0.41)");

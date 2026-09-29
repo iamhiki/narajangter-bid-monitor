@@ -6,7 +6,7 @@ import { matchCodes } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
-import { evaluateQualifications } from "./qualificationFilter.js";
+import { evaluateQualifications, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
  * 공고 한 건이 수집 파이프라인의 각 단계를 통과했는지 하나씩 짚는다 (② 정제 · ③ 미수집 원인 파악용).
@@ -146,7 +146,7 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
 
   const result = evaluateQualifications(groups, ctx.config.heldProducts, ctx.config.heldIndustries);
   if (result.passes) {
-    const held = result.satisfiedBy.map((s) => (s.code ? `${s.name}(${s.code})` : s.name));
+    const held = uniqueSatisfied(result.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name));
     return { step: "참가자격", ok: true, detail: `충족 — ${held.join(", ")}` };
   }
   // "업종명/0002" → "업종명(0002)" — 자격판정 툴팁과 같은 표기

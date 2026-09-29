@@ -24,6 +24,70 @@ export interface DocRequirement {
   /** 보유 자격 목록에서 찾은 이름. 미보유 코드는 null */
   name: string | null;
   held: boolean;
+  /** 공고문에 코드와 함께 적힌 이름 (예: "교육훈련장비"). 못 찾으면 null */
+  docName: string | null;
+  /**
+   * 미보유 세부품명번호일 때, 같은 분류 계층에 있는 지일 보유 품목.
+   * 세부품명번호 10자리 = 물품분류번호 8자리(대·중·소분류·품명 각 2자리) + 세부 2자리라서
+   * 앞자리가 같을수록 가까운 품목이다. 등록은 세부품명 단위라 "보유"는 아니지만, 추가 등록이나
+   * 유사 품목 판단에 참고가 된다.
+   */
+  related: { level: "같은 품명" | "같은 소분류" | "같은 중분류"; items: { code: string; name: string }[] } | null;
+}
+
+const CLASS_LEVELS = [
+  { digits: 8, level: "같은 품명" },
+  { digits: 6, level: "같은 소분류" },
+  { digits: 4, level: "같은 중분류" },
+] as const;
+
+/** 미보유 세부품명번호와 가장 가까운 계층의 보유 품목 (없으면 null) */
+export function relatedHeldProducts(code: string, heldProducts: CodeEntry[]): DocRequirement["related"] {
+  for (const { digits, level } of CLASS_LEVELS) {
+    const items = heldProducts.filter((p) => p.code !== code && p.code.slice(0, digits) === code.slice(0, digits));
+    if (items.length) return { level, items: items.map((p) => ({ code: p.code, name: p.name })) };
+  }
+  return null;
+}
+
+/**
+ * 코드 주변에서 공고문이 적어 둔 이름을 찾는다. 실측 표기:
+ *   "교 육훈련장비(세부품명번호: 6010999901)"          — 이름이 앞, 괄호 안에 번호 (HWP 추출 시 글자 사이 공백)
+ *   "[세부품명: 조형물, 세부품명번호: 6012100201"       — "세부품명:" 라벨
+ *   "[물품분류번호 4924159701 : 조합놀이대]"            — 번호 뒤 콜론
+ *   "(안내전광판, 물품분류번호: 5512190301)"            — 괄호 안 쉼표
+ *   "조합놀이대 (세부품명번호 4924159701)"
+ *   "종합디자인분야 [업종코드 4444]", "비디오제작업 (업종코드: 3244)"
+ */
+export function nameNearCode(section: string, index: number, length: number): string | null {
+  const before = section.slice(Math.max(0, index - 60), index);
+  const after = section.slice(index + length, index + length + 40);
+  const clean = (s: string | undefined) => {
+    const v = (s ?? "").replace(/\s+/g, "").replace(/^(G2B)?(물품)?(분류번호|세부품명|품명|업종명?)[:：]?/, "");
+    return v.length >= 2 && v.length <= 30 && /[가-힣]/.test(v) ? v : null;
+  };
+  const label = String.raw`(?:세부\s*품\s*명\s*번\s*호|물\s*품\s*분\s*류\s*번\s*호|업\s*종\s*코\s*드|분류번호\s*10자리)`;
+
+  // 번호 뒤 콜론: "4924159701 : 조합놀이대]"
+  const a = /^\s*[:：]\s*([가-힣A-Za-z·ㆍ\s]{2,30}?)\s*[\])）,]/.exec(after);
+  if (a) return clean(a[1]);
+  // "세부품명: 조형물, 세부품명번호: " — 바로 앞 라벨
+  const b = new RegExp(String.raw`세부\s*품\s*명\s*[:：]\s*([^,\]\)]{2,30}?)\s*,?\s*${label}[^0-9]{0,6}$`).exec(before);
+  if (b) return clean(b[1]);
+  // "(안내전광판, 물품분류번호: "
+  const c = new RegExp(String.raw`[\(（\[]\s*([^,()\[\]]{2,30}?)\s*,\s*${label}[^0-9]{0,6}$`).exec(before);
+  if (c) return clean(c[1]);
+  // "교육훈련장비(세부품명번호: ", "종합디자인분야 [업종코드 " — 이름 뒤 여는 괄호
+  const d = new RegExp(String.raw`([가-힣·ㆍ][가-힣·ㆍ\s]{1,24}?)\s*[\(（\[]\s*${label}[^0-9]{0,6}$`).exec(before);
+  if (d) {
+    // 앞쪽에 설명어가 붙어 오면 마지막 덩어리만 남긴다:
+    //   "G2B분류번호 교 육훈련장비", "10자리 조합놀이대", "전문회사로 종합디자인분야", "또는 환경디자인분야"
+    // 공백으로 자르면 안 된다 — HWP 추출은 "교 육훈련장비"처럼 단어 중간에 공백을 넣는다.
+    // "및"은 띄어 쓴 경우만 연결어로 본다 — "전시부스설치및디자인서비스"처럼 이름 안에도 들어간다
+    const words = d[1]!.split(/번호|분류|등록|의한|따른|자리|또는|\s및\s|(?:로서|으로|로)\s/);
+    return clean(words[words.length - 1]);
+  }
+  return null;
 }
 
 export interface QualificationDocResult {
@@ -88,25 +152,34 @@ export function analyzeQualificationText(
   const productName = new Map(heldProducts.map((c) => [c.code, c.name]));
   const requirements: DocRequirement[] = [];
   const seen = new Set<string>();
-  const add = (kind: DocRequirement["kind"], code: string) => {
-    if (seen.has(code)) return;
+  const add = (kind: DocRequirement["kind"], m: RegExpMatchArray) => {
+    const code = m[1]!;
+    const at = m.index! + m[0].lastIndexOf(code);
+    const docName = nameNearCode(section, at, code.length);
+    const existing = requirements.find((r) => r.code === code);
+    if (existing) {
+      // 같은 코드가 여러 번 나오면 이름이 적힌 쪽을 쓴다 (첫 등장에 이름이 없을 수 있다)
+      existing.docName ??= docName;
+      return;
+    }
     seen.add(code);
     const name = (kind === "업종" ? industryName : productName).get(code) ?? null;
-    requirements.push({ kind, code, name, held: name !== null });
+    const related = kind === "품명" && name === null ? relatedHeldProducts(code, heldProducts) : null;
+    requirements.push({ kind, code, name, held: name !== null, docName, related });
   };
 
   // "업종코드 4444", "[업종코드 4444]", "(업종코드: 4990)" — 코드 뒤에 "또는 4442"처럼 이어지는 것도 잡는다.
-  for (const m of section.matchAll(/업종\s*코드\s*[:：]?\s*\[?\s*(\d{4})\b/g)) add("업종", m[1]!);
+  for (const m of section.matchAll(/업종\s*코드\s*[:：]?\s*\[?\s*(\d{4})\b/g)) add("업종", m);
   // "[실내건축공사(4990)]", "정보통신공사업(0036)" — 업종명 바로 뒤 괄호 속 4자리
-  for (const m of section.matchAll(/(?:업|공사|분야|사업)\s*[(（]\s*(\d{4})\s*[)）]/g)) add("업종", m[1]!);
+  for (const m of section.matchAll(/(?:업|공사|분야|사업)\s*[(（]\s*(\d{4})\s*[)）]/g)) add("업종", m);
   // "세부품명번호: 6012100201", "물품분류번호 4924159701", "(세부품명번호 1...)"
-  for (const m of section.matchAll(/(?:세부\s*품명\s*번호|물품\s*분류\s*번호|분류번호\s*10자리)[^0-9]{0,20}(\d{10})\b/g)) add("품명", m[1]!);
+  for (const m of section.matchAll(/(?:세부\s*품명\s*번호|물품\s*분류\s*번호|분류번호\s*10자리)[^0-9]{0,20}(\d{10})\b/g)) add("품명", m);
   // 코드 없이 이름만 적은 보유 자격 (예: "전문건설업(…금속구조물·창호·온실공사업…)")
   const flat = normalize(section);
   for (const c of heldIndustries) {
     if (seen.has(c.code)) continue;
     if (flat.includes(normalize(c.name)) && !requirements.some((r) => r.name === c.name)) {
-      requirements.push({ kind: "업종", code: null, name: c.name, held: true });
+      requirements.push({ kind: "업종", code: null, name: c.name, held: true, docName: null, related: null });
       seen.add(c.code);
     }
   }

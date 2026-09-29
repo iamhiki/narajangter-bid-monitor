@@ -39,13 +39,52 @@ describe("analyzeQualificationText", () => {
         "2) 전문건설업(강구조물공사업, 금속구조물·창호·온실공사업 중에서 1개 업종) 3) 직접생산확인증명서[세부품명: 조형물, 세부품명번호: 6012100201 " +
         "또는 세부품명: 실물모형, 세부품명번호: 6010989901]"
     );
-    expect(r.requirements).toEqual([
-      { kind: "업종", code: "4444", name: "산업디자인전문회사(종합디자인분야)", held: true },
-      { kind: "업종", code: "4442", name: "산업디자인전문회사(환경디자인분야)", held: true },
-      { kind: "품명", code: "6012100201", name: "조형물", held: true },
-      { kind: "품명", code: "6010989901", name: null, held: false },
-      { kind: "업종", code: null, name: "금속구조물·창호·온실공사업", held: true },
+    expect(r.requirements.map(({ kind, code, name, held, docName }) => ({ kind, code, name, held, docName }))).toEqual([
+      { kind: "업종", code: "4444", name: "산업디자인전문회사(종합디자인분야)", held: true, docName: "종합디자인분야" },
+      { kind: "업종", code: "4442", name: "산업디자인전문회사(환경디자인분야)", held: true, docName: "환경디자인분야" },
+      { kind: "품명", code: "6012100201", name: "조형물", held: true, docName: "조형물" },
+      { kind: "품명", code: "6010989901", name: null, held: false, docName: "실물모형" },
+      { kind: "업종", code: null, name: "금속구조물·창호·온실공사업", held: true, docName: null },
     ]);
+  });
+
+  // 2026-09-29 실제 공고문 표기 그대로
+  it.each([
+    ["G2B분류번호 교 육훈련장비(세부품명번호: 6010999901)로 등록한 업체", "6010999901", "교육훈련장비"],
+    ["G2B물품분류번호 10자리 조합놀이대 (세부품명번호 4924159701)를 제조물품 으로", "4924159701", "조합놀이대"],
+    ["직접생산확인증명서[물품분류번호 4924159701 : 조합놀이대] 를 소지한 업체", "4924159701", "조합놀이대"],
+    ["전광판 직접 생산증명서를 보유한 업체 (안내전광판, 물품분류번호: 5512190301) 마.", "5512190301", "안내전광판"],
+    ["직접생산확인증명서[세부품명: 조형물, 세부품명번호: 6012100201 또는", "6012100201", "조형물"],
+    ["업체 ․ 전시부스설치및디자인서비스(세부품명번호 : 7215409901) 또는", "7215409901", "전시부스설치및디자인서비스"],
+    ["7215409901) 또는 전시홍보관설치및디자인서비스(세부품명번호 : 7215409902) 이어야", "7215409902", "전시홍보관설치및디자인서비스"],
+  ])("공고문에 적힌 이름을 읽는다: %s", (text, code, name) => {
+    const r = analyze(`참가자격 가. ${text}`);
+    expect(r.requirements.find((x) => x.code === code)?.docName).toBe(name);
+  });
+
+  it("미보유 세부품명번호는 같은 분류 계층의 보유 품목을 붙인다 (앞 8→6→4자리 중 가장 가까운 것)", () => {
+    const products: CodeEntry[] = [
+      { code: "6010989901", name: "실물모형및전시물" },
+      { code: "6010393101", name: "동물표본" },
+      { code: "4924159801", name: "기타놀이기구" },
+    ];
+    const r = analyzeQualificationText(
+      "참가자격 가. 교육훈련장비(세부품명번호: 6010999901) 나. 놀이기구(세부품명번호: 4924159702)",
+      "",
+      products,
+      heldIndustries
+    );
+    expect(r.requirements.find((x) => x.code === "6010999901")?.related).toEqual({
+      level: "같은 중분류",
+      items: [
+        { code: "6010989901", name: "실물모형및전시물" },
+        { code: "6010393101", name: "동물표본" },
+      ],
+    });
+    expect(r.requirements.find((x) => x.code === "4924159702")?.related).toEqual({
+      level: "같은 소분류",
+      items: [{ code: "4924159801", name: "기타놀이기구" }],
+    });
   });
 
   it("'[실내건축공사(4990)]'처럼 업종명 뒤 괄호 코드도 잡는다", () => {

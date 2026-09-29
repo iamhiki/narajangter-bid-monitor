@@ -238,6 +238,8 @@ body {
 .badge.pstat.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); }
 .badge.pstat.muted { background: var(--line); color: var(--muted); border-color: var(--line); }
 .qtip li.miss { color: var(--urgent); }
+.qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; }
+.qtip .rel { display: block; font-size: 11.5px; color: var(--muted); margin: 2px 0 0 14px; }
 .qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
 .qtip h4.sub-h { margin-top: 12px; }
 
@@ -1305,12 +1307,25 @@ function qualBadge(n, doc) {
       docSection
     )}</span>`;
   }
-  const items = q.satisfiedBy
-    .map((s) => `<li>${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}</li>`)
+  // satisfiedBy는 그룹×자격 단위라 같은 자격이 그룹마다 반복된다 — 한 번씩만, 몇 개 조건을 채웠는지와 함께
+  const uniq = new Map();
+  for (const s of q.satisfiedBy) {
+    const key = s.code || s.name;
+    const e = uniq.get(key) || { name: s.name, code: s.code, groups: new Set() };
+    e.groups.add(s.groupNo);
+    uniq.set(key, e);
+  }
+  const items = [...uniq.values()]
+    .sort((a, b) => b.groups.size - a.groups.size)
+    .map((s) => `<li>${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}${q.totalGroups > 1 ? ` <span class="grp">조건 ${s.groups.size}/${q.totalGroups}</span>` : ""}</li>`)
     .join("");
-  return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.satisfiedBy.length}/${q.totalGroups}${tip(
-    `충족된 자격 ${q.satisfiedBy.length}건`,
-    `<ul>${items}</ul><p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>` +
+  const structure =
+    q.totalGroups > 1
+      ? `<p>이 공고는 자격조건이 <b>${q.totalGroups}개</b>이고 모두 채워야 합니다. 조건마다 허용 업종 중 하나만 있으면 되며, 지일은 아래 보유 자격으로 ${q.totalGroups}개를 모두 채웁니다.</p>`
+      : "";
+  return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.totalGroups}/${q.totalGroups}${tip(
+    `충족에 쓰인 보유 자격 ${uniq.size}개`,
+    `<ul>${items}</ul>${structure}<p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>` +
       (doc ? `<h4 class="sub-h">공고문 참가자격</h4>${docSection}` : "")
   )}</span>`;
 }
@@ -1319,8 +1334,15 @@ function docTipBody(doc) {
   const rows = doc.requirements.length
     ? `<ul>${doc.requirements
         .map((r) => {
-          const label = r.name ? `${esc(r.name)}${r.code ? `(${esc(r.code)})` : ""}` : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
-          return `<li class="${r.held ? "" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}</li>`;
+          // 보유 목록 이름 > 공고문에 적힌 이름 > 코드 종류 순으로 쓴다
+          const nm = r.name || r.docName;
+          const label = nm
+            ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}`
+            : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
+          const rel = r.related
+            ? `<span class="rel">${esc(r.related.level)}에 보유: ${r.related.items.map((i) => `${esc(i.name)}(${esc(i.code)})`).join(", ")} — 세부품명이 달라 보유로 치지 않음</span>`
+            : "";
+          return `<li class="${r.held ? "" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}${rel}</li>`;
         })
         .join("")}</ul>`
     : "<p>공고문에서 업종코드·세부품명번호를 찾지 못했습니다.</p>";

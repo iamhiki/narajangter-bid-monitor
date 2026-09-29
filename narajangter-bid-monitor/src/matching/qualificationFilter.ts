@@ -50,6 +50,21 @@ export interface SatisfiedQualification {
   code: string | null;
 }
 
+/**
+ * 충족에 쓰인 보유 자격을 한 번씩만, 몇 개 그룹을 채웠는지와 함께 (화면·요약 표시용).
+ * satisfiedBy는 그룹×자격 단위라 같은 자격이 그룹 수만큼 들어 있다.
+ */
+export function uniqueSatisfied(satisfiedBy: SatisfiedQualification[]): { name: string; code: string | null; groups: number }[] {
+  const byKey = new Map<string, { name: string; code: string | null; groups: Set<string> }>();
+  for (const s of satisfiedBy) {
+    const key = s.code ?? s.name;
+    const e = byKey.get(key) ?? { name: s.name, code: s.code, groups: new Set<string>() };
+    e.groups.add(s.groupNo);
+    byKey.set(key, e);
+  }
+  return [...byKey.values()].map((e) => ({ name: e.name, code: e.code, groups: e.groups.size }));
+}
+
 /** `"정보통신공사업/0036"` → `"0036"`. 코드가 없으면 null. */
 export function extractCode(allowedName: string): string | null {
   const match = /\/\s*(\d{4})\s*$/.exec(allowedName.trim());
@@ -66,26 +81,27 @@ export function isGroupSatisfied(
   group: LicenseLimitGroup,
   heldCodes: ReadonlySet<string>,
   heldNames: ReadonlySet<string>
-): { satisfied: boolean; usedNameFallback: boolean; matched?: { code: string | null; name: string } } {
+): { satisfied: boolean; usedNameFallback: boolean; matched: { code: string | null; name: string }[] } {
+  // 그룹을 채우는 보유 자격을 **전부** 모은다. 첫 번째 것만 남기면, 여러 그룹에 공통으로 들어 있는
+  // 업종(예: 1469가 4개 그룹 모두에 있음)이 그룹마다 똑같이 찍혀 "1469, 1469, 1469, 1469"가 된다
+  // (2026-09-29 구곡관광길·울진해양과학관 공고 실측). 판정은 하나만 있어도 충족으로 같다.
+  const matched: { code: string | null; name: string }[] = [];
   let sawCode = false;
 
   for (const allowed of group.allowedNames) {
     const code = extractCode(allowed);
     if (code) {
       sawCode = true;
-      if (heldCodes.has(code)) {
-        const name = allowed.replace(/\/\s*\d{4}\s*$/, "").trim();
-        return { satisfied: true, usedNameFallback: false, matched: { code, name } };
-      }
+      if (heldCodes.has(code)) matched.push({ code, name: allowed.replace(/\/\s*\d{4}\s*$/, "").trim() });
     }
   }
-  if (sawCode) return { satisfied: false, usedNameFallback: false };
+  if (sawCode) return { satisfied: matched.length > 0, usedNameFallback: false, matched };
 
   // 코드가 하나도 없는 그룹 — 이름 완전일치로만 본다.
-  const hit = group.allowedNames.map((n) => n.trim()).find((n) => heldNames.has(n));
-  return hit !== undefined
-    ? { satisfied: true, usedNameFallback: true, matched: { code: null, name: hit } }
-    : { satisfied: false, usedNameFallback: true };
+  for (const n of group.allowedNames.map((x) => x.trim())) {
+    if (heldNames.has(n)) matched.push({ code: null, name: n });
+  }
+  return { satisfied: matched.length > 0, usedNameFallback: true, matched };
 }
 
 /**
@@ -110,9 +126,9 @@ export function evaluateQualifications(
     const { satisfied, usedNameFallback, matched } = isGroupSatisfied(group, heldCodes, heldNames);
     if (usedNameFallback) nameFallbackGroups += 1;
     if (!satisfied) missingGroups.push(group);
-    else if (matched) {
-      const name = (matched.code && heldNameByCode.get(matched.code)) || matched.name;
-      satisfiedBy.push({ groupNo: group.groupNo, name, code: matched.code });
+    for (const m of matched) {
+      const name = (m.code && heldNameByCode.get(m.code)) || m.name;
+      satisfiedBy.push({ groupNo: group.groupNo, name, code: m.code });
     }
   }
 

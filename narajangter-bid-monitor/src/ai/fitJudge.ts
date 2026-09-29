@@ -122,7 +122,11 @@ export function buildNoticeMessage(input: FitInput): string {
   ];
   if (input.qualDoc) {
     const d = input.qualDoc;
-    const req = d.requirements.map((r) => `${r.held ? "보유" : "미보유"} ${r.name ?? (r.kind === "품명" ? "세부품명번호" : "업종코드")}${r.code ? `(${r.code})` : ""}`);
+    const req = d.requirements.map((r) => {
+      const label = r.name ?? r.docName ?? (r.kind === "품명" ? "세부품명번호" : "업종코드");
+      const rel = r.related ? ` [${r.related.level} 보유: ${r.related.items.map((i) => `${i.name}(${i.code})`).join(", ")}]` : "";
+      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${rel}`;
+    });
     lines.push(
       `공고문 참가자격에서 찾은 요건: ${req.length ? req.join(", ") : "코드 없음"}`,
       `지역제한: ${d.region ?? "공고문에서 못 찾음"}`,

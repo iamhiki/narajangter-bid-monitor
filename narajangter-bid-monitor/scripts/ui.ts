@@ -13,6 +13,7 @@ import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
+import { uniqueSatisfied } from "../src/matching/qualificationFilter.js";
 import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
 import type { CollectionDiagnostics } from "../src/pipeline.js";
 import type { NormalizedNotice } from "../src/api/types.js";
@@ -344,7 +345,7 @@ function qualificationSummary(m: MatchedNotice): string | null {
   const q = m.qualification;
   if (!q) return null;
   if (q.status !== "충족") return q.status === "제한없음" ? "면허제한정보에 업종제한 없음" : "면허제한정보 조회 실패";
-  return `충족 — ${q.satisfiedBy.map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
+  return `제한그룹 ${q.totalGroups}개 모두 충족 — ${uniqueSatisfied(q.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
 }
 
 function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {

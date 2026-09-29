@@ -3,6 +3,7 @@ import {
   evaluateQualifications,
   extractCode,
   MAX_ALLOWED_MISSING_QUALIFICATIONS,
+  uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
 
@@ -94,6 +95,25 @@ describe("satisfiedBy (화면 표시용)", () => {
       { groupNo: "1", name: "실내건축공사업", code: "0006" },
       // 코드 없는 그룹은 이름으로만 맞췄으므로 코드를 추측해 붙이지 않는다
       { groupNo: "2", name: "정보통신공사업", code: null },
+    ]);
+  });
+
+  it("여러 그룹에 공통인 자격은 uniqueSatisfied에서 한 번만, 채운 그룹 수와 함께 나온다", () => {
+    // 2026-09-29 울진해양과학관 공고: 4개 그룹 모두에 1469·4990이 들어 있다
+    const groups = ["4440", "4442", "4443", "4444"].map((c, i) => ({
+      groupNo: String(i + 1),
+      allowedNames: ["소프트웨어사업자(디지털콘텐츠개발서비스사업)/1469", "실내건축공사업/0006", `산업디자인/${c}`],
+    }));
+    const r = evaluateQualifications(groups, [], [
+      { code: "1469", name: "소프트웨어사업자(디지털콘텐츠개발서비스사업)" },
+      { code: "0006", name: "실내건축공사업" },
+      { code: "4444", name: "산업디자인전문회사(종합디자인분야)" },
+    ]);
+    expect(r.passes).toBe(true);
+    expect(uniqueSatisfied(r.satisfiedBy)).toEqual([
+      { name: "소프트웨어사업자(디지털콘텐츠개발서비스사업)", code: "1469", groups: 4 },
+      { name: "실내건축공사업", code: "0006", groups: 4 },
+      { name: "산업디자인전문회사(종합디자인분야)", code: "4444", groups: 1 },
     ]);
   });
 
