@@ -3,7 +3,7 @@ import { toApiDateTime } from "./dateUtil.js";
 import type { FieldCandidates } from "./fieldCandidates.js";
 import { fetchAllPages } from "./httpClient.js";
 import { normalizeRawItem } from "./normalize.js";
-import type { BusinessType, FetchResult, FetchWindow, SourceType } from "./types.js";
+import type { BusinessType, FetchResult, FetchWindow, NormalizedNotice, SourceType } from "./types.js";
 import { toErrorMessage } from "../errors.js";
 
 export interface FetchNoticesConfig {
@@ -83,15 +83,37 @@ export async function fetchNoticesBySourceType(config: FetchNoticesConfig): Prom
   );
 }
 
-/** 조회 결과 배열에서 공고번호 기준 중복 제거 (동일 공고가 페이지 경계 등으로 중복 수집된 경우 대비) */
+/** 공고 차수 (bidNtceOrd "000", "001" …). 없으면 0 */
+function noticeOrd(n: NormalizedNotice): number {
+  const v = Number(String(n.raw.bidNtceOrd ?? "").trim());
+  return Number.isFinite(v) ? v : 0;
+}
+
+/** 나라장터가 취소한 공고. 취소하면 같은 공고번호로 차수를 올린 "취소공고"를 새로 게시한다. */
+export function isCancelledNotice(n: NormalizedNotice): boolean {
+  return /취소/.test(String(n.raw.ntceKindNm ?? ""));
+}
+
+/**
+ * 공고번호 기준 중복 제거. 같은 번호가 여러 번 오면 **가장 높은 차수**(최신 상태)를 남기고,
+ * 그게 취소공고면 아예 뺀다.
+ *
+ * 변경·취소 공고는 같은 공고번호에 차수만 올라가서 온다. 예전에는 먼저 받은 것을 남겨서
+ * 000차 "등록공고"가 살아남고 001차 "취소공고"가 버려졌다 — 취소된 공고가 화면·알림에 계속
+ * 떴다 (2026-09-29 건양대 건양회관 인테리어 공사 R26BK01744615, 최근 7일 취소공고 85건).
+ */
 export function dedupeNotices(results: FetchResult[]): FetchResult[] {
   return results.map((r) => {
-    const seen = new Set<string>();
-    const deduped = r.notices.filter((n) => {
-      if (seen.has(n.noticeNo)) return false;
-      seen.add(n.noticeNo);
-      return true;
-    });
-    return { ...r, notices: deduped };
+    const latest = new Map<string, NormalizedNotice>();
+    for (const n of r.notices) {
+      const prev = latest.get(n.noticeNo);
+      if (!prev || noticeOrd(n) >= noticeOrd(prev)) latest.set(n.noticeNo, n);
+    }
+    const notices = [...latest.values()];
+    const live = notices.filter((n) => !isCancelledNotice(n));
+    if (live.length < notices.length) {
+      logger.info("취소된 공고 제외", { 구분: r.businessType, 제외: notices.length - live.length });
+    }
+    return { ...r, notices: live };
   });
 }
