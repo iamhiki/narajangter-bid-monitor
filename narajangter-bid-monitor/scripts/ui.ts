@@ -9,6 +9,9 @@ import { loadAppConfig } from "../src/config/loadJsonConfig.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
+import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
+import type { CollectionDiagnostics } from "../src/pipeline.js";
+import type { NormalizedNotice } from "../src/api/types.js";
 import type { PastProject } from "../src/corpus/types.js";
 import { SimilarityIndex } from "../src/similarity/index.js";
 import { calibrate } from "../src/similarity/calibrate.js";
@@ -141,6 +144,13 @@ interface NoticeCache {
   error: string | null;
 }
 let noticeCache: NoticeCache | null = null;
+/**
+ * 마지막 조회에서 받은 공고 전체와 판정 맥락. noticeCache와 따로 둔다 — noticeCache는 그대로
+ * JSON으로 내려보내는데, 여기에는 공고 수만 건의 원본이 들어 있어 섞이면 응답이 수십 MB가 된다.
+ */
+let lastDiagnostics: CollectionDiagnostics | null = null;
+/** 제외된 후보 목록 계산 결과 (같은 조회에 대해서는 한 번만 계산) */
+let excludedCache: { source: CollectionDiagnostics; items: unknown[]; byStage: Record<string, number> } | null = null;
 let inFlight: Promise<NoticeCache> | null = null;
 
 /** 어떤 규칙이 이 공고를 걸었는지 한 줄로 (feedbackRow.ts의 표기와 같은 형식) */
@@ -180,11 +190,97 @@ function decorate(m: MatchedNotice): unknown {
   };
 }
 
+function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
+  const failed = d.steps.find((s) => s.step === d.excludedAt);
+  return {
+    noticeNo: n.noticeNo,
+    title: n.title,
+    institution: n.institution,
+    businessType: n.businessType,
+    sourceType: n.sourceType,
+    deadline: n.deadline,
+    budgetAmount: n.budgetAmount,
+    detailUrl: n.detailUrl,
+    bidMethod: n.bidMethod,
+    excludedAt: d.excludedAt,
+    excludedDetail: failed?.detail ?? null,
+    candidate: d.candidate,
+    steps: d.steps,
+  };
+}
+
+/**
+ * 키워드·품목으로는 걸렸는데(= 우리 공고 후보) 다른 조건으로 빠진 공고.
+ * 키워드·품목 단계에서 떨어진 공고는 싣지 않는다 — 수만 건이라 목록으로는 쓸모가 없고,
+ * 그런 공고는 공고번호 추적으로 한 건씩 본다.
+ */
+function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; byStage: Record<string, number> } {
+  if (excludedCache?.source === diag) return excludedCache;
+  const byStage: Record<string, number> = Object.fromEntries(DIAGNOSE_STEPS.map((s) => [s, 0]));
+  const items: unknown[] = [];
+  for (const n of diag.notices) {
+    const d = diagnoseNotice(n, diag.context);
+    if (!d.candidate || d.excludedAt === null) continue;
+    byStage[d.excludedAt] = (byStage[d.excludedAt] ?? 0) + 1;
+    items.push(noticeSummary(n, d));
+  }
+  excludedCache = { source: diag, items, byStage };
+  return excludedCache;
+}
+
+// ── 담당자 판정 (② 수집 정제 · ③ 미수집 원인) ─────────────────────────
+/**
+ * 판정은 이 PC의 cache/verdicts.json에 쌓는다. 공고번호당 마지막 판정 하나만 남긴다.
+ * 구글 피드백 시트는 "수집된" 공고만 담는데, 여기서는 제외된 공고·추적한 공고도 판정해야 해서
+ * 따로 둔다. CSV로 내려받아 시트에 붙일 수 있다.
+ */
+const VERDICTS_PATH = resolve("cache/verdicts.json");
+interface Verdict {
+  noticeNo: string;
+  title: string;
+  verdict: "적절" | "부적절";
+  note: string;
+  by: string;
+  at: string;
+  /** 판정할 때 시스템이 이 공고를 어떻게 처리했는지 */
+  systemResult: string;
+}
+function loadVerdicts(): Record<string, Verdict> {
+  try {
+    return JSON.parse(readFileSync(VERDICTS_PATH, "utf8")) as Record<string, Verdict>;
+  } catch {
+    return {};
+  }
+}
+let verdicts = loadVerdicts();
+function saveVerdicts(): void {
+  mkdirSync(dirname(VERDICTS_PATH), { recursive: true });
+  writeFileSync(VERDICTS_PATH, JSON.stringify(verdicts, null, 2), "utf8");
+}
+
+function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
+  return new Promise((resolveBody, reject) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString("utf8");
+      if (body.length > limit) {
+        reject(new Error("요청이 너무 큽니다"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolveBody(body));
+    req.on("error", reject);
+  });
+}
+
+const csvCell = (v: string): string => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
 async function fetchNotices(lookbackDays: number): Promise<NoticeCache> {
   try {
     const env = loadEnv();
     const appConfig = loadAppConfig();
-    const input = await collectReportInput(env, appConfig, { lookbackDays });
+    const input = await collectReportInput(env, appConfig, { lookbackDays, withDiagnostics: true });
+    lastDiagnostics = input.diagnostics ?? null;
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
@@ -325,6 +421,97 @@ const server = createServer((req, res) => {
       bodyTerms: explanation.bodyTerms?.slice(0, 10) ?? null,
       bodyTermCount: explanation.bodyTerms?.length ?? 0,
     });
+    return;
+  }
+
+  if (url.pathname === "/api/excluded") {
+    if (!lastDiagnostics) {
+      json(res, { error: "먼저 '실제 공고' 탭에서 나라장터 공고를 불러오세요." });
+      return;
+    }
+    const { items, byStage } = excludedCandidates(lastDiagnostics);
+    json(res, { lookbackDays: noticeCache?.lookbackDays ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
+    return;
+  }
+
+  if (url.pathname === "/api/trace") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    if (!lastDiagnostics) {
+      json(res, { error: "먼저 '실제 공고' 탭에서 나라장터 공고를 불러오세요." });
+      return;
+    }
+    if (q.length < 2) {
+      json(res, { error: "공고번호나 제목 일부를 2자 이상 입력하세요." });
+      return;
+    }
+    // 공고번호(영문·숫자·하이픈)는 앞부분 일치, 그 밖에는 제목 부분일치(공백 무시).
+    const byNo = /^[A-Za-z0-9-]+$/.test(q);
+    const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+    const needle = norm(q);
+    const found = lastDiagnostics.notices
+      .filter((n) => (byNo ? n.noticeNo.toLowerCase().startsWith(needle) : norm(n.title).includes(needle)))
+      .slice(0, 30);
+    json(res, {
+      lookbackDays: noticeCache?.lookbackDays ?? null,
+      total: lastDiagnostics.notices.length,
+      items: found.map((n) => noticeSummary(n, diagnoseNotice(n, lastDiagnostics!.context))),
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/verdicts" && req.method === "GET") {
+    json(res, { verdicts });
+    return;
+  }
+
+  if (url.pathname === "/api/verdicts.csv") {
+    const head = ["공고번호", "공고명", "판정", "메모", "판정자", "판정일시", "시스템 처리"];
+    const rows = Object.values(verdicts).map((v) =>
+      [v.noticeNo, v.title, v.verdict, v.note, v.by, v.at, v.systemResult].map((c) => csvCell(String(c ?? ""))).join(",")
+    );
+    // 엑셀이 UTF-8 CSV를 한글 깨짐 없이 열도록 BOM을 붙인다.
+    res.writeHead(200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="verdicts.csv"`,
+    });
+    res.end("\uFEFF" + [head.join(","), ...rows].join("\r\n"));
+    return;
+  }
+
+  if (url.pathname === "/api/verdict" && req.method === "POST") {
+    // application/json만 받는다 — 다른 사이트의 폼이 이 서버로 몰래 POST하는 것을 막는다
+    // (JSON 요청은 브라우저가 사전 확인을 거치므로 다른 출처에서는 막힌다).
+    if (!(req.headers["content-type"] ?? "").includes("application/json")) {
+      res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "application/json만 받습니다." }));
+      return;
+    }
+    readBody(req)
+      .then((raw) => {
+        const b = JSON.parse(raw) as Partial<Verdict> & { clear?: boolean };
+        const noticeNo = String(b.noticeNo ?? "").trim();
+        if (!noticeNo) throw new Error("공고번호가 없습니다");
+        if (b.clear) {
+          delete verdicts[noticeNo];
+        } else {
+          if (b.verdict !== "적절" && b.verdict !== "부적절") throw new Error("판정은 적절/부적절 중 하나여야 합니다");
+          verdicts[noticeNo] = {
+            noticeNo,
+            title: String(b.title ?? "").slice(0, 300),
+            verdict: b.verdict,
+            note: String(b.note ?? "").slice(0, 500),
+            by: String(b.by ?? "").slice(0, 40),
+            at: new Date().toISOString(),
+            systemResult: String(b.systemResult ?? "").slice(0, 200),
+          };
+        }
+        saveVerdicts();
+        json(res, { ok: true, verdict: verdicts[noticeNo] ?? null });
+      })
+      .catch((err: unknown) => {
+        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: String(err instanceof Error ? err.message : err) }));
+      });
     return;
   }
 

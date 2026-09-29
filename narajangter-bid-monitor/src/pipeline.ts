@@ -16,6 +16,8 @@ import { applyQualificationFilter } from "./matching/applyQualificationFilter.js
 import { fetchAllLicenseLimitGroups } from "./api/licenseLimitApi.js";
 import type { ReportInput } from "./report/buildReport.js";
 import { ApiError } from "./errors.js";
+import type { NormalizedNotice } from "./api/types.js";
+import type { DiagnoseContext } from "./matching/diagnose.js";
 import { logger } from "./logger.js";
 
 /**
@@ -49,8 +51,13 @@ export async function collectReportInput(
      * 끄고, 실제 보고서가 나가는 정기 실행에서만 켠다.
      */
     withJointBidStatus?: boolean;
+    /**
+     * 수집한 공고 전체와 판정 맥락을 함께 돌려줄지 (웹 UI의 "제외된 공고"·공고번호 추적용).
+     * 정기 실행에서는 필요 없고 메모리만 잡아먹으므로 기본 꺼짐.
+     */
+    withDiagnostics?: boolean;
   } = {}
-): Promise<ReportInput> {
+): Promise<CollectedInput> {
   const notify = async (message: string): Promise<void> => {
     if (!options.onProgress) return;
     try {
@@ -168,13 +175,31 @@ export async function collectReportInput(
   await notify("과거 수행사업과 대조 중…");
   attachSimilarity(allMatches, bodies);
 
-  return {
+  const result: CollectedInput = {
     generatedAt: now,
     window,
     bid: { matches: bidMatches, failures: bidResults.filter((r) => r.failed) },
     preStandard: { matches: preStandardMatches, failures: preStandardResults.filter((r) => r.failed) },
   };
+
+  if (options.withDiagnostics) {
+    // 면허제한정보 조회는 내부에서 오류를 삼키고 빈 Map을 주므로 여기서 거부되지 않는다.
+    const licenseGroups = await licenseGroupsPromise;
+    result.diagnostics = {
+      notices: [...bidResults.flatMap((r) => r.notices), ...preStandardResults.flatMap((r) => r.notices)],
+      context: { config: appConfig, mongoliaKeywords, now, licenseGroups },
+    };
+  }
+  return result;
 }
+
+/** 수집한 공고 전체 + 판정 맥락. 어떤 공고든 matching/diagnose.ts로 단계별 판정을 다시 돌릴 수 있다. */
+export interface CollectionDiagnostics {
+  notices: NormalizedNotice[];
+  context: DiagnoseContext;
+}
+
+export type CollectedInput = ReportInput & { diagnostics?: CollectionDiagnostics };
 
 /**
  * 매칭된 공고에 싱크로율을 붙인다 (제자리 수정).

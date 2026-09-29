@@ -222,6 +222,36 @@ body {
 .badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
 .badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
 
+/* 담당자 판정 버튼 */
+.vctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.vctl button {
+  font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; border-radius: var(--radius);
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+}
+.vctl button:hover { border-color: var(--muted); }
+.vctl .v-ok.on { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
+.vctl .v-bad.on { background: var(--urgent); color: var(--on-urgent); border-color: var(--urgent); font-weight: 600; }
+.vctl .v-clear { color: var(--muted); }
+.vctl .v-note {
+  flex: 1 1 200px; min-width: 0; font: inherit; font-size: 12px; padding: 4px 8px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.vctl .v-by { font-size: 11.5px; color: var(--faint); }
+.judge-bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 18px 0 12px; font-size: 13px; color: var(--muted); }
+.judge-bar input {
+  font: inherit; font-size: 13px; padding: 4px 8px; width: 110px; margin-left: 4px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.judge-bar a { color: var(--brand); }
+.trace-end { border-bottom: 1px dashed var(--line); margin: 6px 0 4px; }
+.steps { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12.5px; }
+.steps li { padding: 4px 0; color: var(--muted); display: flex; gap: 6px; align-items: baseline; }
+.steps li b { color: var(--ink); font-weight: 600; min-width: 64px; }
+.steps li .mark { width: 14px; flex: none; color: var(--brand); font-weight: 700; }
+.steps li.no .mark { color: var(--urgent); }
+.steps li.first { color: var(--ink-strong); }
+.steps li.first b { color: var(--urgent); }
+
 /* 자격판정 배지 — 커서를 올리거나 탭으로 포커스하면 어떤 보유 자격으로 채웠는지 보여준다 */
 .qual { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: help; outline: none; }
 .qual .ico {
@@ -451,6 +481,7 @@ footer b { color: var(--muted); }
 
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="live">실제 공고</button>
+    <button role="tab" aria-selected="false" data-tab="excluded">제외된 공고</button>
     <button role="tab" aria-selected="false" data-tab="search">직접 검색</button>
     <button role="tab" aria-selected="false" data-tab="corpus">과거사업 목록</button>
     <button role="tab" aria-selected="false" data-tab="how">동작 원리</button>
@@ -470,6 +501,26 @@ footer b { color: var(--muted); }
     <div class="filters" id="filters"></div>
     <p class="sub" id="liveMeta" style="margin:0 0 18px">조회에 40초쯤 걸립니다. 한 번 불러오면 캐시되니 탭을 오가도 다시 기다리지 않습니다.</p>
     <div id="liveResults"></div>
+  </section>
+
+  <section id="tab-excluded" hidden>
+    <p class="sub" style="margin:0 0 14px">
+      키워드·품목으로는 걸렸지만 다른 조건으로 빠진 공고입니다. 놓치면 안 되는 공고가 있으면 <b>✓ 적절</b>을 눌러 주세요 —
+      그 판정이 모여 어떤 필터를 고칠지 정하는 근거가 됩니다. 키워드에 아예 안 걸린 공고는 아래 <b>공고 추적</b>으로 찾습니다.
+    </p>
+    <form class="search" id="traceForm">
+      <input id="traceQ" placeholder="놓친 공고의 공고번호 또는 제목 일부 — 어느 단계에서 왜 빠졌는지 보여줍니다" autocomplete="off">
+      <button type="submit">공고 추적</button>
+    </form>
+    <div id="traceResults"></div>
+    <div class="judge-bar">
+      <label>판정자 <input id="judge" placeholder="이름" maxlength="40" autocomplete="off"></label>
+      <span>누적 판정 <b id="vCount">0</b>건</span>
+      <a href="/api/verdicts.csv" download>판정 CSV 내려받기</a>
+    </div>
+    <div class="filters" id="exFilters"></div>
+    <p class="sub" id="exMeta" style="margin:0 0 18px"></p>
+    <div id="exResults"></div>
   </section>
 
   <section id="tab-search" hidden>
@@ -914,6 +965,9 @@ async function loadNotices(refresh) {
       ` · 첨부읽음 <b>${data.items.filter((n) => n.basis === "제목+과업내용").length}</b>건` +
       ` · ${esc(when)}${data.cached ? " (캐시)" : ""}`;
     renderNotices(data.items);
+    // 제외된 공고는 이번 조회 결과로 다시 계산해야 한다
+    exData = null;
+    if (!$("tab-excluded").hidden) loadExcluded();
   } catch (err) {
     $("liveResults").innerHTML = `<div class="verdict edge">요청 실패 — ${esc(err.message)}</div>`;
   } finally {
@@ -1028,6 +1082,7 @@ function renderNotice(n) {
       ${n.bidMethod ? " · " + esc(n.bidMethod.slice(0, 24)) : ""}</div>
     <div class="meta">규칙 근거: ${esc(n.reason)}</div>
     ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
+    ${vctl(n, "수집됨")}
   </div>`;
 }
 
@@ -1063,6 +1118,159 @@ function qualBadge(n) {
     `충족된 자격 ${q.satisfiedBy.length}건`,
     `<ul>${items}</ul><p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>`
   )}</span>`;
+}
+
+// ── 담당자 판정 (② 수집 정제 · ③ 미수집 원인) ─────────────────────
+let verdicts = {};
+
+async function loadVerdicts() {
+  try {
+    verdicts = (await getJson("/api/verdicts")).verdicts || {};
+  } catch (e) {
+    verdicts = {};
+  }
+  $("vCount").textContent = Object.keys(verdicts).length;
+}
+
+/**
+ * 적절/부적절 판정 버튼. systemResult는 판정할 때 시스템이 이 공고를 어떻게 처리했는지다 —
+ * "수집됨"인데 부적절이면 ② 정제 대상, "제외됨"인데 적절이면 ③ 놓친 공고다.
+ */
+function vctl(n, systemResult) {
+  const v = verdicts[n.noticeNo];
+  const collected = systemResult === "수집됨";
+  const okTitle = collected ? "제대로 수집된 공고" : "놓치면 안 되는 공고 — 필터가 잘못 뺐다";
+  const badTitle = collected ? "수집하면 안 되는 공고 — 필터가 잘못 넣었다" : "빠진 게 맞는 공고";
+  const attrs = `data-no="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-sys="${esc(systemResult)}"`;
+  return `<div class="vctl" ${attrs}>
+    <button type="button" class="v-ok ${v?.verdict === "적절" ? "on" : ""}" data-v="적절" title="${esc(okTitle)}">✓ 적절</button>
+    <button type="button" class="v-bad ${v?.verdict === "부적절" ? "on" : ""}" data-v="부적절" title="${esc(badTitle)}">✗ 부적절</button>
+    <input class="v-note" placeholder="메모 (선택) — 예: 전시관 설계라 우리 업무" value="${esc(v?.note || "")}" maxlength="500">
+    ${v ? `<button type="button" class="v-clear" data-v="clear" title="판정 취소">취소</button><span class="v-by">${esc(v.by || "이름 없음")} · ${esc(new Date(v.at).toLocaleDateString("ko-KR"))}</span>` : ""}
+  </div>`;
+}
+
+async function saveVerdict(btn) {
+  const box = btn.closest(".vctl");
+  const clear = btn.dataset.v === "clear";
+  const by = $("judge").value.trim();
+  if (!clear && !by) {
+    $("judge").focus();
+    alert("판정자 이름을 먼저 입력해 주세요 ('제외된 공고' 탭 위쪽).");
+    return;
+  }
+  const body = {
+    noticeNo: box.dataset.no,
+    title: box.dataset.title,
+    systemResult: box.dataset.sys,
+    verdict: clear ? undefined : btn.dataset.v,
+    note: box.querySelector(".v-note").value.trim(),
+    by,
+    clear,
+  };
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.verdict) verdicts[body.noticeNo] = data.verdict;
+    else delete verdicts[body.noticeNo];
+    $("vCount").textContent = Object.keys(verdicts).length;
+    // 같은 공고가 여러 탭에 떠 있을 수 있으니 전부 갱신한다
+    document.querySelectorAll(".vctl").forEach((el) => {
+      if (el.dataset.no === body.noticeNo) el.outerHTML = vctl({ noticeNo: el.dataset.no, title: el.dataset.title }, el.dataset.sys);
+    });
+  } catch (err) {
+    alert(`판정 저장 실패 — ${err.message}`);
+    btn.disabled = false;
+  }
+}
+
+// ── 제외된 공고 · 공고 추적 ─────────────────────────────────────
+let exData = null;
+let exStage = "all";
+
+async function loadExcluded() {
+  $("exMeta").textContent = "불러오는 중…";
+  $("exResults").innerHTML = "";
+  try {
+    const data = await getJson("/api/excluded");
+    if (data.error) {
+      $("exMeta").textContent = "";
+      $("exFilters").innerHTML = "";
+      $("exResults").innerHTML = `<div class="empty">${esc(data.error)}</div>`;
+      return;
+    }
+    exData = data;
+    renderExcluded();
+  } catch (err) {
+    $("exResults").innerHTML = `<div class="verdict edge">요청 실패 — ${esc(err.message)}</div>`;
+  }
+}
+
+function renderExcluded() {
+  const d = exData;
+  const stages = Object.entries(d.byStage).filter(([, c]) => c > 0);
+  $("exFilters").innerHTML = [
+    `<button type="button" class="chip ${exStage === "all" ? "on" : ""}" data-stage="all">전체 ${d.items.length}</button>`,
+    ...stages.map(([s, c]) => `<button type="button" class="chip ${exStage === s ? "on" : ""}" data-stage="${esc(s)}">${esc(s)} ${c}</button>`),
+  ].join("");
+  const judged = d.items.filter((n) => verdicts[n.noticeNo]?.verdict === "적절").length;
+  $("exMeta").innerHTML =
+    `최근 ${d.lookbackDays}일 수집 공고 ${d.total.toLocaleString("ko-KR")}건 중 키워드·품목 후보였다가 빠진 공고 <b>${d.items.length}건</b>` +
+    (judged ? ` · 놓치면 안 된다고 판정 <b>${judged}건</b>` : "");
+  const list = d.items.filter((n) => exStage === "all" || n.excludedAt === exStage);
+  $("exResults").innerHTML = list.length
+    ? list.map((n) => renderDiagnosed(n)).join("")
+    : '<div class="empty">이 조건에 해당하는 공고가 없습니다.</div>';
+}
+
+function renderSteps(steps, excludedAt) {
+  return `<ol class="steps">${steps
+    .map((s) => `<li class="${s.ok ? "ok" : "no"} ${s.step === excludedAt ? "first" : ""}"><span class="mark" aria-hidden="true">${s.ok ? "✓" : "✗"}</span><b>${esc(s.step)}</b> ${esc(s.detail)}</li>`)
+    .join("")}</ol>`;
+}
+
+function renderDiagnosed(n, openSteps = false) {
+  const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
+  const result = n.excludedAt ? "제외됨" : "수집됨";
+  return `<div class="notice ${n.excludedAt ? "edge" : "strong"}">
+    <div class="badges">
+      ${n.excludedAt ? `<span class="badge warn">빠진 단계 · ${esc(n.excludedAt)}</span>` : `<span class="badge hi">수집됨</span>`}
+      <span class="badge">${esc(n.sourceType)}</span>
+      <span class="badge">${esc(n.businessType)}</span>
+    </div>
+    <h3>${title}</h3>
+    <div class="meta">${esc(n.institution || "기관 미상")}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · <code>${esc(n.noticeNo)}</code></div>
+    ${n.excludedDetail ? `<div class="meta">사유: <b>${esc(n.excludedDetail)}</b></div>` : ""}
+    <details class="body" ${openSteps ? "open" : ""}><summary>단계별 판정 보기</summary>${renderSteps(n.steps, n.excludedAt)}</details>
+    ${vctl(n, result)}
+  </div>`;
+}
+
+async function trace() {
+  const q = $("traceQ").value.trim();
+  if (!q) return;
+  $("traceResults").innerHTML = '<div class="empty">찾는 중…</div>';
+  try {
+    const data = await getJson(`/api/trace?q=${encodeURIComponent(q)}`);
+    if (data.error) {
+      $("traceResults").innerHTML = `<div class="verdict edge">${esc(data.error)}</div>`;
+      return;
+    }
+    if (!data.items.length) {
+      $("traceResults").innerHTML = `<div class="verdict edge">최근 ${data.lookbackDays}일 동안 수집한 공고 ${data.total.toLocaleString("ko-KR")}건 중에 없습니다.
+        조회 기간보다 먼저 올라온 공고라면 '실제 공고' 탭에서 기간을 늘려 다시 불러오세요.
+        기간 안인데도 없다면 수집 단계(API)에서 빠진 것이므로 공고번호를 담당자에게 알려주세요.</div>`;
+      return;
+    }
+    $("traceResults").innerHTML =
+      `<p class="sub" style="margin:0 0 10px">${data.items.length}건 찾음${data.items.length >= 30 ? " (앞 30건만 표시 — 더 구체적으로 입력하세요)" : ""}</p>` +
+      data.items.map((n) => renderDiagnosed(n, data.items.length === 1)).join("") +
+      '<div class="trace-end"></div>';
+  } catch (err) {
+    $("traceResults").innerHTML = `<div class="verdict edge">요청 실패 — ${esc(err.message)}</div>`;
+  }
 }
 
 // ── 점수 근거 ───────────────────────────────────────────────
@@ -1159,8 +1367,23 @@ document.querySelector(".tabs").onclick = (e) => {
   const btn = e.target.closest("button[data-tab]");
   if (!btn) return;
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
-  for (const name of ["live", "search", "corpus", "how"]) $("tab-" + name).hidden = btn.dataset.tab !== name;
+  for (const name of ["live", "excluded", "search", "corpus", "how"]) $("tab-" + name).hidden = btn.dataset.tab !== name;
+  if (btn.dataset.tab === "excluded" && !exData) loadExcluded();
 };
+$("traceForm").onsubmit = (e) => { e.preventDefault(); trace(); };
+$("exFilters").onclick = (ev) => {
+  const btn = ev.target.closest("[data-stage]");
+  if (!btn) return;
+  exStage = btn.dataset.stage;
+  renderExcluded();
+};
+try { $("judge").value = localStorage.getItem("ui-judge") || ""; } catch (e) { /* 무시 */ }
+$("judge").onchange = () => { try { localStorage.setItem("ui-judge", $("judge").value.trim()); } catch (e) { /* 무시 */ } };
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-v]");
+  if (btn) saveVerdict(btn);
+});
+loadVerdicts();
 
 boot();
 </script>
