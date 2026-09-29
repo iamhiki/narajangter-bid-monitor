@@ -40,6 +40,7 @@
   --faint: #6a6a6a;   /* 패널 5.41 · 배경 4.92 */
   --line: #dfdfdf;
   --line-soft: #ececec;
+  --line-strong: #c2c2c2; /* 배지 테두리 — 대비가 낮은 모니터에서도 칸이 보이게 */
   --panel: #ffffff;
   --bg: #f4f4f4;
   --warn: #8f6210;    /* AA 4.98:1 (경고 틴트 배경 위) */
@@ -68,6 +69,7 @@
     --faint: #90908a;
     --line: #333940;
     --line-soft: #272c32;
+    --line-strong: #4d545c;
     --panel: #1c2026;
     --bg: #15191e;
     --warn: #d6a343;
@@ -82,7 +84,7 @@
   --brand: #5fc298; --brand-hover: #7ad0ac; --on-brand: #0e1512;
   --brand-dark: #0d1512; --brand-tint: #16261f;
   --ink: #dcdcd8; --ink-strong: #f2f2ef; --muted: #a3a39d; --faint: #90908a;
-  --line: #333940; --line-soft: #272c32; --panel: #1c2026; --bg: #15191e;
+  --line: #333940; --line-soft: #272c32; --line-strong: #4d545c; --panel: #1c2026; --bg: #15191e;
   --warn: #d6a343; --warn-tint: #2b2415;
   --urgent: #e26a6a; --on-urgent: #1a1012; --urgent-tint: #2e1a1a;
 }
@@ -216,7 +218,7 @@ body {
 .badges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; align-items: center; }
 .badge {
   font-size: 11px; padding: 3px 8px; background: var(--bg); color: var(--muted);
-  white-space: nowrap; border: 1px solid var(--line-soft); letter-spacing: .01em;
+  white-space: nowrap; border: 1px solid var(--line-strong); letter-spacing: .01em;
 }
 .badge.hi { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
 .badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
@@ -277,13 +279,13 @@ body {
 }
 
 /* 마감 임박 */
-.notice.due { border-left-color: var(--urgent); border-left-width: 4px; box-shadow: 0 0 0 1px var(--urgent) inset; }
-.due-strip {
-  margin: -16px -18px 12px; padding: 7px 18px; background: var(--urgent); color: var(--on-urgent);
-  font-size: 13px; letter-spacing: .01em;
+.notice.due { border-left-color: var(--urgent); border-left-width: 4px; }
+.due {
+  font-family: var(--head); font-size: 12px; font-weight: 700; padding: 3px 10px; letter-spacing: .02em;
+  background: var(--panel); color: var(--urgent); border: 1px solid var(--urgent); white-space: nowrap;
 }
-.due-strip b { font-size: 14px; margin-right: 6px; }
-.due-strip span { opacity: .9; }
+.due.today { background: var(--urgent); color: var(--on-urgent); }
+.due time { font-family: var(--body); font-weight: 500; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .enrich-meta { margin: -10px 0 14px; color: var(--brand); font-size: 12.5px; min-height: 1em; }
 
 /* AI 판단 */
@@ -424,7 +426,7 @@ dialog::backdrop { background: rgba(28, 28, 28, .5); }
 /* ── 추천등급 ─────────────────────────────────────────────── */
 .grade {
   font-family: var(--head); font-size: 12px; font-weight: 700; padding: 3px 10px;
-  background: var(--bg); color: var(--muted); border: 1px solid var(--line); letter-spacing: .02em;
+  background: var(--bg); color: var(--muted); border: 1px solid var(--line-strong); letter-spacing: .02em;
 }
 .grade.urgent { background: var(--urgent); color: var(--on-urgent); border-color: var(--urgent); }
 .notice.urgent { border-left-color: var(--urgent); border-left-width: 4px; }
@@ -1139,8 +1141,8 @@ function renderNotice(n) {
     .join(" &nbsp;·&nbsp; ");
   const due = dueBadge(n);
   return `<div class="notice ${band} ${due ? "due" : ""}">
-    ${due}
     <div class="badges">
+      ${due}
       <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
       ${scoreBadge}
       <span class="badge">${esc(n.businessType)}</span>
@@ -1171,14 +1173,15 @@ function daysLeft(deadline) {
   return kstDay(at) - kstDay(Date.now());
 }
 
-/** 마감 3일 이내면 카드 맨 위에 띠를 붙인다. 사전규격은 입찰 마감이 아니라 의견 마감이라 뺀다. */
+/** 마감 3일 이내면 배지 줄 맨 앞에 라벨을 붙인다. 사전규격은 입찰 마감이 아니라 의견 마감이라 뺀다. */
 function dueBadge(n) {
   if (n.sourceType !== "본공고") return "";
   const d = daysLeft(n.deadline);
   if (d === null || d < 0 || d > 3) return "";
   const when = String(n.deadline).slice(5, 16).replace("-", "/");
-  const label = d === 0 ? "오늘 마감" : `마감 D-${d}`;
-  return `<div class="due-strip">🔥 <b>${label}</b> <span>${esc(when)} 까지</span></div>`;
+  return d === 0
+    ? `<span class="due today">오늘 마감<time>${esc(when.slice(6))}</time></span>`
+    : `<span class="due">마감 D-${d}<time>${esc(when)}</time></span>`;
 }
 
 // ── AI 적합성 판단 ─────────────────────────────────────────
