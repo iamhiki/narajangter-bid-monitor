@@ -314,7 +314,6 @@ body {
   background: var(--panel); color: var(--urgent); border: 1px solid var(--urgent); white-space: nowrap;
 }
 .due-tag.today { background: var(--urgent); color: var(--on-urgent); }
-.due-tag time { font-family: var(--body); font-weight: 500; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .enrich-meta { margin: -10px 0 14px; color: var(--brand); font-size: 12.5px; min-height: 1em; }
 
 /* AI 판단 */
@@ -920,10 +919,8 @@ function dueBadge(n) {
   if (n.sourceType !== "본공고") return "";
   const d = daysLeft(n.deadline);
   if (d === null || d < 0 || d > 3) return "";
-  const when = String(n.deadline).slice(5, 16).replace("-", "/");
-  return d === 0
-    ? `<span class="due-tag today">오늘 마감<time>${esc(when.slice(6))}</time></span>`
-    : `<span class="due-tag">마감 D-${d}<time>${esc(when)}</time></span>`;
+  // 임박했다는 사실만 — 정확한 일시는 제목 아래 "입찰 마감" 칸에 있다
+  return d === 0 ? `<span class="due-tag today">오늘 마감</span>` : `<span class="due-tag">마감 D-${d}</span>`;
 }
 
 // ── AI 적합성 판단 ─────────────────────────────────────────
