@@ -8,6 +8,8 @@ import { loadEnv } from "../src/config/env.js";
 import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
 import { readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
+import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
+import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
@@ -230,36 +232,6 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
   return excludedCache;
 }
 
-// ── 담당자 판정 (② 수집 정제 · ③ 미수집 원인) ─────────────────────────
-/**
- * 판정은 이 PC의 cache/verdicts.json에 쌓는다. 공고번호당 마지막 판정 하나만 남긴다.
- * 구글 피드백 시트는 "수집된" 공고만 담는데, 여기서는 제외된 공고·추적한 공고도 판정해야 해서
- * 따로 둔다. CSV로 내려받아 시트에 붙일 수 있다.
- */
-const VERDICTS_PATH = resolve("cache/verdicts.json");
-interface Verdict {
-  noticeNo: string;
-  title: string;
-  verdict: "적절" | "부적절";
-  note: string;
-  by: string;
-  at: string;
-  /** 판정할 때 시스템이 이 공고를 어떻게 처리했는지 */
-  systemResult: string;
-}
-function loadVerdicts(): Record<string, Verdict> {
-  try {
-    return JSON.parse(readFileSync(VERDICTS_PATH, "utf8")) as Record<string, Verdict>;
-  } catch {
-    return {};
-  }
-}
-let verdicts = loadVerdicts();
-function saveVerdicts(): void {
-  mkdirSync(dirname(VERDICTS_PATH), { recursive: true });
-  writeFileSync(VERDICTS_PATH, JSON.stringify(verdicts, null, 2), "utf8");
-}
-
 // ── 참가여부 (담당자끼리 공유) ─────────────────────────────────
 /**
  * 공고마다 참가여부·담당자·대화를 cache/participation.json에 둔다. 같은 링크로 들어온
@@ -298,33 +270,124 @@ function saveParticipation(): void {
  * 결과는 공고번호로 프로세스가 떠 있는 동안 계속 쓴다 — 공고문과 공동수급 방식은 공고 후
  * 잘 바뀌지 않고, 정정공고는 첨부 URL이 바뀌어 첨부 캐시가 알아서 새로 받는다.
  */
+interface AiState {
+  judgment?: FitJudgment;
+  model?: string;
+  at?: string;
+  error?: string;
+}
 interface Enrichment {
   jointBid?: string | null;
   qualDoc?: QualificationDocResult | null;
+  ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
-let enrichState = { running: false, done: 0, total: 0 };
+let enrichState = { running: false, done: 0, total: 0, aiDone: 0, aiTotal: 0, aiEnabled: isAiConfigured() };
 
-function startEnrichment(notices: NormalizedNotice[], appConfig: AppConfig): void {
-  const todo = notices.filter((n) => {
+/**
+ * AI 판단은 공고당 수십 원이 들고 결과가 잘 바뀌지 않으므로 cache/ai-judgments.json에 남겨
+ * 재시작해도 다시 묻지 않는다. 실패는 저장하지 않는다 — 키를 넣거나 한도가 풀리면 다음 조회 때 다시 묻는다.
+ * 회사 소개(company-profile.json)를 고친 뒤 다시 판단하게 하려면 이 파일을 지우면 된다.
+ */
+const AI_CACHE_PATH = resolve("cache/ai-judgments.json");
+const aiCache: Record<string, AiState> = (() => {
+  try {
+    return JSON.parse(readFileSync(AI_CACHE_PATH, "utf8")) as Record<string, AiState>;
+  } catch {
+    return {};
+  }
+})();
+for (const [no, ai] of Object.entries(aiCache)) enrichment.set(no, { ...enrichment.get(no), ai });
+function saveAiCache(): void {
+  mkdirSync(dirname(AI_CACHE_PATH), { recursive: true });
+  writeFileSync(AI_CACHE_PATH, JSON.stringify(aiCache, null, 2), "utf8");
+}
+
+function heldOf(appConfig: AppConfig) {
+  return { products: appConfig.heldProducts, industries: appConfig.heldIndustries };
+}
+
+/** 공고 하나에 대해 AI 판단을 돌리고 결과를 enrichment·캐시에 넣는다. */
+async function runAiJudgment(
+  n: NormalizedNotice,
+  facts: { matchReason: string; qualificationSummary: string | null },
+  appConfig: AppConfig
+): Promise<AiState> {
+  const e = enrichment.get(n.noticeNo) ?? {};
+  // 과업지시서는 싱크로율 계산 때 이미 받아둔 첨부 캐시를 그대로 쓴다 (다시 받지 않음).
+  const body = await fetchNoticeBody(n, { maxLength: 6000 }).catch(() => null);
+  const similar = index.findSimilar(n.title, 3, body ? { body: body.text } : {});
+  const result = await judgeFit(
+    {
+      notice: n,
+      matchReason: facts.matchReason,
+      qualificationSummary: facts.qualificationSummary,
+      qualDoc: e.qualDoc ?? null,
+      jointBid: e.jointBid ?? null,
+      taskText: body?.text ?? null,
+      similarPast: similar.top.filter((s) => s.score > 0.02).map((s) => ({ name: s.name, year: s.year, score: s.score })),
+    },
+    heldOf(appConfig)
+  );
+  const ai: AiState = result.ok
+    ? { judgment: result.judgment, model: result.model, at: new Date().toISOString() }
+    : { error: result.error };
+  enrichment.set(n.noticeNo, { ...enrichment.get(n.noticeNo), ai });
+  if (result.ok) {
+    aiCache[n.noticeNo] = ai;
+    saveAiCache();
+  }
+  return ai;
+}
+
+function qualificationSummary(m: MatchedNotice): string | null {
+  const q = m.qualification;
+  if (!q) return null;
+  if (q.status !== "충족") return q.status === "제한없음" ? "면허제한정보에 업종제한 없음" : "면허제한정보 조회 실패";
+  return `충족 — ${q.satisfiedBy.map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
+}
+
+function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
+  if (enrichState.running) return;
+  const bids = matches.filter((m) => m.notice.sourceType === "본공고").map((m) => m.notice);
+  const docTodo = bids.filter((n) => {
     const e = enrichment.get(n.noticeNo);
     return !e || e.jointBid === undefined || e.qualDoc === undefined;
   });
-  if (enrichState.running || todo.length === 0) return;
-  enrichState = { running: true, done: 0, total: todo.length };
-  const held = { products: appConfig.heldProducts, industries: appConfig.heldIndustries };
+  const aiEnabled = isAiConfigured();
+  const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
+  if (!aiEnabled) {
+    for (const m of matches) enrichment.set(m.notice.noticeNo, { ...enrichment.get(m.notice.noticeNo), ai: { error: "AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다" } });
+  }
+  if (docTodo.length === 0 && aiTodo.length === 0) return;
+  enrichState = { running: true, done: 0, total: docTodo.length, aiDone: 0, aiTotal: aiTodo.length, aiEnabled };
+  const held = heldOf(appConfig);
 
   void (async () => {
-    const cookie = await getSessionCookie();
-    for (const n of todo) {
-      const e = enrichment.get(n.noticeNo) ?? {};
-      if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
-      if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
-      enrichment.set(n.noticeNo, e);
-      enrichState.done += 1;
-      await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
+    try {
+      // 1) 공고문·공동수급 — AI가 이 결과를 근거로 쓰므로 먼저 채운다.
+      const cookie = await getSessionCookie();
+      for (const n of docTodo) {
+        const e = enrichment.get(n.noticeNo) ?? {};
+        if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
+        if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
+        enrichment.set(n.noticeNo, e);
+        enrichState.done += 1;
+        await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
+      }
+
+      // 2) AI 판단 — 세 건씩 동시에. 한 건에 10~30초라 순차로 하면 목록 하나에 몇 분이 걸린다.
+      const queue = [...aiTodo];
+      const worker = async () => {
+        for (let m = queue.shift(); m; m = queue.shift()) {
+          await runAiJudgment(m.notice, { matchReason: matchReason(m), qualificationSummary: qualificationSummary(m) }, appConfig);
+          enrichState.aiDone += 1;
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+    } finally {
+      enrichState.running = false;
     }
-    enrichState.running = false;
   })();
 }
 
@@ -343,7 +406,6 @@ function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
   });
 }
 
-const csvCell = (v: string): string => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 async function fetchNotices(lookbackDays: number): Promise<NoticeCache> {
   try {
@@ -351,7 +413,7 @@ async function fetchNotices(lookbackDays: number): Promise<NoticeCache> {
     const appConfig = loadAppConfig();
     const input = await collectReportInput(env, appConfig, { lookbackDays, withDiagnostics: true });
     lastDiagnostics = input.diagnostics ?? null;
-    startEnrichment(input.bid.matches.map((m) => m.notice), appConfig);
+    startEnrichment([...input.bid.matches, ...input.preStandard.matches], appConfig);
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
@@ -599,54 +661,43 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (url.pathname === "/api/verdicts" && req.method === "GET") {
-    json(res, { verdicts });
-    return;
-  }
-
-  if (url.pathname === "/api/verdicts.csv") {
-    const head = ["공고번호", "공고명", "판정", "메모", "판정자", "판정일시", "시스템 처리"];
-    const rows = Object.values(verdicts).map((v) =>
-      [v.noticeNo, v.title, v.verdict, v.note, v.by, v.at, v.systemResult].map((c) => csvCell(String(c ?? ""))).join(",")
-    );
-    // 엑셀이 UTF-8 CSV를 한글 깨짐 없이 열도록 BOM을 붙인다.
-    res.writeHead(200, {
-      "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="verdicts.csv"`,
-    });
-    res.end("\uFEFF" + [head.join(","), ...rows].join("\r\n"));
-    return;
-  }
-
-  if (url.pathname === "/api/verdict" && req.method === "POST") {
-    // application/json만 받는다 — 다른 사이트의 폼이 이 서버로 몰래 POST하는 것을 막는다
-    // (JSON 요청은 브라우저가 사전 확인을 거치므로 다른 출처에서는 막힌다).
+  if (url.pathname === "/api/ai-judge" && req.method === "POST") {
+    // 제외된 공고·추적한 공고처럼 자동 판단 대상이 아닌 공고를 한 건씩 AI에게 묻는다.
+    // application/json만 받는다 — 다른 사이트의 폼이 이 서버로 몰래 POST해 API 비용을 쓰지 못하게.
     if (!(req.headers["content-type"] ?? "").includes("application/json")) {
       res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ error: "application/json만 받습니다." }));
       return;
     }
     readBody(req)
-      .then((raw) => {
-        const b = JSON.parse(raw) as Partial<Verdict> & { clear?: boolean };
-        const noticeNo = String(b.noticeNo ?? "").trim();
-        if (!noticeNo) throw new Error("공고번호가 없습니다");
-        if (b.clear) {
-          delete verdicts[noticeNo];
-        } else {
-          if (b.verdict !== "적절" && b.verdict !== "부적절") throw new Error("판정은 적절/부적절 중 하나여야 합니다");
-          verdicts[noticeNo] = {
-            noticeNo,
-            title: String(b.title ?? "").slice(0, 300),
-            verdict: b.verdict,
-            note: String(b.note ?? "").slice(0, 500),
-            by: String(b.by ?? "").slice(0, 40),
-            at: new Date().toISOString(),
-            systemResult: String(b.systemResult ?? "").slice(0, 200),
-          };
+      .then(async (raw) => {
+        const noticeNo = String((JSON.parse(raw) as { noticeNo?: string }).noticeNo ?? "").trim();
+        const diag = lastDiagnostics;
+        const n = diag?.notices.find((x) => x.noticeNo === noticeNo);
+        if (!n || !diag) throw new Error("먼저 '실제 공고' 탭에서 공고를 불러오세요.");
+        const cached = enrichment.get(noticeNo)?.ai;
+        if (cached?.judgment) return json(res, { ai: cached });
+        if (!isAiConfigured()) throw new Error("AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다");
+
+        const appConfig = diag.context.config;
+        const e = enrichment.get(noticeNo) ?? {};
+        if (n.sourceType === "본공고") {
+          if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
+          if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, await getSessionCookie()).catch(() => null);
+          enrichment.set(noticeNo, e);
         }
-        saveVerdicts();
-        json(res, { ok: true, verdict: verdicts[noticeNo] ?? null });
+        const d = diagnoseNotice(n, diag.context);
+        const step = (name: string) => d.steps.find((x) => x.step === name)?.detail ?? null;
+        const failed = d.steps.find((x) => x.step === d.excludedAt);
+        const ai = await runAiJudgment(
+          n,
+          {
+            matchReason: `${step("키워드·품목")}` + (failed ? ` (규칙 필터에서 '${failed.step}' 단계로 제외됨: ${failed.detail})` : ""),
+            qualificationSummary: step("참가자격"),
+          },
+          appConfig
+        );
+        json(res, { ai });
       })
       .catch((err: unknown) => {
         res.writeHead(400, { "content-type": "application/json; charset=utf-8" });

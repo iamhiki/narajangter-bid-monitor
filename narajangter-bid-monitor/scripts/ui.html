@@ -274,35 +274,37 @@ body {
   background: var(--brand); color: var(--on-brand); border: 1px solid var(--brand);
 }
 
-/* 담당자 판정 버튼 */
-.vctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
-.vctl button {
-  font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; border-radius: var(--radius);
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+/* 마감 임박 */
+.notice.due { border-left-color: var(--urgent); border-left-width: 4px; box-shadow: 0 0 0 1px var(--urgent) inset; }
+.due-strip {
+  margin: -16px -18px 12px; padding: 7px 18px; background: var(--urgent); color: var(--on-urgent);
+  font-size: 13px; letter-spacing: .01em;
 }
-.vctl button:hover { border-color: var(--muted); }
-.vctl .v-ok.on { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
-.vctl .v-bad.on { background: var(--urgent); color: var(--on-urgent); border-color: var(--urgent); font-weight: 600; }
-.vctl .v-clear { color: var(--muted); }
-.vctl .v-note {
-  flex: 1 1 200px; min-width: 0; font: inherit; font-size: 12px; padding: 4px 8px;
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+.due-strip b { font-size: 14px; margin-right: 6px; }
+.due-strip span { opacity: .9; }
+.enrich-meta { margin: -10px 0 14px; color: var(--brand); font-size: 12.5px; min-height: 1em; }
+
+/* AI 판단 */
+.ai { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--muted); background: var(--bg); font-size: 13px; }
+.ai.hi { border-left-color: var(--brand); background: var(--brand-tint); }
+.ai.warn { border-left-color: var(--warn); background: var(--warn-tint); }
+.ai.urgentb { border-left-color: var(--urgent); background: var(--urgent-tint); }
+.ai.off { color: var(--faint); font-size: 12.5px; border-left-color: var(--line); }
+.ai-head { line-height: 1.55; color: var(--ink-strong); }
+.ai-tag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); padding: 1px 5px; margin-right: 6px; background: var(--panel); }
+.ai-verdict { margin-right: 6px; }
+.ai.hi .ai-verdict { color: var(--brand); }
+.ai.warn .ai-verdict { color: var(--warn); }
+.ai.urgentb .ai-verdict { color: var(--urgent); }
+.ai-list { margin: 6px 0 0; padding-left: 18px; color: var(--ink); }
+.ai-list li { margin: 2px 0; line-height: 1.5; }
+.ai-risks { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; align-items: baseline; font-size: 12px; }
+.ai-risks b { color: var(--urgent); margin-right: 2px; }
+.ai-risks span { padding: 1px 7px; border: 1px solid var(--urgent); color: var(--urgent); background: var(--panel); }
+.ai-ask {
+  font: inherit; font-size: 12.5px; padding: 5px 12px; cursor: pointer; border-radius: var(--radius);
+  background: var(--panel); color: var(--brand); border: 1px solid var(--brand); font-weight: 600;
 }
-.vctl .v-by { font-size: 11.5px; color: var(--faint); }
-.judge-bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 18px 0 12px; font-size: 13px; color: var(--muted); }
-.judge-bar input {
-  font: inherit; font-size: 13px; padding: 4px 8px; width: 110px; margin-left: 4px;
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
-}
-.judge-bar a { color: var(--brand); }
-.trace-end { border-bottom: 1px dashed var(--line); margin: 6px 0 4px; }
-.steps { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12.5px; }
-.steps li { padding: 4px 0; color: var(--muted); display: flex; gap: 6px; align-items: baseline; }
-.steps li b { color: var(--ink); font-weight: 600; min-width: 64px; }
-.steps li .mark { width: 14px; flex: none; color: var(--brand); font-weight: 700; }
-.steps li.no .mark { color: var(--urgent); }
-.steps li.first { color: var(--ink-strong); }
-.steps li.first b { color: var(--urgent); }
 
 /* 자격판정 배지 — 커서를 올리거나 탭으로 포커스하면 어떤 보유 자격으로 채웠는지 보여준다 */
 .qual { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: help; outline: none; }
@@ -557,23 +559,20 @@ footer b { color: var(--muted); }
     </div>
     <div class="filters" id="filters"></div>
     <p class="sub" id="liveMeta" style="margin:0 0 18px">조회에 40초쯤 걸립니다. 한 번 불러오면 캐시되니 탭을 오가도 다시 기다리지 않습니다.</p>
+    <p class="sub enrich-meta" id="enrichMeta" role="status"></p>
     <div id="liveResults"></div>
   </section>
 
   <section id="tab-excluded" hidden>
     <p class="sub" style="margin:0 0 14px">
-      키워드·품목으로는 걸렸지만 다른 조건으로 빠진 공고입니다. 놓치면 안 되는 공고가 있으면 <b>✓ 적절</b>을 눌러 주세요 —
-      그 판정이 모여 어떤 필터를 고칠지 정하는 근거가 됩니다. 키워드에 아예 안 걸린 공고는 아래 <b>공고 추적</b>으로 찾습니다.
+      키워드·품목으로는 걸렸지만 다른 조건으로 빠진 공고입니다. <b>AI에게 판단 요청</b>을 누르면 지일에 맞는 공고인지,
+      아니라면 왜 아닌지 알려줍니다 — 필터가 좋은 공고를 잘못 뺐는지 확인하는 데 씁니다. 키워드에 아예 안 걸린 공고는 아래 <b>공고 추적</b>으로 찾습니다.
     </p>
     <form class="search" id="traceForm">
       <input id="traceQ" placeholder="놓친 공고의 공고번호 또는 제목 일부 — 어느 단계에서 왜 빠졌는지 보여줍니다" autocomplete="off">
       <button type="submit">공고 추적</button>
     </form>
     <div id="traceResults"></div>
-    <div class="judge-bar">
-      <span>누적 판정 <b id="vCount">0</b>건</span>
-      <a href="/api/verdicts.csv" download>판정 CSV 내려받기</a>
-    </div>
     <div class="filters" id="exFilters"></div>
     <p class="sub" id="exMeta" style="margin:0 0 18px"></p>
     <div id="exResults"></div>
@@ -1034,7 +1033,7 @@ async function loadNotices(refresh) {
 }
 
 /** 현재 걸려 있는 필터 상태 */
-const filters = { grade: "all", source: "all", method: "all", part: "all" };
+const filters = { grade: "all", source: "all", method: "all", part: "all", ai: "all" };
 let lastItems = [];
 
 function renderNotices(items) {
@@ -1048,7 +1047,8 @@ function applyFilters() {
       (filters.grade === "all" || n.confidence === filters.grade) &&
       (filters.source === "all" || n.sourceType === filters.source) &&
       (filters.method === "all" || n.bidMethodCategory === filters.method) &&
-      (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part)
+      (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part) &&
+      (filters.ai === "all" || (enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict || "미판단") === filters.ai)
   );
 
   // 필터 칩의 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
@@ -1069,6 +1069,11 @@ function applyFilters() {
     chip("part", "all", "참가여부 전체"),
     ...["미지정", ...PART_STATUSES].map((st) =>
       chip("part", st, `${st} ${count((n) => (participation[n.noticeNo]?.status || "미지정") === st)}`)
+    ),
+    `<span class="chip-gap"></span>`,
+    chip("ai", "all", "AI 판단 전체"),
+    ...["적절", "검토필요", "부적절"].map((v) =>
+      chip("ai", v, `AI ${v} ${count((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === v)}`)
     ),
   ].join("");
 
@@ -1130,7 +1135,9 @@ function renderNotice(n) {
     .filter((s) => s.score > 0.02)
     .map((s) => `<a href="#" class="why" data-q="${esc(n.title)}" data-id="${esc(s.id)}">${esc(s.name.slice(0, 34))} <b>${s.score.toFixed(3)}</b></a>`)
     .join(" &nbsp;·&nbsp; ");
-  return `<div class="notice ${band}">
+  const due = dueBadge(n);
+  return `<div class="notice ${band} ${due ? "due" : ""}">
+    ${due}
     <div class="badges">
       <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
       ${scoreBadge}
@@ -1147,8 +1154,78 @@ function renderNotice(n) {
     <div class="meta">규칙 근거: ${esc(n.reason)}</div>
     ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
     ${partBlock(n)}
-    ${vctl(n, "수집됨")}
+    <div data-ai="${esc(n.noticeNo)}">${aiBlock(n, false)}</div>
   </div>`;
+}
+
+// ── 마감 임박 ──────────────────────────────────────────────
+/** 마감까지 남은 날 (한국 달력 기준). 형식을 모르면 null. 서버 deadline.ts의 daysUntilDeadline과 같은 셈. */
+function daysLeft(deadline) {
+  const m = /^(\d{4})[-./]?(\d{2})[-./]?(\d{2})(?:[ T]?(\d{2}):?(\d{2}))?/.exec(String(deadline || "").trim());
+  if (!m) return null;
+  const at = Date.UTC(+m[1], +m[2] - 1, +m[3], (m[4] === undefined ? 23 : +m[4]) - 9, m[5] === undefined ? 59 : +m[5]);
+  if (at < Date.now()) return -1;
+  const kstDay = (t) => Math.floor((t + 9 * 3600000) / 86400000);
+  return kstDay(at) - kstDay(Date.now());
+}
+
+/** 마감 3일 이내면 카드 맨 위에 띠를 붙인다. 사전규격은 입찰 마감이 아니라 의견 마감이라 뺀다. */
+function dueBadge(n) {
+  if (n.sourceType !== "본공고") return "";
+  const d = daysLeft(n.deadline);
+  if (d === null || d < 0 || d > 3) return "";
+  const when = String(n.deadline).slice(5, 16).replace("-", "/");
+  const label = d === 0 ? "오늘 마감" : `마감 D-${d}`;
+  return `<div class="due-strip">🔥 <b>${label}</b> <span>${esc(when)} 까지</span></div>`;
+}
+
+// ── AI 적합성 판단 ─────────────────────────────────────────
+const AI_TONE = { 적절: "hi", 검토필요: "warn", 부적절: "urgentb" };
+
+/**
+ * AI 판단 패널. 결론(적절/검토필요/부적절)보다 이유가 먼저 눈에 들어오게 한 줄 요약을 크게,
+ * 근거·걸림돌은 목록으로 둔다. onDemand면(제외된 공고·추적) 판단이 없을 때 요청 버튼을 띄운다.
+ */
+function aiBlock(n, onDemand) {
+  const ai = enrich.byNo[n.noticeNo]?.ai;
+  if (ai?.judgment) {
+    const j = ai.judgment;
+    return `<div class="ai ${AI_TONE[j.verdict] || ""}">
+      <div class="ai-head"><span class="ai-tag">AI 판단</span><b class="ai-verdict">${esc(j.verdict)}</b> ${esc(j.summary)}</div>
+      ${j.reasons.length ? `<ul class="ai-list">${j.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+      ${j.risks.length ? `<div class="ai-risks"><b>걸림돌</b> ${j.risks.map((r) => `<span>${esc(r)}</span>`).join("")}</div>` : ""}
+    </div>`;
+  }
+  if (ai?.error && !ai.pending) return `<div class="ai off"><span class="ai-tag">AI 판단</span> ${esc(ai.error)}${onDemand && enrich.aiEnabled ? ` <button type="button" class="linkish" data-ai-ask="${esc(n.noticeNo)}">다시 요청</button>` : ""}</div>`;
+  if (ai?.pending) return `<div class="ai off"><span class="ai-tag">AI 판단</span> 판단 중… (10~30초)</div>`;
+  if (onDemand) return `<div class="ai off"><button type="button" class="ai-ask" data-ai-ask="${esc(n.noticeNo)}">AI에게 판단 요청</button></div>`;
+  return enrich.running ? `<div class="ai off"><span class="ai-tag">AI 판단</span> 차례를 기다리는 중…</div>` : "";
+}
+
+async function askAi(btn) {
+  const no = btn.dataset.aiAsk;
+  enrich.byNo[no] = { ...(enrich.byNo[no] || {}), ai: { pending: true } };
+  refreshCards("enrich");
+  try {
+    const res = await fetch("/api/ai-judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ noticeNo: no }) });
+    const data = await res.json();
+    enrich.byNo[no] = { ...(enrich.byNo[no] || {}), ai: data.error ? { error: data.error } : data.ai };
+  } catch (err) {
+    enrich.byNo[no] = { ...(enrich.byNo[no] || {}), ai: { error: `요청 실패 — ${err.message}` } };
+  }
+  refreshCards("enrich");
+}
+
+function renderEnrichMeta() {
+  const e = enrich;
+  if (!e.running) {
+    $("enrichMeta").textContent = e.aiEnabled === false ? "AI 판단 꺼짐 — 서버 PC의 .env에 ANTHROPIC_API_KEY를 넣으면 켜집니다." : "";
+    return;
+  }
+  const parts = [];
+  if (e.total) parts.push(`공고문·공동수급 확인 ${e.done}/${e.total}`);
+  if (e.aiTotal) parts.push(`AI 판단 ${e.aiDone}/${e.aiTotal}`);
+  $("enrichMeta").textContent = parts.join(" · ") + " — 끝나는 대로 카드에 채워집니다";
 }
 
 // ── 부가 정보: 공고문 참가자격 · 공동수급 (서버가 뒤에서 채운다) ──────────────
@@ -1164,6 +1241,7 @@ async function pollEnrich() {
   }
   refreshCards("enrich");
   if (enrich.running) enrichTimer = setTimeout(pollEnrich, 3000);
+  else if (filters.ai !== "all") applyFilters(); // AI 필터가 걸려 있을 때만 — 전체를 다시 그리면 쓰던 대화가 날아간다
 }
 
 /** 카드의 두 번째 배지 줄 — 참가여부 · 자격 · 공고문 경고 · 공동수급 */
@@ -1334,6 +1412,14 @@ function refreshCards(what, force = false) {
       if (n) el.innerHTML = enrichBadges(n);
     });
   }
+  if (what === "enrich") {
+    // 제외된 공고·추적 카드는 lastItems에 없으므로 data-ai 칸이 가진 공고번호로 최소 정보를 만든다
+    document.querySelectorAll("[data-ai]").forEach((el) => {
+      const n = byNo.get(el.dataset.ai) || { noticeNo: el.dataset.ai };
+      el.innerHTML = aiBlock(n, !byNo.has(el.dataset.ai));
+    });
+    renderEnrichMeta();
+  }
   if (what === "part") {
     document.querySelectorAll("[data-part]").forEach((el) => {
       const n = byNo.get(el.dataset.part);
@@ -1345,72 +1431,6 @@ function refreshCards(what, force = false) {
       if (fresh && open) fresh.querySelector("details").open = true;
       if (fresh && draft && !force) fresh.querySelector(".talk-form input").value = draft;
     });
-  }
-}
-
-// ── 담당자 판정 (② 수집 정제 · ③ 미수집 원인) ─────────────────────
-let verdicts = {};
-
-async function loadVerdicts() {
-  try {
-    verdicts = (await getJson("/api/verdicts")).verdicts || {};
-  } catch (e) {
-    verdicts = {};
-  }
-  $("vCount").textContent = Object.keys(verdicts).length;
-}
-
-/**
- * 적절/부적절 판정 버튼. systemResult는 판정할 때 시스템이 이 공고를 어떻게 처리했는지다 —
- * "수집됨"인데 부적절이면 ② 정제 대상, "제외됨"인데 적절이면 ③ 놓친 공고다.
- */
-function vctl(n, systemResult) {
-  const v = verdicts[n.noticeNo];
-  const collected = systemResult === "수집됨";
-  const okTitle = collected ? "제대로 수집된 공고" : "놓치면 안 되는 공고 — 필터가 잘못 뺐다";
-  const badTitle = collected ? "수집하면 안 되는 공고 — 필터가 잘못 넣었다" : "빠진 게 맞는 공고";
-  const attrs = `data-no="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-sys="${esc(systemResult)}"`;
-  return `<div class="vctl" ${attrs}>
-    <button type="button" class="v-ok ${v?.verdict === "적절" ? "on" : ""}" data-v="적절" title="${esc(okTitle)}">✓ 적절</button>
-    <button type="button" class="v-bad ${v?.verdict === "부적절" ? "on" : ""}" data-v="부적절" title="${esc(badTitle)}">✗ 부적절</button>
-    <input class="v-note" placeholder="메모 (선택) — 예: 전시관 설계라 우리 업무" value="${esc(v?.note || "")}" maxlength="500">
-    ${v ? `<button type="button" class="v-clear" data-v="clear" title="판정 취소">취소</button><span class="v-by">${esc(v.by || "이름 없음")} · ${esc(new Date(v.at).toLocaleDateString("ko-KR"))}</span>` : ""}
-  </div>`;
-}
-
-async function saveVerdict(btn) {
-  const box = btn.closest(".vctl");
-  const clear = btn.dataset.v === "clear";
-  const by = $("judge").value.trim();
-  if (!clear && !by) {
-    $("judge").focus();
-    alert("위쪽 '내 이름' 칸에 이름을 먼저 입력해 주세요.");
-    return;
-  }
-  const body = {
-    noticeNo: box.dataset.no,
-    title: box.dataset.title,
-    systemResult: box.dataset.sys,
-    verdict: clear ? undefined : btn.dataset.v,
-    note: box.querySelector(".v-note").value.trim(),
-    by,
-    clear,
-  };
-  btn.disabled = true;
-  try {
-    const res = await fetch("/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-    if (data.verdict) verdicts[body.noticeNo] = data.verdict;
-    else delete verdicts[body.noticeNo];
-    $("vCount").textContent = Object.keys(verdicts).length;
-    // 같은 공고가 여러 탭에 떠 있을 수 있으니 전부 갱신한다
-    document.querySelectorAll(".vctl").forEach((el) => {
-      if (el.dataset.no === body.noticeNo) el.outerHTML = vctl({ noticeNo: el.dataset.no, title: el.dataset.title }, el.dataset.sys);
-    });
-  } catch (err) {
-    alert(`판정 저장 실패 — ${err.message}`);
-    btn.disabled = false;
   }
 }
 
@@ -1443,10 +1463,10 @@ function renderExcluded() {
     `<button type="button" class="chip ${exStage === "all" ? "on" : ""}" data-stage="all">전체 ${d.items.length}</button>`,
     ...stages.map(([s, c]) => `<button type="button" class="chip ${exStage === s ? "on" : ""}" data-stage="${esc(s)}">${esc(s)} ${c}</button>`),
   ].join("");
-  const judged = d.items.filter((n) => verdicts[n.noticeNo]?.verdict === "적절").length;
+  const aiFit = d.items.filter((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === "적절").length;
   $("exMeta").innerHTML =
     `최근 ${d.lookbackDays}일 수집 공고 ${d.total.toLocaleString("ko-KR")}건 중 키워드·품목 후보였다가 빠진 공고 <b>${d.items.length}건</b>` +
-    (judged ? ` · 놓치면 안 된다고 판정 <b>${judged}건</b>` : "");
+    (aiFit ? ` · AI가 적절하다고 본 공고 <b>${aiFit}건</b> — 필터가 놓친 공고일 수 있습니다` : "");
   const list = d.items.filter((n) => exStage === "all" || n.excludedAt === exStage);
   $("exResults").innerHTML = list.length
     ? list.map((n) => renderDiagnosed(n)).join("")
@@ -1461,7 +1481,6 @@ function renderSteps(steps, excludedAt) {
 
 function renderDiagnosed(n, openSteps = false) {
   const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
-  const result = n.excludedAt ? "제외됨" : "수집됨";
   return `<div class="notice ${n.excludedAt ? "edge" : "strong"}">
     <div class="badges">
       ${n.excludedAt ? `<span class="badge warn">빠진 단계 · ${esc(n.excludedAt)}</span>` : `<span class="badge hi">수집됨</span>`}
@@ -1472,7 +1491,7 @@ function renderDiagnosed(n, openSteps = false) {
     <div class="meta">${esc(n.institution || "기관 미상")}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · <code>${esc(n.noticeNo)}</code></div>
     ${n.excludedDetail ? `<div class="meta">사유: <b>${esc(n.excludedDetail)}</b></div>` : ""}
     <details class="body" ${openSteps ? "open" : ""}><summary>단계별 판정 보기</summary>${renderSteps(n.steps, n.excludedAt)}</details>
-    ${vctl(n, result)}
+    <div data-ai="${esc(n.noticeNo)}">${aiBlock(n, true)}</div>
   </div>`;
 }
 
@@ -1608,8 +1627,8 @@ $("exFilters").onclick = (ev) => {
 try { $("judge").value = localStorage.getItem("ui-judge") || ""; } catch (e) { /* 무시 */ }
 $("judge").onchange = () => { try { localStorage.setItem("ui-judge", $("judge").value.trim()); } catch (e) { /* 무시 */ } };
 document.addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-v]");
-  if (btn) saveVerdict(btn);
+  const ask = ev.target.closest("[data-ai-ask]");
+  if (ask) askAi(ask);
 
   const st = ev.target.closest("[data-pstatus]");
   if (st) {
@@ -1658,7 +1677,6 @@ document.addEventListener("submit", (ev) => {
 // 다른 사람이 바꾼 참가여부·대화를 20초마다 받아온다
 loadParticipation();
 setInterval(loadParticipation, 20000);
-loadVerdicts();
 
 boot();
 </script>
