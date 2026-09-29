@@ -282,12 +282,12 @@ body {
 
 /* 마감 임박 */
 .notice.due { border-left-color: var(--urgent); border-left-width: 4px; }
-.due {
+.due-tag {
   font-family: var(--head); font-size: 12px; font-weight: 700; padding: 3px 10px; letter-spacing: .02em;
   background: var(--panel); color: var(--urgent); border: 1px solid var(--urgent); white-space: nowrap;
 }
-.due.today { background: var(--urgent); color: var(--on-urgent); }
-.due time { font-family: var(--body); font-weight: 500; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.due-tag.today { background: var(--urgent); color: var(--on-urgent); }
+.due-tag time { font-family: var(--body); font-weight: 500; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .enrich-meta { margin: -10px 0 14px; color: var(--brand); font-size: 12.5px; min-height: 1em; }
 
 /* AI 판단 */
@@ -295,7 +295,7 @@ body {
 .ai.hi { border-left-color: var(--brand); background: var(--brand-tint); }
 .ai.warn { border-left-color: var(--warn); background: var(--warn-tint); }
 .ai.urgentb { border-left-color: var(--urgent); background: var(--urgent-tint); }
-.ai.off { color: var(--faint); font-size: 12.5px; border-left-color: var(--line); }
+.ai.off { color: var(--faint); font-size: 12.5px; background: none; border: 0; padding: 0; margin-top: 12px; }
 .ai-head { line-height: 1.55; color: var(--ink-strong); }
 .ai-tag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); padding: 1px 5px; margin-right: 6px; background: var(--panel); }
 .ai-verdict { margin-right: 6px; }
@@ -343,6 +343,16 @@ body {
 .simlist a.why { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
 .simlist a.why:hover { color: var(--brand); border-bottom-color: var(--brand); }
 .simlist b { color: var(--ink-strong); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sim-label { display: block; margin-bottom: 4px; }
+.sim-label span { color: var(--faint); }
+.sim-rows { list-style: none; margin: 0; padding: 0; }
+.sim-rows li { display: flex; gap: 10px; align-items: baseline; padding: 2px 0; }
+/* 이름이 길면 줄을 넘기지 않고 말줄임 — 전체 이름은 마우스를 올리면(title) 보인다 */
+.sim-rows a.why { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-rows b { flex: none; margin-left: auto; }
+/* 카드 안 어디든 띄어쓰기 없는 긴 문자열(과거사업명·낙찰방법 원문 등)이 카드 밖으로 밀고 나가지 않게.
+   keep-all(한국어 어절 단위 줄바꿈)은 그대로 두고, 한 어절이 줄보다 길 때만 그 안에서 끊는다. */
+.card, .notice { min-width: 0; overflow-wrap: anywhere; }
 
 details.body { margin-top: 10px; }
 details.body summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
@@ -1143,8 +1153,8 @@ function renderNotice(n) {
     : esc(n.title);
   const sims = n.similar
     .filter((s) => s.score > 0.02)
-    .map((s) => `<a href="#" class="why" data-q="${esc(n.title)}" data-id="${esc(s.id)}">${esc(s.name.slice(0, 34))} <b>${s.score.toFixed(3)}</b></a>`)
-    .join(" &nbsp;·&nbsp; ");
+    .map((s) => `<li><a href="#" class="why" data-q="${esc(n.title)}" data-id="${esc(s.id)}" title="${esc(s.name)}">${esc(s.name)}</a><b>${s.score.toFixed(3)}</b></li>`)
+    .join("");
   const due = dueBadge(n);
   return `<div class="notice ${band} ${due ? "due" : ""}">
     <div class="badges">
@@ -1162,7 +1172,7 @@ function renderNotice(n) {
       ${n.deadline ? " · 마감 " + esc(n.deadline) : ""}
       ${n.bidMethod ? " · " + esc(n.bidMethod.slice(0, 24)) : ""}</div>
     <div class="meta">규칙 근거: ${esc(n.reason)}</div>
-    ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
+    ${sims ? `<div class="simlist"><span class="sim-label">유사 과거사업 <span>(클릭하면 계산 근거)</span></span><ol class="sim-rows">${sims}</ol></div>` : ""}
     ${partBlock(n)}
     <div data-ai="${esc(n.noticeNo)}">${aiBlock(n, false)}</div>
   </div>`;
@@ -1186,8 +1196,8 @@ function dueBadge(n) {
   if (d === null || d < 0 || d > 3) return "";
   const when = String(n.deadline).slice(5, 16).replace("-", "/");
   return d === 0
-    ? `<span class="due today">오늘 마감<time>${esc(when.slice(6))}</time></span>`
-    : `<span class="due">마감 D-${d}<time>${esc(when)}</time></span>`;
+    ? `<span class="due-tag today">오늘 마감<time>${esc(when.slice(6))}</time></span>`
+    : `<span class="due-tag">마감 D-${d}<time>${esc(when)}</time></span>`;
 }
 
 // ── AI 적합성 판단 ─────────────────────────────────────────
