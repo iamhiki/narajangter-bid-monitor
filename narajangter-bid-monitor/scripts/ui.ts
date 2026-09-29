@@ -169,6 +169,20 @@ function matchReason(m: MatchedNotice): string {
   return parts.length > 0 ? parts.join(" / ") : "(근거 없음)";
 }
 
+/**
+ * 수요기관 — 실제로 사업을 발주한 곳. 입찰공고의 institution은 공고기관(ntceInsttNm)이라
+ * 조달청 대행 공고는 전부 "조달청"으로 나온다. 담당자가 알고 싶은 건 수요기관이다.
+ * 입찰공고 dminsttNm, 사전규격 rlDminsttNm(실수요기관).
+ */
+function demandInstitutionOf(n: NormalizedNotice): string | null {
+  const raw = (n.raw ?? {}) as Record<string, unknown>;
+  for (const key of ["dminsttNm", "rlDminsttNm", "dmndInsttNm"]) {
+    const v = raw[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 function decorate(m: MatchedNotice): unknown {
   const n = m.notice;
   // 여기가 ④단계를 실제로 붙여보는 자리다. 파이프라인 본체는 아직 건드리지 않았고,
@@ -178,6 +192,7 @@ function decorate(m: MatchedNotice): unknown {
     noticeNo: n.noticeNo,
     title: n.title,
     institution: n.institution,
+    demandInstitution: demandInstitutionOf(n),
     businessType: n.businessType,
     sourceType: n.sourceType,
     deadline: n.deadline,

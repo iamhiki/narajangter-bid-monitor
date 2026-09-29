@@ -213,6 +213,17 @@ body {
 .name { font-family: var(--head); font-weight: 500; color: var(--ink-strong); }
 .meta { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
 
+/* 공고 카드 제목 아래: 마감·수요기관 */
+.facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 20px;
+  margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft);
+}
+.facts div { min-width: 0; }
+.facts dt { font-size: 11px; color: var(--faint); margin-bottom: 2px; }
+.facts dd { margin: 0; font-size: 13px; color: var(--ink-strong); font-variant-numeric: tabular-nums; }
+.facts .left { font-size: 11.5px; color: var(--muted); margin-left: 4px; }
+.facts .left.soon { color: var(--urgent); font-weight: 600; }
+
 
 
 
@@ -358,17 +369,17 @@ body {
 .qtip li:first-child { border-top: 0; padding-top: 0; }
 .qtip p { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); }
 
-.simlist { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
 
 
-.simlist b { color: var(--ink-strong); font-weight: 600; font-variant-numeric: tabular-nums; }
-.sim-label { display: block; margin-bottom: 4px; }
-.sim-label span { color: var(--faint); }
-.sim-rows { list-style: none; margin: 0; padding: 0; }
-.sim-rows li { display: flex; gap: 10px; align-items: baseline; padding: 2px 0; }
 
-.sim-rows b { flex: none; margin-left: auto; font-weight: 400; color: var(--faint); }
-.sim-rows li > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+
+
+
+
+
+
+
+
 /* 카드 안 어디든 띄어쓰기 없는 긴 문자열(과거사업명·낙찰방법 원문 등)이 카드 밖으로 밀고 나가지 않게.
    keep-all(한국어 어절 단위 줄바꿈)은 그대로 두고, 한 어절이 줄보다 길 때만 그 안에서 끊는다. */
 .card, .notice { min-width: 0; overflow-wrap: anywhere; }
@@ -853,10 +864,6 @@ function renderNotice(n) {
   const title = n.detailUrl
     ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>`
     : esc(n.title);
-  const sims = n.similar
-    .filter((s) => s.score > 0.02)
-    .map((s) => `<li><span title="${esc(s.name)}">${esc(s.name)}</span><b>${s.year}년</b></li>`)
-    .join("");
   const due = dueBadge(n);
   return `<div class="notice ${band} ${due ? "due" : ""}">
     <div class="card-head">
@@ -873,14 +880,28 @@ function renderNotice(n) {
       ${scoreBox}
     </div>
     <h3>${title}</h3>
-    <div class="meta">${esc(n.institution || "기관 미상")}
-      ${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}
-      ${n.deadline ? " · 마감 " + esc(n.deadline) : ""}
-      ${n.bidMethod ? " · " + esc(n.bidMethod.slice(0, 24)) : ""}</div>
-    ${sims ? `<div class="simlist"><span class="sim-label">비슷한 과거 수행사업</span><ol class="sim-rows">${sims}</ol></div>` : ""}
+    ${factsBlock(n)}
     ${partBlock(n)}
     <div data-ai="${esc(n.noticeNo)}">${aiBlock(n, false)}</div>
   </div>`;
+}
+
+/**
+ * 제목 아래 핵심 정보 — 언제까지, 누가 발주했나. 공고기관(조달청 등)이 수요기관과 다르면 따로 적는다.
+ * 사전규격의 마감은 입찰 마감이 아니라 의견 등록 마감이다.
+ */
+function factsBlock(n) {
+  const d = daysLeft(n.deadline);
+  const left = d === null ? "" : d < 0 ? "마감됨" : d === 0 ? "오늘" : `D-${d}`;
+  const when = n.deadline ? String(n.deadline).slice(0, 16) : "공고에 없음";
+  const demand = n.demandInstitution || n.institution || "기관 미상";
+  const facts = [
+    [n.sourceType === "사전규격" ? "의견 마감" : "입찰 마감", `${esc(when)}${left ? ` <span class="left ${d !== null && d >= 0 && d <= 3 ? "soon" : ""}">${left}</span>` : ""}`],
+    ["수요기관", esc(demand)],
+    n.demandInstitution && n.institution && n.demandInstitution !== n.institution ? ["공고기관", esc(n.institution)] : null,
+    n.budgetAmount ? ["사업금액", won(n.budgetAmount)] : null,
+  ].filter(Boolean);
+  return `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
 }
 
 // ── 마감 임박 ──────────────────────────────────────────────
