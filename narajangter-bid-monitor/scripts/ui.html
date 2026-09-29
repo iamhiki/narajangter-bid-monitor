@@ -1318,11 +1318,12 @@ function qualBadge(n, doc) {
         `<p>${where} 첨부에서도 참가자격 항목을 찾지 못했습니다. 원문을 직접 확인하세요.</p>${doc ? docSection : ""}`
       )}</span>`;
     }
-    if (doc.sectionFound === false) {
-      // 참가자격 문구는 없지만 공고가 분류된 세부품명은 안다
+    if (doc.sectionFound === false || (!doc.requirements.length && (doc.classifiedItems || []).length)) {
+      // 참가자격 문구가 없거나, 있어도 코드 없이 "나라장터에 등록한 자"뿐이면 공고가 분류된 세부품명으로 본다
       const items = doc.classifiedItems;
       const allHeld = items.every((i) => i.held);
-      return `<span class="badge qual ${allHeld ? "ok" : "fix"}" tabindex="0"><span class="ico" aria-hidden="true">${allHeld ? "✓" : "!"}</span>분류 품목 ${items.filter((i) => i.held).length}/${items.length}${tip(
+      const miss = items.filter((i) => !i.held).length;
+      return `<span class="badge qual ${allHeld ? "ok" : "fix"}" tabindex="0"><span class="ico" aria-hidden="true">${allHeld ? "✓" : "!"}</span>${allHeld ? `분류 품목 보유 ${items.length}/${items.length}` : `분류 품목 미등록 ${miss}건`}${tip(
         `${head} → 분류 품목으로 확인`,
         docSection
       )}</span>`;
@@ -1425,9 +1426,22 @@ function docTipBody(doc) {
         .map((i) => `<span class="${i.held ? "" : "miss"}">${i.held ? "✓" : "✗"} ${esc(i.name)}(${esc(i.code)})</span>${!i.held && (doc.classes || {})[i.code] ? classPath(doc.classes[i.code]) : ""}`)
         .join(", ")}</p>`
     : "";
+  // 분류 품목이 미보유일 때 할 일 — 코드 제한이 없는 공고는 보통 그 세부품명으로 입찰참가자격을 등록해 두면 된다
+  const classFix = cls.some((i) => !i.held)
+    ? `<span class="fixline">→ 나라장터 입찰참가자격 등록에 이 세부품명을 추가하면 참가할 수 있을 가능성이 큽니다 — 본공고의 참가자격 문구로 최종 확인하세요</span>`
+    : "";
   const linked = doc.linkedBidNo ? `<p>본공고가 이미 나왔습니다: <b>${esc(doc.linkedBidNo)}</b> — 본공고 쪽 판정을 기준으로 보세요.</p>` : "";
   if (doc.sectionFound === false) {
-    return classified + linked + "<p>첨부에서 참가자격 항목은 찾지 못해, 공고가 분류된 품목만 보여줍니다.</p>";
+    return classified + classFix + linked + "<p>첨부에서 참가자격 항목은 찾지 못해, 공고가 분류된 품목만 보여줍니다.</p>";
+  }
+  if (!doc.requirements.length && cls.length) {
+    return (
+      classified +
+      classFix +
+      linked +
+      `<p>참가자격에 업종코드·세부품명번호 제한이 없고 "나라장터에 입찰참가자격을 등록한 자"만 요구합니다. 그래서 공고가 분류된 세부품명으로 판단했습니다.</p>` +
+      `<p>출처: ${esc(doc.sourceFile)}</p>`
+    );
   }
   const rows = doc.requirements.length
     ? `<ul>${doc.requirements
