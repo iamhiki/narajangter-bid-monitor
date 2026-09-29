@@ -224,6 +224,20 @@ body {
 .badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
 .badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
 
+/* 공고 카드 윗부분: 왼쪽 분류·자격 배지, 오른쪽 싱크로율 */
+.card-head { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; }
+.card-tags { flex: 1 1 auto; min-width: 0; }
+.card-score {
+  flex: 0 0 auto; text-align: right; line-height: 1.1; padding-left: 12px;
+  border-left: 1px solid var(--line-soft); font-variant-numeric: tabular-nums;
+}
+.card-score b { display: block; font-family: var(--head); font-size: 24px; font-weight: 700; color: var(--muted); letter-spacing: -.01em; }
+.card-score b i { font-style: normal; font-size: 13px; font-weight: 600; margin-left: 1px; }
+.card-score small { display: block; font-size: 11px; color: var(--faint); margin-top: 2px; }
+.card-score small.raw { font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; }
+.card-score.hi b { color: var(--brand); }
+.card-score.edge b, .card-score.edge small:not(.raw) { color: var(--warn); }
+
 /* 내 이름 */
 .me-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; font-size: 12.5px; color: var(--faint); }
 .me-bar label { color: var(--ink); font-weight: 600; font-size: 13px; }
@@ -1139,13 +1153,13 @@ function renderNotice(n) {
   const pct = Math.round(n.maxScore * 100);
   // 테스트 단계라 보정된 싱크로율과 원점수를 함께 보여준다 —
   // 눈금이 맞는지 확인하려면 둘을 나란히 봐야 한다.
-  const scoreBadge =
-    (n.maxScore >= HIGH
-      ? `<span class="badge hi">싱크로율 ${pct}%</span>`
-      : n.maxScore >= LOW
-        ? `<span class="badge warn">경계선 ${pct}%</span>`
-        : `<span class="badge">싱크로율 ${pct}%</span>`) +
-    `<span class="badge raw" title="보정 전 원점수 · 기준 ${esc(n.basis || "제목")}">원 ${(n.rawScore ?? 0).toFixed(3)}</span>`;
+  // 점수는 카드 오른쪽 위에 따로 — 배지 줄에 섞으면 정보가 전부 왼쪽에 몰린다
+  const tone = n.maxScore >= HIGH ? "hi" : n.maxScore >= LOW ? "edge" : "";
+  const scoreBox = `<div class="card-score ${tone}" title="보정 전 원점수 · 기준 ${esc(n.basis || "제목")}">
+      <b>${pct}<i>%</i></b>
+      <small>${tone === "edge" ? "경계선" : "싱크로율"}</small>
+      <small class="raw">원 ${(n.rawScore ?? 0).toFixed(3)}</small>
+    </div>`;
   const title = n.detailUrl
     ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>`
     : esc(n.title);
@@ -1155,15 +1169,19 @@ function renderNotice(n) {
     .join("");
   const due = dueBadge(n);
   return `<div class="notice ${band} ${due ? "due" : ""}">
-    <div class="badges">
-      ${due}
-      <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
-      ${scoreBadge}
-      <span class="badge">${esc(n.businessType)}</span>
-      ${n.bidMethodCategory ? `<span class="badge" title="${esc(n.bidMethod || "")}">${esc(n.bidMethodCategory)}</span>` : ""}
-      ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
+    <div class="card-head">
+      <div class="card-tags">
+        <div class="badges">
+          ${due}
+          <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
+          <span class="badge">${esc(n.businessType)}</span>
+          ${n.bidMethodCategory ? `<span class="badge" title="${esc(n.bidMethod || "")}">${esc(n.bidMethodCategory)}</span>` : ""}
+          ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
+        </div>
+        <div class="badges" data-enrich="${esc(n.noticeNo)}">${enrichBadges(n)}</div>
+      </div>
+      ${scoreBox}
     </div>
-    <div class="badges" data-enrich="${esc(n.noticeNo)}">${enrichBadges(n)}</div>
     <h3>${title}</h3>
     <div class="meta">${esc(n.institution || "기관 미상")}
       ${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}
