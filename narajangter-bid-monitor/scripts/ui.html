@@ -348,6 +348,9 @@ body {
   font-size: 12.5px; font-weight: 400; letter-spacing: 0; line-height: 1.5; cursor: default;
 }
 .qual:hover .qtip, .qual:focus .qtip { display: block; }
+/* 화면 아래쪽이 모자라면 배지 위로 띄운다 (placeTip). 그래도 길면 팝업 안에서 스크롤 */
+.qtip { max-height: min(420px, 70vh); overflow-y: auto; }
+.qtip.up { top: auto; bottom: calc(100% + 6px); }
 .qtip h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--brand); }
 .qtip ul { list-style: none; margin: 0; padding: 0; }
 .qtip li { padding: 6px 0; border-top: 1px solid var(--line-soft); color: var(--ink-strong); }
@@ -1363,9 +1366,16 @@ function qualBadge(n, doc) {
     byGroup.set(s.groupNo, list);
   }
   const label = (s) => `${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}`;
-  const items = [...byGroup.entries()]
-    .map(([no, list], i) => `<li>${q.totalGroups > 1 ? `<span class="grp">조건 ${i + 1}</span> ` : ""}${list.map(label).join(" 또는 ")}</li>`)
-    .join("");
+  const keyOf = (s) => s.code || s.name;
+  // 모든 조건에 들어 있는 자격(예: 1469가 조건 4개 모두에)은 "모든 조건" 한 줄로 한 번만 — 조건마다 반복하면 팝업이 길어진다
+  const lists = [...byGroup.values()];
+  const common = lists.length > 1 ? lists[0].filter((s) => lists.every((l) => l.some((x) => keyOf(x) === keyOf(s)))) : [];
+  const commonKeys = new Set(common.map(keyOf));
+  const rows = lists
+    .map((list, i) => [i, list.filter((s) => !commonKeys.has(keyOf(s)))])
+    .filter(([, rest]) => rest.length)
+    .map(([i, rest]) => `<li>${q.totalGroups > 1 ? `<span class="grp">조건 ${i + 1}</span> ` : ""}${rest.map(label).join(" 또는 ")}</li>`);
+  const items = (common.length ? `<li><span class="grp">모든 조건</span> ${common.map(label).join(" 또는 ")}</li>` : "") + rows.join("");
   // 충족 팝업은 충족한 자격만. 공고문 쪽은 걸리는 게 있을 때만(미보유 요건·지역제한 등) 덧붙인다
   const issues = doc ? docIssues(doc) : "";
   return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.totalGroups}/${q.totalGroups}${tip(
@@ -1691,6 +1701,21 @@ $("filters").onclick = (ev) => {
   filters[btn.dataset.group] = btn.dataset.value;
   applyFilters();
 };
+/** 자격 팝업을 열 때 아래 공간이 모자라고 위가 더 넓으면 위로 띄운다 — 화면 하단 카드에서 팝업이 잘렸다 */
+function placeTip(ev) {
+  const badge = ev.target.closest?.(".qual");
+  const tip = badge?.querySelector(".qtip");
+  if (!tip || badge.contains(ev.relatedTarget)) return; // 배지 안에서 움직일 때마다 다시 재면 깜빡인다
+  tip.classList.remove("up");
+  requestAnimationFrame(() => {
+    const b = badge.getBoundingClientRect();
+    const below = innerHeight - b.bottom;
+    if (tip.offsetHeight + 12 > below && b.top > below) tip.classList.add("up");
+  });
+}
+document.addEventListener("mouseover", placeTip);
+document.addEventListener("focusin", placeTip);
+
 $("load").onclick = () => loadNotices(false);
 $("refresh").onclick = () => loadNotices(true);
 $("form").onsubmit = (e) => { e.preventDefault(); search(); };
