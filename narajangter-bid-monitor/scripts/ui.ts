@@ -491,7 +491,8 @@ const server = createServer((req, res) => {
 
   if (url.pathname === "/") {
     try {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // 화면 파일을 고치면 새로고침만으로 반영돼야 한다 — 캐시 헤더가 없으면 브라우저가 옛 화면을 쥐고 있다
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(readFileSync(HTML_PATH, "utf8"));
     } catch {
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
