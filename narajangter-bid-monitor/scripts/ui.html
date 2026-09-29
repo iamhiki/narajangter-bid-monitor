@@ -1351,15 +1351,38 @@ function qualBadge(n, doc) {
     .sort((a, b) => b.groups.size - a.groups.size)
     .map((s) => `<li>${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}${q.totalGroups > 1 ? ` <span class="grp">조건 ${s.groups.size}/${q.totalGroups}</span>` : ""}</li>`)
     .join("");
-  const structure =
-    q.totalGroups > 1
-      ? `<p>이 공고는 자격조건이 <b>${q.totalGroups}개</b>이고 모두 채워야 합니다. 조건마다 허용 업종 중 하나만 있으면 되며, 지일은 아래 보유 자격으로 ${q.totalGroups}개를 모두 채웁니다.</p>`
-      : "";
+  // 충족 팝업은 충족한 자격만. 공고문 쪽은 걸리는 게 있을 때만(미보유 요건·지역제한 등) 덧붙인다
+  const issues = doc ? docIssues(doc) : "";
   return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.totalGroups}/${q.totalGroups}${tip(
-    `충족에 쓰인 보유 자격 ${uniq.size}개`,
-    `<ul>${items}</ul>${structure}<p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>` +
-      (doc ? `<h4 class="sub-h">공고문 참가자격</h4>${docSection}` : "")
+    `충족한 자격 ${uniq.size}개`,
+    `<ul>${items}</ul>` + (issues ? `<h4 class="sub-h">공고문에서 확인할 것</h4>${issues}` : "")
   )}</span>`;
+}
+
+/** 공고문 판독 결과 중 참가에 걸리는 것만 — 미보유 요건, 미보유 분류 품목, 지명경쟁·지역제한 */
+function docIssues(doc) {
+  if (doc.sectionFound === false) return "";
+  const missing = doc.requirements.filter((r) => !r.held);
+  const heldCodes = new Set(doc.requirements.filter((r) => r.held && r.code).map((r) => r.code));
+  const cls = (doc.classifiedItems || []).filter((i) => !i.held && !heldCodes.has(i.code));
+  const warns = [
+    doc.designated && !doc.jiilDesignated ? "⚠ 지명경쟁·조합추천 — 명단에 지일 없음, 참가 불가 가능성 높음" : "",
+    doc.region ? `⚠ 지역제한 — 본점 소재지 ${esc(doc.region)}` : "",
+  ].filter(Boolean);
+  if (!missing.length && !cls.length && !warns.length) return "";
+  const rows = missing
+    .map((r) => {
+      const nm = r.name || r.docName;
+      const label = nm ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}` : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
+      const c = r.code ? (doc.classes || {})[r.code] : null;
+      const fixable = (r.bases || []).length === 1 && r.bases[0] === "등록";
+      return `<li class="${fixable ? "fixable" : "miss"}">✗ 미보유 ${label}${c ? classPath(c) : ""}${howToFix(r, doc)}</li>`;
+    })
+    .join("");
+  const clsLine = cls.length
+    ? `<p class="cls">공고 분류 세부품명: ${cls.map((i) => `<span class="miss">✗ ${esc(i.name)}(${esc(i.code)})</span>`).join(", ")}</p>`
+    : "";
+  return (rows ? `<ul>${rows}</ul>` : "") + clsLine + (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") + `<p>출처: ${esc(doc.sourceFile)}</p>`;
 }
 
 /**
