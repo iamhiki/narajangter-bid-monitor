@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { OcrMode } from "../src/corpus/extractText.js";
 import { isOcrAvailable } from "../src/corpus/ocr.js";
-import { scanArchive } from "../src/corpus/scanArchive.js";
+import { scanArchive, type ScanReport } from "../src/corpus/scanArchive.js";
 
 /**
  * 과거 공고 아카이브 폴더 → data/past-projects.json
@@ -18,14 +18,16 @@ const args = process.argv.slice(2);
 const ocrFlag = args.find((a) => a.startsWith("--ocr"));
 const positional = args.filter((a) => !a.startsWith("--"));
 
-const ARCHIVE_ROOT = positional[0] ?? process.env.ARCHIVE_ROOT;
-const OUTPUT = resolve(positional[1] ?? "data/past-projects.json");
+// 아카이브는 여러 개 줄 수 있다 (22~26년도, 17~21년도를 따로 내려받은 폴더). .json으로 끝나는 인자가 출력 경로.
+const ARCHIVE_ROOTS = positional.filter((a) => !/\.json$/i.test(a));
+if (ARCHIVE_ROOTS.length === 0 && process.env.ARCHIVE_ROOT) ARCHIVE_ROOTS.push(process.env.ARCHIVE_ROOT);
+const OUTPUT = resolve(positional.find((a) => /\.json$/i.test(a)) ?? "data/past-projects.json");
 
 /** --ocr / --ocr=auto / --ocr=force / (없으면) off */
 const ocrMode: OcrMode = ocrFlag ? ((ocrFlag.split("=")[1] as OcrMode) ?? "auto") : "off";
 
-if (!ARCHIVE_ROOT) {
-  console.error("사용법: npm run build:corpus -- <아카이브 폴더 경로> [출력 JSON 경로] [--ocr[=auto|force]]");
+if (ARCHIVE_ROOTS.length === 0) {
+  console.error("사용법: npm run build:corpus -- <아카이브 폴더 경로>... [출력 JSON 경로] [--ocr[=auto|force]]");
   console.error('예:    npm run build:corpus -- "C:\\Users\\WEBDEV\\Desktop\\지일 과거 공고"');
   console.error('       npm run build:corpus -- "…\\지일 과거 공고" --ocr   (PDF 스캔 페이지도 읽기)');
   process.exit(1);
@@ -36,19 +38,30 @@ if (!["off", "auto", "force"].includes(ocrMode)) {
   process.exit(1);
 }
 
-const archiveRoot = resolve(ARCHIVE_ROOT);
-console.log(`아카이브: ${archiveRoot}`);
+const archiveRoots = ARCHIVE_ROOTS.map((r) => resolve(r));
+for (const root of archiveRoots) console.log(`아카이브: ${root}`);
 if (ocrMode !== "off") {
   console.log(`OCR: ${ocrMode} · ${isOcrAvailable() ? "사용 가능 (Windows 내장)" : "이 환경에서는 사용 불가 — 텍스트 레이어만 읽습니다"}`);
 }
 
 const started = Date.now();
-const { projects, withoutBody } = await scanArchive(archiveRoot, {
-  ocr: ocrMode,
-  onProgress: (done, total, name) => {
-    process.stdout.write(`\r  ${done}/${total} 처리 중… ${name.slice(0, 40)}`.padEnd(80));
-  },
-});
+const projects: ScanReport["projects"] = [];
+const withoutBody: ScanReport["withoutBody"] = [];
+for (const archiveRoot of archiveRoots) {
+  const report = await scanArchive(archiveRoot, {
+    ocr: ocrMode,
+    onProgress: (done, total, name) => {
+      process.stdout.write(`\r  ${done}/${total} 처리 중… ${name.slice(0, 40)}`.padEnd(80));
+    },
+  });
+  // id가 <연도>/<사업 폴더>라 두 아카이브에 같은 폴더가 있으면 겹친다 — 먼저 준 아카이브 쪽을 남긴다.
+  const seen = new Set(projects.map((p) => p.id));
+  for (const p of report.projects) {
+    if (seen.has(p.id)) console.warn(`\n  중복 사업 폴더 건너뜀: ${p.id}`);
+    else projects.push(p);
+  }
+  withoutBody.push(...report.withoutBody.filter((w) => !seen.has(w.id)));
+}
 process.stdout.write("\r".padEnd(82) + "\r");
 
 if (projects.length === 0) {

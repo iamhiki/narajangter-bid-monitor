@@ -144,10 +144,9 @@ function listProjectFolders(archiveRoot: string): ProjectFolder[] {
  * "(수정)", "최종" 같은 표기는 일관되지 않아 파일명 날짜가 가장 믿을 만하다.
  */
 export function pickSpecDocuments(folderPath: string): string[] {
-  const candidates = safeReaddir(folderPath)
-    .filter((name) => SUPPORTED_EXT.test(name) && !EXCLUDED_DOC.test(normalizeFileName(name)))
-    .map((name) => ({ name, normalized: normalizeFileName(name), path: join(folderPath, name) }))
-    .filter((f) => isFile(f.path));
+  const candidates = listFiles(folderPath)
+    .filter((f) => SUPPORTED_EXT.test(f.name) && !EXCLUDED_DOC.test(normalizeFileName(f.rel)))
+    .map((f) => ({ ...f, normalized: normalizeFileName(f.rel) }));
 
   const ranked: { path: string; rank: number; isPdf: boolean; date: string }[] = [];
   for (const file of candidates) {
@@ -183,6 +182,27 @@ export function cleanFolderName(folderName: string): string {
     .replace(/_+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * 사업 폴더 안의 파일. 17~21년도 아카이브는 `<사업>/과업지시서/<파일>`처럼 문서 종류별 하위 폴더가
+ * 한 단계 더 있고 파일명에는 종류가 없는 경우가 많아서, 하위 폴더 이름까지 붙인 상대 경로(rel)로
+ * 종류를 판별한다. `사업수행능력평가/` 아래 파일은 rel에 "수행능력"이 들어가 EXCLUDED_DOC에 걸린다.
+ */
+function listFiles(folderPath: string): { name: string; rel: string; path: string }[] {
+  const files: { name: string; rel: string; path: string }[] = [];
+  for (const name of safeReaddir(folderPath)) {
+    const path = join(folderPath, name);
+    if (isFile(path)) {
+      files.push({ name, rel: name, path });
+    } else if (isDirectory(path)) {
+      for (const inner of safeReaddir(path)) {
+        const innerPath = join(path, inner);
+        if (isFile(innerPath)) files.push({ name: inner, rel: `${name}/${inner}`, path: innerPath });
+      }
+    }
+  }
+  return files;
 }
 
 function safeReaddir(path: string): string[] {
