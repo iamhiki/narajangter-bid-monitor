@@ -5,7 +5,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "../src/config/env.js";
-import { loadAppConfig } from "../src/config/loadJsonConfig.js";
+import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
+import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
+import { readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
@@ -258,6 +260,74 @@ function saveVerdicts(): void {
   writeFileSync(VERDICTS_PATH, JSON.stringify(verdicts, null, 2), "utf8");
 }
 
+// ── 참가여부 (담당자끼리 공유) ─────────────────────────────────
+/**
+ * 공고마다 참가여부·담당자·대화를 cache/participation.json에 둔다. 같은 링크로 들어온
+ * 사람 모두가 같은 기록을 본다 — "A가 이미 보고 있다", "보류인데 왜?"를 바로 알 수 있게.
+ * 상태를 바꾸면 대화에 시스템 기록을 한 줄 남긴다. 나중에 보는 사람이 경위를 따라갈 수 있어야 한다.
+ */
+const PARTICIPATION_STATUSES = ["검토중", "참가", "보류", "불참"] as const;
+type ParticipationStatus = (typeof PARTICIPATION_STATUSES)[number];
+interface Participation {
+  noticeNo: string;
+  title: string;
+  status: ParticipationStatus | null;
+  owner: string;
+  updatedAt: string;
+  comments: { by: string; text: string; at: string; system?: boolean }[];
+}
+const PARTICIPATION_PATH = resolve("cache/participation.json");
+let participation: Record<string, Participation> = (() => {
+  try {
+    return JSON.parse(readFileSync(PARTICIPATION_PATH, "utf8")) as Record<string, Participation>;
+  } catch {
+    return {};
+  }
+})();
+function saveParticipation(): void {
+  mkdirSync(dirname(PARTICIPATION_PATH), { recursive: true });
+  writeFileSync(PARTICIPATION_PATH, JSON.stringify(participation, null, 2), "utf8");
+}
+
+// ── 부가 정보 (공고문 참가자격 · 공동수급) ──────────────────────
+/**
+ * 공고 목록을 먼저 보여주고 뒤에서 채운다. 공고문 다운로드·추출과 g2b 공동수급 조회는 건당
+ * 수백 ms~수 초라, 목록 응답을 붙잡아 두면 화면이 그만큼 늦게 뜬다. 화면은 /api/enrich를
+ * 주기적으로 불러 채워진 만큼 배지를 갱신한다.
+ *
+ * 결과는 공고번호로 프로세스가 떠 있는 동안 계속 쓴다 — 공고문과 공동수급 방식은 공고 후
+ * 잘 바뀌지 않고, 정정공고는 첨부 URL이 바뀌어 첨부 캐시가 알아서 새로 받는다.
+ */
+interface Enrichment {
+  jointBid?: string | null;
+  qualDoc?: QualificationDocResult | null;
+}
+const enrichment = new Map<string, Enrichment>();
+let enrichState = { running: false, done: 0, total: 0 };
+
+function startEnrichment(notices: NormalizedNotice[], appConfig: AppConfig): void {
+  const todo = notices.filter((n) => {
+    const e = enrichment.get(n.noticeNo);
+    return !e || e.jointBid === undefined || e.qualDoc === undefined;
+  });
+  if (enrichState.running || todo.length === 0) return;
+  enrichState = { running: true, done: 0, total: todo.length };
+  const held = { products: appConfig.heldProducts, industries: appConfig.heldIndustries };
+
+  void (async () => {
+    const cookie = await getSessionCookie();
+    for (const n of todo) {
+      const e = enrichment.get(n.noticeNo) ?? {};
+      if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
+      if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
+      enrichment.set(n.noticeNo, e);
+      enrichState.done += 1;
+      await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
+    }
+    enrichState.running = false;
+  })();
+}
+
 function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
   return new Promise((resolveBody, reject) => {
     let body = "";
@@ -281,6 +351,7 @@ async function fetchNotices(lookbackDays: number): Promise<NoticeCache> {
     const appConfig = loadAppConfig();
     const input = await collectReportInput(env, appConfig, { lookbackDays, withDiagnostics: true });
     lastDiagnostics = input.diagnostics ?? null;
+    startEnrichment(input.bid.matches.map((m) => m.notice), appConfig);
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
@@ -456,6 +527,75 @@ const server = createServer((req, res) => {
       total: lastDiagnostics.notices.length,
       items: found.map((n) => noticeSummary(n, diagnoseNotice(n, lastDiagnostics!.context))),
     });
+    return;
+  }
+
+  if (url.pathname === "/api/enrich") {
+    json(res, { ...enrichState, byNo: Object.fromEntries(enrichment) });
+    return;
+  }
+
+  if (url.pathname === "/api/participation" && req.method === "GET") {
+    json(res, { participation, statuses: PARTICIPATION_STATUSES });
+    return;
+  }
+
+  if (url.pathname === "/api/participation" && req.method === "POST") {
+    if (!(req.headers["content-type"] ?? "").includes("application/json")) {
+      res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "application/json만 받습니다." }));
+      return;
+    }
+    readBody(req)
+      .then((raw) => {
+        const b = JSON.parse(raw) as { noticeNo?: string; title?: string; by?: string; status?: string; owner?: string; comment?: string };
+        const noticeNo = String(b.noticeNo ?? "").trim();
+        const by = String(b.by ?? "").trim().slice(0, 40);
+        if (!noticeNo) throw new Error("공고번호가 없습니다");
+        if (!by) throw new Error("이름을 먼저 입력하세요");
+        const now = new Date().toISOString();
+        const p: Participation = participation[noticeNo] ?? {
+          noticeNo,
+          title: String(b.title ?? "").slice(0, 300),
+          status: null,
+          owner: "",
+          updatedAt: now,
+          comments: [],
+        };
+        const log = (text: string) => p.comments.push({ by, text, at: now, system: true });
+
+        if (b.status !== undefined) {
+          const status = b.status === "" ? null : (b.status as ParticipationStatus);
+          if (status !== null && !PARTICIPATION_STATUSES.includes(status)) throw new Error("알 수 없는 상태입니다");
+          if (status !== p.status) {
+            log(status ? `상태를 '${status}'(으)로 변경` : "상태를 지움");
+            p.status = status;
+          }
+          // 처음 상태를 정한 사람이 담당자가 된다 (따로 지정하지 않았다면)
+          if (status && !p.owner) {
+            p.owner = by;
+            log(`담당자: ${by}`);
+          }
+        }
+        if (b.owner !== undefined) {
+          const owner = String(b.owner).trim().slice(0, 40);
+          if (owner !== p.owner) {
+            log(owner ? `담당자를 '${owner}'(으)로 지정` : "담당자를 비움");
+            p.owner = owner;
+          }
+        }
+        const comment = String(b.comment ?? "").trim().slice(0, 1000);
+        if (comment) p.comments.push({ by, text: comment, at: now });
+
+        p.updatedAt = now;
+        participation[noticeNo] = p;
+        saveParticipation();
+        json(res, { ok: true, participation: p });
+      })
+      .catch((err: unknown) => {
+        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: String(err instanceof Error ? err.message : err) }));
+      });
     return;
   }
 

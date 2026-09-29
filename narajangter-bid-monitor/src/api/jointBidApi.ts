@@ -51,7 +51,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_INTERVAL_MS = 300;
 
 /** 세션 쿠키 확보. 실패해도 쿠키 없이 시도해본다 — 로그인 없이도 되는 것을 실측 확인했다. */
-async function getSessionCookie(timeoutMs: number): Promise<string> {
+export async function getSessionCookie(timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<string> {
   try {
     const res = await fetch(G2B_HOME, { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
     return res.headers.get("set-cookie") ?? "";

@@ -222,6 +222,58 @@ body {
 .badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
 .badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
 
+/* 내 이름 */
+.me-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; font-size: 12.5px; color: var(--faint); }
+.me-bar label { color: var(--ink); font-weight: 600; font-size: 13px; }
+.me-bar input {
+  font: inherit; font-size: 13px; font-weight: 400; padding: 4px 8px; width: 120px; margin-left: 6px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+}
+
+/* 부가 정보 배지 */
+.badge.faint { color: var(--faint); border-style: dashed; }
+.badge.urgentb { background: var(--urgent-tint); color: var(--urgent); border-color: var(--urgent); font-weight: 600; }
+.badge.pstat { font-weight: 700; background: var(--panel); color: var(--ink-strong); border-color: var(--ink); }
+.badge.pstat.hi { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+.badge.pstat.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); }
+.badge.pstat.muted { background: var(--line); color: var(--muted); border-color: var(--line); }
+.qtip li.miss { color: var(--urgent); }
+.qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
+.qtip h4.sub-h { margin-top: 12px; }
+
+/* 참가여부 · 대화 */
+.part { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+.part-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.part-label { font-weight: 600; color: var(--ink); margin-right: 4px; }
+.pbtn {
+  font: inherit; font-size: 12px; padding: 4px 11px; cursor: pointer; border-radius: 999px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+}
+.pbtn:hover { border-color: var(--muted); }
+.pbtn.on { background: var(--ink-strong); color: var(--panel); border-color: var(--ink-strong); font-weight: 600; }
+.pbtn.hi.on { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+.pbtn.warn.on { background: var(--warn); color: var(--panel); border-color: var(--warn); }
+.pbtn.muted.on { background: var(--muted); color: var(--panel); border-color: var(--muted); }
+.part-owner { margin-left: auto; color: var(--muted); }
+.part-owner b { color: var(--ink-strong); }
+.linkish { font: inherit; font-size: 12px; background: none; border: 0; padding: 0 0 0 6px; color: var(--brand); cursor: pointer; text-decoration: underline; }
+.talk { margin-top: 8px; }
+.talk summary { cursor: pointer; color: var(--muted); }
+.talk-list { list-style: none; margin: 8px 0; padding: 0; }
+.talk-list li { padding: 5px 0; border-top: 1px solid var(--line-soft); color: var(--ink); line-height: 1.5; }
+.talk-list li:first-child { border-top: 0; }
+.talk-list li.sys { color: var(--faint); font-size: 11.5px; }
+.talk-list time { color: var(--faint); font-size: 11px; margin-left: 4px; }
+.talk-form { display: flex; gap: 6px; }
+.talk-form input {
+  flex: 1; min-width: 0; font: inherit; font-size: 12.5px; padding: 5px 8px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.talk-form button {
+  font: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; border-radius: var(--radius);
+  background: var(--brand); color: var(--on-brand); border: 1px solid var(--brand);
+}
+
 /* 담당자 판정 버튼 */
 .vctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .vctl button {
@@ -479,6 +531,11 @@ footer b { color: var(--muted); }
 <div class="wrap">
   <div class="corpus-line" id="corpusInfo">코퍼스 불러오는 중…</div>
 
+  <div class="me-bar">
+    <label>내 이름 <input id="judge" placeholder="예: 홍길동" maxlength="40" autocomplete="off"></label>
+    <span>참가여부·대화·판정에 이 이름이 남습니다. 이 브라우저에 기억됩니다.</span>
+  </div>
+
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="live">실제 공고</button>
     <button role="tab" aria-selected="false" data-tab="excluded">제외된 공고</button>
@@ -514,7 +571,6 @@ footer b { color: var(--muted); }
     </form>
     <div id="traceResults"></div>
     <div class="judge-bar">
-      <label>판정자 <input id="judge" placeholder="이름" maxlength="40" autocomplete="off"></label>
       <span>누적 판정 <b id="vCount">0</b>건</span>
       <a href="/api/verdicts.csv" download>판정 CSV 내려받기</a>
     </div>
@@ -590,7 +646,8 @@ footer b { color: var(--muted); }
           <p><b>③-a</b> 코드·키워드 매칭 — 세부품명번호는 단독 인정, 업종코드는 정밀도가 낮아 제목 키워드가 함께 있을 때만 인정<br>
              <b>③-b</b> 해외 개최 판별 — 전시회+한국관 조합은 자동배제, 단 몽골은 예외로 표시<br>
              <b>③-c</b> 자격조건 필터 — 면허제한정보 API의 <b>업종코드</b>를 보유 자격과 대조
-             (대응 API가 없어 본공고만)<br>
+             (대응 API가 없어 본공고만). 화면에서는 입찰공고문 첨부도 읽어 업종코드·세부품명번호·지역제한·지명경쟁을
+             보여준다 — API에 업종제한이 없다고 나와도 공고문에는 적혀 있는 경우가 많다(표시 전용, 거르지 않음)<br>
              <b>③-d</b> 마감 지난 본공고 제외 — 입찰 마감일시가 이미 지난 본공고는 뺍니다. 마감일시가 없거나
              형식을 모르면 남깁니다. 사전규격은 마감이 의견 등록 마감이라 적용하지 않습니다</p>
           <p class="sub">코드로 맞춥니다. 이름 부분일치로 보던 시절에는
@@ -965,6 +1022,7 @@ async function loadNotices(refresh) {
       ` · 첨부읽음 <b>${data.items.filter((n) => n.basis === "제목+과업내용").length}</b>건` +
       ` · ${esc(when)}${data.cached ? " (캐시)" : ""}`;
     renderNotices(data.items);
+    pollEnrich();
     // 제외된 공고는 이번 조회 결과로 다시 계산해야 한다
     exData = null;
     if (!$("tab-excluded").hidden) loadExcluded();
@@ -976,7 +1034,7 @@ async function loadNotices(refresh) {
 }
 
 /** 현재 걸려 있는 필터 상태 */
-const filters = { grade: "all", source: "all", method: "all" };
+const filters = { grade: "all", source: "all", method: "all", part: "all" };
 let lastItems = [];
 
 function renderNotices(items) {
@@ -989,7 +1047,8 @@ function applyFilters() {
     (n) =>
       (filters.grade === "all" || n.confidence === filters.grade) &&
       (filters.source === "all" || n.sourceType === filters.source) &&
-      (filters.method === "all" || n.bidMethodCategory === filters.method)
+      (filters.method === "all" || n.bidMethodCategory === filters.method) &&
+      (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part)
   );
 
   // 필터 칩의 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
@@ -1006,6 +1065,11 @@ function applyFilters() {
     `<span class="chip-gap"></span>`,
     chip("method", "all", "낙찰방법 전체"),
     ...["협상", "규격가격동시", "입찰"].map((m) => chip("method", m, `${m} ${count((n) => n.bidMethodCategory === m)}`)),
+    `<span class="chip-gap"></span>`,
+    chip("part", "all", "참가여부 전체"),
+    ...["미지정", ...PART_STATUSES].map((st) =>
+      chip("part", st, `${st} ${count((n) => (participation[n.noticeNo]?.status || "미지정") === st)}`)
+    ),
   ].join("");
 
   if (!lastItems.length) {
@@ -1073,8 +1137,8 @@ function renderNotice(n) {
       <span class="badge">${esc(n.businessType)}</span>
       ${n.bidMethodCategory ? `<span class="badge" title="${esc(n.bidMethod || "")}">${esc(n.bidMethodCategory)}</span>` : ""}
       ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
-      ${qualBadge(n)}
     </div>
+    <div class="badges" data-enrich="${esc(n.noticeNo)}">${enrichBadges(n)}</div>
     <h3>${title}</h3>
     <div class="meta">${esc(n.institution || "기관 미상")}
       ${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}
@@ -1082,15 +1146,61 @@ function renderNotice(n) {
       ${n.bidMethod ? " · " + esc(n.bidMethod.slice(0, 24)) : ""}</div>
     <div class="meta">규칙 근거: ${esc(n.reason)}</div>
     ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
+    ${partBlock(n)}
     ${vctl(n, "수집됨")}
   </div>`;
+}
+
+// ── 부가 정보: 공고문 참가자격 · 공동수급 (서버가 뒤에서 채운다) ──────────────
+let enrich = { running: false, done: 0, total: 0, byNo: {} };
+let enrichTimer = null;
+
+async function pollEnrich() {
+  clearTimeout(enrichTimer);
+  try {
+    enrich = await getJson("/api/enrich");
+  } catch (e) {
+    return;
+  }
+  refreshCards("enrich");
+  if (enrich.running) enrichTimer = setTimeout(pollEnrich, 3000);
+}
+
+/** 카드의 두 번째 배지 줄 — 참가여부 · 자격 · 공고문 경고 · 공동수급 */
+function enrichBadges(n) {
+  const e = enrich.byNo[n.noticeNo] || {};
+  const p = participation[n.noticeNo];
+  const out = [];
+  if (p?.status) out.push(`<span class="badge pstat ${PART_TONE[p.status]}">${esc(p.status)}${p.owner ? " · " + esc(p.owner) : ""}</span>`);
+  out.push(qualBadge(n, e.qualDoc));
+  const doc = e.qualDoc;
+  if (doc?.designated) {
+    out.push(`<span class="badge urgentb" title="${esc(doc.sourceFile)}">⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}</span>`);
+  }
+  if (doc?.region) out.push(`<span class="badge warn" title="${esc(doc.sourceFile)}">⚠ 지역제한 ${esc(doc.region)}</span>`);
+  out.push(jointBadge(n, e));
+  return out.join("");
+}
+
+/**
+ * 공동수급 방식. g2b 원문은 "(전자)분담이행", "(없음)공동수급불허", "(수기)공동이행 또는 분담이행"처럼
+ * 앞에 제출 방식이 붙어 온다 — 화면에는 뒤쪽만 크게 쓰고 원문은 툴팁에 둔다.
+ */
+function jointBadge(n, e) {
+  if (n.sourceType !== "본공고") return "";
+  if (e.jointBid === undefined) return enrich.running ? `<span class="badge faint">공동수급 확인 중…</span>` : "";
+  if (e.jointBid === null) return `<span class="badge faint" title="g2b 상세 조회 실패 — 원문 공고에서 확인하세요">공동수급 확인 안 됨</span>`;
+  const short = e.jointBid.replace(/^\([^)]*\)\s*/, "");
+  const tone = /불허/.test(short) ? "warn" : "";
+  return `<span class="badge ${tone}" title="${esc(e.jointBid)}">공동수급 · ${esc(short)}</span>`;
 }
 
 /**
  * 자격판정 배지. 필터에서 떨어진 공고는 화면에 오지 않으므로 "미충족"은 없다 —
  * 여기 보이는 본공고는 충족했거나, 판정할 제한 정보가 없어 통과한 것이다.
+ * 면허제한정보에 없는 공고("업종제한 없음")는 공고문을 읽어 요구 자격을 대신 보여준다.
  */
-function qualBadge(n) {
+function qualBadge(n, doc) {
   const q = n.qualification;
   const tip = (title, body) => `<span class="qtip" role="tooltip"><h4>${title}</h4>${body}</span>`;
   if (!q) {
@@ -1099,16 +1209,22 @@ function qualBadge(n) {
       "<p>사전규격은 나라장터에 면허제한정보 API가 없어 참가자격을 자동으로 대조하지 않습니다. 본공고가 나오면 판정됩니다.</p>"
     )}</span>`;
   }
-  if (q.status === "조회실패") {
-    return `<span class="badge qual fail" tabindex="0">자격 확인 실패${tip(
-      "자격 확인 실패",
-      "<p>면허제한정보 조회가 실패해 판정 없이 통과시켰습니다. 원문 공고의 참가자격을 직접 확인하세요.</p>"
-    )}</span>`;
-  }
-  if (q.status === "제한없음") {
-    return `<span class="badge qual" tabindex="0">업종제한 없음${tip(
-      "업종제한 없음",
-      "<p>면허제한정보에 이 공고의 업종제한이 등록되어 있지 않습니다. 지역제한 등 다른 참가자격은 원문 공고에서 확인하세요.</p>"
+  const docSection = doc ? docTipBody(doc) : "";
+  if (q.status === "조회실패" || q.status === "제한없음") {
+    const head = q.status === "조회실패" ? "면허제한정보 조회 실패" : "면허제한정보에 업종제한 없음";
+    if (doc === undefined && enrich.running) return `<span class="badge qual faint">공고문에서 자격 확인 중…</span>`;
+    if (!doc) {
+      return `<span class="badge qual ${q.status === "조회실패" ? "fail" : ""}" tabindex="0">${q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음"}${tip(
+        head,
+        "<p>공고문 첨부에서도 참가자격 항목을 찾지 못했습니다. 원문 공고를 직접 확인하세요.</p>"
+      )}</span>`;
+    }
+    const need = doc.requirements;
+    const heldN = need.filter((r) => r.held).length;
+    const tone = need.length > 0 && heldN === need.length ? "ok" : "fail";
+    return `<span class="badge qual ${tone}" tabindex="0"><span class="ico" aria-hidden="true">${tone === "ok" ? "✓" : "!"}</span>공고문 자격 ${heldN}/${need.length}${tip(
+      `${head} → 공고문에서 확인`,
+      docSection
     )}</span>`;
   }
   const items = q.satisfiedBy
@@ -1116,8 +1232,120 @@ function qualBadge(n) {
     .join("");
   return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.satisfiedBy.length}/${q.totalGroups}${tip(
     `충족된 자격 ${q.satisfiedBy.length}건`,
-    `<ul>${items}</ul><p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>`
+    `<ul>${items}</ul><p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>` +
+      (doc ? `<h4 class="sub-h">공고문 참가자격</h4>${docSection}` : "")
   )}</span>`;
+}
+
+function docTipBody(doc) {
+  const rows = doc.requirements.length
+    ? `<ul>${doc.requirements
+        .map((r) => {
+          const label = r.name ? `${esc(r.name)}${r.code ? `(${esc(r.code)})` : ""}` : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
+          return `<li class="${r.held ? "" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}</li>`;
+        })
+        .join("")}</ul>`
+    : "<p>공고문에서 업종코드·세부품명번호를 찾지 못했습니다.</p>";
+  const warns = [
+    doc.designated ? `⚠ 지명경쟁·조합추천 — ${doc.jiilDesignated ? "명단에 지일 있음" : "명단에 지일 없음, 참가 불가 가능성 높음"}` : "",
+    doc.region ? `⚠ 지역제한 — 본점 소재지 ${esc(doc.region)}` : "",
+  ].filter(Boolean);
+  return (
+    rows +
+    (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") +
+    `<p>출처: ${esc(doc.sourceFile)}<br>공고문 문장을 기계적으로 읽은 결과입니다. "A 또는 B" 같은 조건은 원문으로 확인하세요.</p>`
+  );
+}
+
+// ── 참가여부 · 담당자 · 대화 (같은 링크로 보는 사람 모두 공유) ────────────────
+let participation = {};
+const PART_STATUSES = ["검토중", "참가", "보류", "불참"];
+const PART_TONE = { 검토중: "", 참가: "hi", 보류: "warn", 불참: "muted" };
+
+async function loadParticipation() {
+  try {
+    participation = (await getJson("/api/participation")).participation || {};
+  } catch (e) {
+    return;
+  }
+  refreshCards("part");
+}
+
+function myName() {
+  return $("judge").value.trim();
+}
+
+function partBlock(n) {
+  const p = participation[n.noticeNo];
+  const comments = p?.comments || [];
+  const talk = comments.filter((c) => !c.system).length;
+  const when = (iso) => new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `<div class="part" data-part="${esc(n.noticeNo)}" data-title="${esc(n.title)}">
+    <div class="part-row">
+      <span class="part-label">참가여부</span>
+      ${PART_STATUSES.map((s) => `<button type="button" class="pbtn ${PART_TONE[s]} ${p?.status === s ? "on" : ""}" data-pstatus="${s}">${s}</button>`).join("")}
+      <span class="part-owner">담당 <b>${esc(p?.owner || "없음")}</b>
+        <button type="button" class="linkish" data-powner>${p?.owner === myName() && myName() ? "넘기기" : "내가 맡기"}</button></span>
+    </div>
+    <details class="talk" ${talk ? "" : ""}>
+      <summary>대화 ${talk}건${p?.updatedAt ? ` · 마지막 ${esc(when(p.updatedAt))}` : ""}</summary>
+      <ul class="talk-list">${comments
+        .map((c) => `<li class="${c.system ? "sys" : ""}"><b>${esc(c.by)}</b> ${esc(c.text)} <time>${esc(when(c.at))}</time></li>`)
+        .join("") || '<li class="sys">아직 기록이 없습니다. 보류·불참이면 이유를 남겨 주세요.</li>'}</ul>
+      <form class="talk-form"><input maxlength="1000" placeholder="예: 공동수급 불허라 단독 수행 어려워 보류 — 규모 확인 중" autocomplete="off"><button type="submit">남기기</button></form>
+    </details>
+  </div>`;
+}
+
+async function postParticipation(box, payload) {
+  const by = myName();
+  if (!by) {
+    $("judge").focus();
+    alert("위쪽 '내 이름' 칸에 이름을 먼저 입력해 주세요.");
+    return false;
+  }
+  try {
+    const res = await fetch("/api/participation", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ noticeNo: box.dataset.part, title: box.dataset.title, by, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    participation[box.dataset.part] = data.participation;
+    refreshCards("part", true);
+    return true;
+  } catch (err) {
+    alert(`저장 실패 — ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * 카드 전체를 다시 그리지 않고 배지 줄·참가여부 칸만 바꾼다. 다른 사람이 바꾼 내용을 주기적으로
+ * 받아 반영하는데, 카드를 통째로 다시 그리면 입력 중이던 대화나 펼쳐 둔 대화창이 날아간다.
+ * 그래서 포커스가 들어가 있는 칸은 건너뛰고, 펼친 대화창은 펼친 채로 둔다.
+ */
+function refreshCards(what, force = false) {
+  const byNo = new Map(lastItems.map((n) => [n.noticeNo, n]));
+  if (what === "enrich" || what === "part") {
+    document.querySelectorAll("[data-enrich]").forEach((el) => {
+      const n = byNo.get(el.dataset.enrich);
+      if (n) el.innerHTML = enrichBadges(n);
+    });
+  }
+  if (what === "part") {
+    document.querySelectorAll("[data-part]").forEach((el) => {
+      const n = byNo.get(el.dataset.part);
+      if (!n || (!force && el.contains(document.activeElement))) return;
+      const open = el.querySelector("details")?.open;
+      const draft = el.querySelector(".talk-form input")?.value;
+      el.outerHTML = partBlock(n);
+      const fresh = document.querySelector(`[data-part="${CSS.escape(n.noticeNo)}"]`);
+      if (fresh && open) fresh.querySelector("details").open = true;
+      if (fresh && draft && !force) fresh.querySelector(".talk-form input").value = draft;
+    });
+  }
 }
 
 // ── 담당자 판정 (② 수집 정제 · ③ 미수집 원인) ─────────────────────
@@ -1156,7 +1384,7 @@ async function saveVerdict(btn) {
   const by = $("judge").value.trim();
   if (!clear && !by) {
     $("judge").focus();
-    alert("판정자 이름을 먼저 입력해 주세요 ('제외된 공고' 탭 위쪽).");
+    alert("위쪽 '내 이름' 칸에 이름을 먼저 입력해 주세요.");
     return;
   }
   const body = {
@@ -1382,7 +1610,54 @@ $("judge").onchange = () => { try { localStorage.setItem("ui-judge", $("judge").
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-v]");
   if (btn) saveVerdict(btn);
+
+  const st = ev.target.closest("[data-pstatus]");
+  if (st) {
+    const box = st.closest("[data-part]");
+    const noticeNo = box.dataset.part;
+    const current = participation[noticeNo]?.status;
+    // 이미 선택된 상태를 다시 누르면 해제
+    postParticipation(box, { status: current === st.dataset.pstatus ? "" : st.dataset.pstatus }).then((ok) => {
+      if (!ok) return;
+      if (filters.part !== "all") applyFilters();
+      // 보류·불참은 이유가 있어야 다른 사람이 이해한다 — 대화창을 열어 바로 적게 한다
+      if ((st.dataset.pstatus === "보류" || st.dataset.pstatus === "불참") && current !== st.dataset.pstatus) {
+        const fresh = document.querySelector(`[data-part="${CSS.escape(noticeNo)}"]`);
+        if (fresh) {
+          fresh.querySelector("details").open = true;
+          fresh.querySelector(".talk-form input").focus();
+        }
+      }
+    });
+  }
+
+  const own = ev.target.closest("[data-powner]");
+  if (own) {
+    const box = own.closest("[data-part]");
+    const cur = participation[box.dataset.part]?.owner || "";
+    if (cur && cur === myName()) {
+      const next = prompt("누구에게 넘길까요? (비우면 담당자 없음)", "");
+      if (next !== null) postParticipation(box, { owner: next.trim() });
+    } else {
+      postParticipation(box, { owner: myName() });
+    }
+  }
 });
+document.addEventListener("submit", (ev) => {
+  const form = ev.target.closest(".talk-form");
+  if (!form) return;
+  ev.preventDefault();
+  const noticeNo = form.closest("[data-part]").dataset.part;
+  const text = form.querySelector("input").value.trim();
+  if (!text) return;
+  postParticipation(form.closest("[data-part]"), { comment: text }).then((ok) => {
+    const fresh = ok && document.querySelector(`[data-part="${CSS.escape(noticeNo)}"]`);
+    if (fresh) fresh.querySelector("details").open = true;
+  });
+});
+// 다른 사람이 바꾼 참가여부·대화를 20초마다 받아온다
+loadParticipation();
+setInterval(loadParticipation, 20000);
 loadVerdicts();
 
 boot();
