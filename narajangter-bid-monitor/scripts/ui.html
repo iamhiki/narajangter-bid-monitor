@@ -238,6 +238,7 @@ body {
 .badge.hi { background: var(--brand); color: var(--on-brand); border-color: var(--brand); font-weight: 600; }
 
 .badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
+.badge.okb { color: var(--brand); border-color: var(--brand); font-weight: 600; }
 
 /* 공고 카드 윗부분: 왼쪽 분류·자격 배지, 오른쪽 싱크로율 */
 .card-head { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; }
@@ -996,12 +997,12 @@ function enrichBadges(n) {
   const p = participation[n.noticeNo];
   const out = [];
   if (p?.status) out.push(`<span class="badge pstat ${PART_TONE[p.status]}">${esc(p.status)}${p.owner ? " · " + esc(p.owner) : ""}</span>`);
-  out.push(qualBadge(n, e.qualDoc ? { ...e.qualDoc, classes: e.classes || {} } : e.qualDoc));
+  out.push(qualBadge(n, e.qualDoc ? { ...e.qualDoc, classes: e.classes || {}, regionOk: e.regionOk } : e.qualDoc));
   const doc = e.qualDoc;
   if (doc?.designated) {
     out.push(`<span class="badge urgentb" title="${esc(doc.sourceFile)}">⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}</span>`);
   }
-  if (doc?.region) out.push(`<span class="badge warn" title="${esc(doc.sourceFile)}">⚠ 지역제한 ${esc(doc.region)}</span>`);
+  if (doc?.region) out.push(regionBadge(doc, e.regionOk));
   out.push(jointBadge(n, e));
   return out.join("");
 }
@@ -1110,11 +1111,21 @@ function missingRows(doc) {
   return rows;
 }
 
+/** 지역제한은 본점 소재지 기준 (디자인랩실 같은 지점은 인정 안 됨). 본점 지역이면 충족, 아니면 지역만 경고 */
+function regionText(doc, ok) {
+  return ok === true ? `지역제한 ${doc.region} · 본점 충족` : `지역제한 ${doc.region}`;
+}
+function regionBadge(doc, ok) {
+  return ok === true
+    ? `<span class="badge okb" title="${esc(doc.sourceFile)}">✓ ${esc(regionText(doc, ok))}</span>`
+    : `<span class="badge warn" title="${esc(doc.sourceFile)}">⚠ ${esc(regionText(doc, ok))}</span>`;
+}
+
 /** 참가를 막는 경고와 출처 */
 function docFooter(doc) {
   const warns = [
     doc.designated && !doc.jiilDesignated ? "⚠ 지명경쟁 — 명단에 지일 없음" : "",
-    doc.region ? `⚠ 지역제한 — ${esc(doc.region)}` : "",
+    doc.region && doc.regionOk !== true ? `⚠ ${esc(regionText(doc, doc.regionOk))}` : "",
     doc.linkedBidNo ? `본공고 게시됨: ${esc(doc.linkedBidNo)}` : "",
   ].filter(Boolean);
   return (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") + (doc.sourceFile ? `<p>출처: ${esc(doc.sourceFile)}</p>` : "");

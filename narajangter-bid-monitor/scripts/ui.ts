@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnv } from "../src/config/env.js";
 import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
-import { readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
+import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import { lookupProductClass, type ProductClassInfo } from "../src/api/productClassApi.js";
@@ -266,6 +266,17 @@ interface Participation {
   comments: { by: string; text: string; at: string; system?: boolean }[];
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
+
+/** 본점 소재지 (company-profile.json). 요청마다 읽어서 파일만 고치면 재시작 없이 반영된다. */
+function headquartersRegion(): string | null {
+  try {
+    const dir = process.env.APP_CONFIG_DIR ? resolve(process.env.APP_CONFIG_DIR) : resolve("config");
+    const profile = JSON.parse(readFileSync(resolve(dir, "company-profile.json"), "utf8")) as { headquartersRegion?: string | null };
+    return profile.headquartersRegion ?? null;
+  } catch {
+    return null;
+  }
+}
 let participation: Record<string, Participation> = (() => {
   try {
     return JSON.parse(readFileSync(PARTICIPATION_PATH, "utf8")) as Record<string, Participation>;
@@ -635,7 +646,11 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/api/enrich") {
-    json(res, { ...enrichState, byNo: Object.fromEntries(enrichment) });
+    const hq = headquartersRegion();
+    const byNo = Object.fromEntries(
+      [...enrichment].map(([no, e]) => [no, { ...e, regionOk: e.qualDoc?.region ? meetsRegion(e.qualDoc.region, hq) : null }])
+    );
+    json(res, { ...enrichState, headquartersRegion: hq, byNo });
     return;
   }
 

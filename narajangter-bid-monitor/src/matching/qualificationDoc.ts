@@ -183,6 +183,39 @@ const REGIONS =
  */
 const REGION_PATTERN = new RegExp(`소재지[^.]{0,80}?(${REGIONS})[^.]{0,40}?(있는|소재한|소재하는|업체)`);
 
+const REGION_ALL = new RegExp(`(${REGIONS})`, "g");
+const REGION_JOIN = " 또는 ";
+
+/**
+ * 지역제한 문구 안의 시·도를 전부 — "[충청남도] 또는 [세 종특별시]에 있는 업체"는 두 곳 다 허용이다.
+ * 공고문 추출 텍스트에 "세 종"처럼 공백이 끼어 공백을 빼고 찾는다. 같은 지역의 다른 표기는 하나로.
+ */
+function regionsIn(phrase: string | undefined): string | null {
+  if (!phrase) return null;
+  const seen = new Map<string, string>();
+  for (const [name] of phrase.replace(/\s/g, "").matchAll(REGION_ALL)) {
+    if (!seen.has(regionKey(name))) seen.set(regionKey(name), name);
+  }
+  return seen.size ? [...seen.values()].join(REGION_JOIN) : null;
+}
+
+/**
+ * 시·도 이름을 두 글자 약칭으로 — "강원특별자치도"/"강원도"/"강원"을 같은 지역으로 본다.
+ * 충청·전라·경상은 둘째 글자 대신 북/남을 붙인다 (충청북도 → 충북).
+ */
+export function regionKey(name: string): string {
+  const s = name.replace(/\s/g, "");
+  const m = /^(충청|전라|경상)(북|남)/.exec(s);
+  return m ? `${m[1]!.charAt(0)}${m[2]}` : s.slice(0, 2);
+}
+
+/** 지역제한(여러 곳이면 그중 하나라도)을 본점이 충족하는지. 본점 소재지를 모르면 null (판단 안 함). */
+export function meetsRegion(required: string, headquartersRegion: string | null): boolean | null {
+  if (!headquartersRegion) return null;
+  const hq = regionKey(headquartersRegion);
+  return required.split(REGION_JOIN).some((r) => regionKey(r) === hq);
+}
+
 const normalize = (s: string): string => s.replace(/[\s·ㆍ.,()（）]/g, "");
 
 /**
@@ -251,7 +284,7 @@ export function analyzeQualificationText(
   }
 
   const whole = fullText.replace(/\s+/g, " ");
-  const region = REGION_PATTERN.exec(whole)?.[1] ?? null;
+  const region = regionsIn(REGION_PATTERN.exec(whole)?.[0]);
   const designated = /지명\s*경쟁\s*입찰|조합\s*추천|추천\s*받은|아래의?\s*\d+\s*개\s*업체/.test(whole);
   const jiilDesignated = designated && /지일/.test(whole);
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  meetsRegion,
   analyzeQualificationText,
   classifiedItemsOf,
   findQualificationSection,
@@ -137,7 +138,15 @@ describe("analyzeQualificationText", () => {
     const full =
       "마. 본 입찰은 지역제한 입찰이며, 법인등기부상 본 점 소재지(개인사업자인 경우 사업자등록증상 사업장 소재지)가 [충청남도] 또는 [세 종특별시]에 있는 업체여야 합니다. " +
       "3. 입찰 참가자격 가. 유자격 업체 나. [실내건축공사(4990)] 등록";
-    expect(analyze("참가자격 가. [실내건축공사(4990)] 등록", full).region).toBe("충청남도");
+    expect(analyze("참가자격 가. [실내건축공사(4990)] 등록", full).region).toBe("충청남도 또는 세종");
+  });
+
+  it("지역제한은 본점 소재지로 판정하고, 같은 지역의 다른 표기(강원도·강원특별자치도)는 같게 본다", () => {
+    expect(meetsRegion("강원도", "강원특별자치도")).toBe(true);
+    expect(meetsRegion("경기도", "강원특별자치도")).toBe(false);
+    expect(meetsRegion("충청남도 또는 세종", "세종특별자치시")).toBe(true);
+    expect(meetsRegion("충청북도", "충청남도")).toBe(false);
+    expect(meetsRegion("경기도", null)).toBeNull();
   });
 
   it("공사현장 주소의 지명은 지역제한으로 보지 않는다", () => {
