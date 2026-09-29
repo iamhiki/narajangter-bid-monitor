@@ -20,6 +20,7 @@ import {
   shouldSendFailureAlert,
   type NotifiedState,
 } from "./state/notifiedStore.js";
+import { isPostedWithin } from "./state/recency.js";
 import { toErrorMessage } from "./errors.js";
 import { logger } from "./logger.js";
 import { redactSecrets } from "./redact.js";
@@ -94,14 +95,16 @@ async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: N
   const fetchFailed = hasFetchFailures(reportInput);
   const onlyNew = (source: ReportSource): ReportSource => ({
     ...source,
-    matches: source.matches.filter((m) => !isNotified(state, m.notice.noticeNo)),
+    // 아직 안 보냈고 최근 24시간 안에 올라온 공고만. 조회는 7일치라 기간 전체 개수도 함께 센다
+    matches: source.matches.filter((m) => !isNotified(state, m.notice.noticeNo) && isPostedWithin(m.notice.postedAt, now)),
   });
   const fresh: ReportInput = { ...reportInput, bid: onlyNew(reportInput.bid), preStandard: onlyNew(reportInput.preStandard) };
   const freshMatches = allMatches(fresh);
+  const windowTotal = { days: env.lookbackDays, count: allMatches(reportInput).length };
   logger.info("새 공고 확인", { 매칭: allMatches(reportInput).length, 새공고: freshMatches.length });
 
   if (env.dryRun) {
-    const messages = freshMatches.length > 0 ? buildTelegramMessages(fresh, { kind: "new" }) : [];
+    const messages = freshMatches.length > 0 ? buildTelegramMessages(fresh, { kind: "new", windowTotal }) : [];
     console.log(`텔레그램 미리보기 (새 공고 ${freshMatches.length}건, 메시지 ${messages.length}건)`);
     messages.forEach((message, i) => console.log(`\n--- 메시지 ${i + 1}/${messages.length} ---\n${message}`));
     return fetchFailed ? 2 : 0;
@@ -121,6 +124,7 @@ async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: N
       botToken: env.telegramBotToken!,
       chatIds: env.telegramChatIds,
       kind: "new",
+      windowTotal,
     });
   } catch (err) {
     // 보낸 것으로 기록하지 않는다 — 다음 실행에서 다시 보낸다.

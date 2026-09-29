@@ -222,13 +222,27 @@ function renderSummaryBlock(input: ReportInput, tally: ReportTally): string {
 }
 
 /** 매시간 확인에서 새로 나온 공고만 보낼 때의 머리말. 정기 보고서처럼 조회기간을 늘어놓지 않는다. */
-function renderNewNoticesBlock(input: ReportInput, tally: ReportTally): string {
+/**
+ * 웹 화면은 최근 7일 조건에 맞는 공고 전체를, 알림은 그중 새로 올라온 것만 보여준다. 개수가 달라
+ * "빠진 게 있나" 헷갈리지 않게 머리말에 기간 전체 개수를 함께 적는다 (2026-09-29 담당자 요청).
+ */
+export interface WindowTotal {
+  days: number;
+  count: number;
+}
+
+function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTotal?: WindowTotal): string {
   const d = input.generatedAt;
   const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const lines = [
     `🆕 <b>새 공고 ${tally.total}건</b>`,
     escapeTelegramHtml(`${formatDateForSubject(d)} ${time} 확인 · 강력추천 ${tally.priority}건 · 참고용 ${tally.brief}건`),
   ];
+  if (windowTotal) {
+    lines.push(
+      escapeTelegramHtml(`최근 ${windowTotal.days}일 전체 ${windowTotal.count}건 중 새로 올라온 공고만 보냅니다 (전체 목록은 웹 화면)`)
+    );
+  }
   const failures = collectFailures(input);
   if (failures.length > 0) {
     lines.push("", `⚠️ <b>일부 조회 실패</b>: ${escapeTelegramHtml(truncate(failures.join(", "), 200))}`);
@@ -245,12 +259,15 @@ export type TelegramMessageKind = "report" | "new";
  * kind "new"는 매시간 확인에서 새로 나온 공고만 보낼 때 쓴다 — 머리말과 끝맺음만 다르고
  * 공고 목록 모양은 같다.
  */
-export function buildTelegramMessages(input: ReportInput, options: { kind?: TelegramMessageKind } = {}): string[] {
+export function buildTelegramMessages(
+  input: ReportInput,
+  options: { kind?: TelegramMessageKind; windowTotal?: WindowTotal } = {}
+): string[] {
   const kind = options.kind ?? "report";
   const tally = tallyReport(input);
   const { priority, brief } = splitByConfidence(input);
 
-  const blocks: string[] = [kind === "new" ? renderNewNoticesBlock(input, tally) : renderSummaryBlock(input, tally)];
+  const blocks: string[] = [kind === "new" ? renderNewNoticesBlock(input, tally, options.windowTotal) : renderSummaryBlock(input, tally)];
 
   if (priority.length > 0) {
     blocks.push(

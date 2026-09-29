@@ -8,6 +8,7 @@ import {
   buildTelegramFailureMessage,
   buildTelegramMessages,
   type TelegramMessageKind,
+  type WindowTotal,
 } from "./telegramMessage.js";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -197,9 +198,9 @@ async function sendDocument(
 
 export async function sendTelegramReport(
   input: ReportInput,
-  options: TelegramSendOptions & { attachHtml?: string; kind?: TelegramMessageKind }
+  options: TelegramSendOptions & { attachHtml?: string; kind?: TelegramMessageKind; windowTotal?: WindowTotal }
 ): Promise<void> {
-  const messages = buildTelegramMessages(input, { kind: options.kind });
+  const messages = buildTelegramMessages(input, { kind: options.kind, windowTotal: options.windowTotal });
   await sendMessages(messages, options);
 
   // 첨부는 본문이 이미 나간 뒤에 시도한다. 파일이 실패해도 요약은 이미 도착해 있어야 한다.
