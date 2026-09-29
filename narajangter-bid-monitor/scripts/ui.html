@@ -245,6 +245,7 @@ body {
 .qtip .cls .miss { color: var(--urgent); }
 .qtip .fixline { display: block; font-size: 12px; color: var(--ink); margin: 3px 0 0 14px; }
 .qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; }
+.qtip .clspath { display: block; font-size: 11.5px; color: var(--faint); margin: 2px 0 0 14px; }
 .qtip .rel { display: block; font-size: 11.5px; color: var(--muted); margin: 2px 0 0 14px; }
 .qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
 .qtip h4.sub-h { margin-top: 12px; }
@@ -1273,7 +1274,7 @@ function enrichBadges(n) {
   const p = participation[n.noticeNo];
   const out = [];
   if (p?.status) out.push(`<span class="badge pstat ${PART_TONE[p.status]}">${esc(p.status)}${p.owner ? " · " + esc(p.owner) : ""}</span>`);
-  out.push(qualBadge(n, e.qualDoc));
+  out.push(qualBadge(n, e.qualDoc ? { ...e.qualDoc, classes: e.classes || {} } : e.qualDoc));
   const doc = e.qualDoc;
   if (doc?.designated) {
     out.push(`<span class="badge urgentb" title="${esc(doc.sourceFile)}">⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}</span>`);
@@ -1376,13 +1377,29 @@ function howToFix(r, doc) {
   return lines.map((l) => `<span class="fixline">${l}</span>`).join("");
 }
 
+/** 조달청 분류 경로 한 줄 + 해설. 대분류(2자리)는 너무 넓어서 빼고 중분류부터 보여준다. */
+function classPath(cls) {
+  const lv = (cls.levels || []).filter((l) => l.digits >= 4 && l.digits <= 8);
+  const leaf = (cls.levels || []).find((l) => l.digits === 10);
+  const route = lv.map((l) => esc(l.name)).join(" › ");
+  const desc = leaf && leaf.description ? ` — ${esc(leaf.description)}` : "";
+  return route ? `<span class="clspath">분류: ${route}${desc}</span>` : "";
+}
+
+/** "같은 중분류" 같은 단계 이름에 맞는 실제 분류 이름 (8·6·4자리) */
+function classLevelName(cls, level) {
+  const digits = { "같은 품명": 8, "같은 소분류": 6, "같은 중분류": 4 }[level];
+  const hit = (cls.levels || []).find((l) => l.digits === digits);
+  return hit ? hit.name : "";
+}
+
 function docTipBody(doc) {
   // 공고가 분류된 세부품명 (사전규격 prdctDtlList / 본공고 dtilPrdctClsfcNo) — 참가자격 문구가 없어도 알 수 있다
   const heldCodes = new Set(doc.requirements.filter((r) => r.held && r.code).map((r) => r.code));
   const cls = (doc.classifiedItems || []).filter((i) => !heldCodes.has(i.code) || !i.held);
   const classified = cls.length
     ? `<p class="cls">공고 분류 세부품명: ${cls
-        .map((i) => `<span class="${i.held ? "" : "miss"}">${i.held ? "✓" : "✗"} ${esc(i.name)}(${esc(i.code)})</span>`)
+        .map((i) => `<span class="${i.held ? "" : "miss"}">${i.held ? "✓" : "✗"} ${esc(i.name)}(${esc(i.code)})</span>${!i.held && (doc.classes || {})[i.code] ? classPath(doc.classes[i.code]) : ""}`)
         .join(", ")}</p>`
     : "";
   const linked = doc.linkedBidNo ? `<p>본공고가 이미 나왔습니다: <b>${esc(doc.linkedBidNo)}</b> — 본공고 쪽 판정을 기준으로 보세요.</p>` : "";
@@ -1397,10 +1414,13 @@ function docTipBody(doc) {
           const label = nm
             ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}`
             : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
+          const cls = r.code ? (doc.classes || {})[r.code] : null;
+          const levelName = r.related && cls ? classLevelName(cls, r.related.level) : "";
           const rel = r.related
-            ? `<span class="rel">${esc(r.related.level)}에 보유: ${r.related.items.map((i) => `${esc(i.name)}(${esc(i.code)})`).join(", ")} — 세부품명이 달라 보유로 치지 않음</span>`
+            ? `<span class="rel">${esc(r.related.level)}${levelName ? `(${esc(levelName)})` : ""}에 보유: ${r.related.items.map((i) => `${esc(i.name)}(${esc(i.code)})`).join(", ")} — 세부품명이 달라 보유로 치지 않음</span>`
             : "";
-          return `<li class="${r.held ? "" : (r.bases || []).includes("등록") && (r.bases || []).length === 1 ? "fixable" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}${r.held ? "" : howToFix(r, doc)}${rel}</li>`;
+          const path = !r.held && cls ? classPath(cls) : "";
+          return `<li class="${r.held ? "" : (r.bases || []).includes("등록") && (r.bases || []).length === 1 ? "fixable" : "miss"}">${r.held ? "✓" : "✗ 미보유"} ${label}${path}${r.held ? "" : howToFix(r, doc)}${rel}</li>`;
         })
         .join("")}</ul>`
     : "<p>공고문에서 업종코드·세부품명번호를 찾지 못했습니다.</p>";

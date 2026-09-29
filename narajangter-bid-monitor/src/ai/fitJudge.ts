@@ -6,6 +6,7 @@ import * as z from "zod/v4";
 import type { CodeEntry } from "../config/loadJsonConfig.js";
 import type { NormalizedNotice } from "../api/types.js";
 import type { QualificationDocResult } from "../matching/qualificationDoc.js";
+import type { ProductClassInfo } from "../api/productClassApi.js";
 import { redactPersonal } from "../redactPersonal.js";
 
 /**
@@ -38,6 +39,8 @@ export interface FitInput {
   /** 면허제한정보 판정 요약 (예: "충족 — 실내건축공사업(4990)") */
   qualificationSummary: string | null;
   qualDoc: QualificationDocResult | null;
+  /** 세부품명번호별 분류 경로·해설 (조달청 물품목록정보서비스). 없으면 빈 객체 */
+  productClasses?: Record<string, ProductClassInfo>;
   jointBid: string | null;
   /** 과업지시서·제안요청서 본문 (첨부를 읽은 경우) */
   taskText: string | null;
@@ -130,7 +133,9 @@ export function buildNoticeMessage(input: FitInput): string {
       const label = r.name ?? r.docName ?? (r.kind === "품명" ? "세부품명번호" : "업종코드");
       const rel = r.related ? ` [${r.related.level} 보유: ${r.related.items.map((i) => `${i.name}(${i.code})`).join(", ")}]` : "";
       const how = r.held ? "" : ` <요건: ${r.bases.join("+")}>`;
-      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${how}${rel}`;
+      const cls = r.code ? input.productClasses?.[r.code] : undefined;
+      const path = !r.held && cls ? ` [분류: ${cls.levels.filter((l) => l.digits >= 4).map((l) => l.name).join(" > ")}${cls.levels.at(-1)?.description ? ` — ${cls.levels.at(-1)!.description}` : ""}]` : "";
+      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${how}${rel}${path}`;
     });
     lines.push(
       `요건 종류 설명: 등록 = 나라장터 입찰참가자격 등록에 세부품명만 추가하면 됨(등록 마감 ${d.registrationDeadline ?? "공고에 없음"}까지) / 직접생산 = 직접생산확인증명서 필요(공고 기간 안에 취득 어려움) / 면허 = 법령상 업종 등록·면허 필요`

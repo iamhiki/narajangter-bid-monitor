@@ -10,6 +10,7 @@ import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js
 import { readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody } from "../src/api/noticeBody.js";
+import { lookupProductClass, type ProductClassInfo } from "../src/api/productClassApi.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
@@ -280,6 +281,8 @@ interface AiState {
 interface Enrichment {
   jointBid?: string | null;
   qualDoc?: QualificationDocResult | null;
+  /** 공고문·분류에 나온 세부품명번호의 분류 경로·해설 (조달청 물품목록정보서비스) */
+  classes?: Record<string, ProductClassInfo>;
   ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
@@ -324,6 +327,7 @@ async function runAiJudgment(
       matchReason: facts.matchReason,
       qualificationSummary: facts.qualificationSummary,
       qualDoc: e.qualDoc ?? null,
+      productClasses: e.classes ?? {},
       jointBid: e.jointBid ?? null,
       taskText: body?.text ?? null,
       similarPast: similar.top.filter((s) => s.score > 0.02).map((s) => ({ name: s.name, year: s.year, score: s.score })),
@@ -348,6 +352,22 @@ function qualificationSummary(m: MatchedNotice): string | null {
   return `제한그룹 ${q.totalGroups}개 모두 충족 — ${uniqueSatisfied(q.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
 }
 
+/** 공고문 요건·공고 분류에 나온 세부품명번호마다 분류 경로를 조회한다 (캐시가 있어 대부분 즉시 끝난다). */
+async function classesFor(doc: QualificationDocResult | null): Promise<Record<string, ProductClassInfo>> {
+  if (!doc) return {};
+  const codes = new Set<string>([
+    ...doc.requirements.filter((r) => r.kind === "품명" && r.code).map((r) => r.code!),
+    ...(doc.classifiedItems ?? []).map((i) => i.code),
+  ]);
+  const key = loadEnv().naraBidServiceKey;
+  const out: Record<string, ProductClassInfo> = {};
+  for (const code of codes) {
+    const info = await lookupProductClass(key, code).catch(() => null);
+    if (info) out[code] = info;
+  }
+  return out;
+}
+
 function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
   if (enrichState.running) return;
   // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
@@ -355,7 +375,7 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
   const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
   const docTodo = matches.map((m) => m.notice).filter((n) => {
     const e = enrichment.get(n.noticeNo);
-    return !e || e.qualDoc === undefined || (isBid(n) && e.jointBid === undefined);
+    return !e || e.qualDoc === undefined || e.classes === undefined || (isBid(n) && e.jointBid === undefined);
   });
   const aiEnabled = isAiConfigured();
   const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
@@ -374,6 +394,7 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
         const e = enrichment.get(n.noticeNo) ?? {};
         if (isBid(n) && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
         if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
+        if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
         enrichment.set(n.noticeNo, e);
         enrichState.done += 1;
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
@@ -686,6 +707,7 @@ const server = createServer((req, res) => {
         const e = enrichment.get(noticeNo) ?? {};
         if (n.sourceType === "본공고") {
           if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
+          if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
           if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, await getSessionCookie()).catch(() => null);
           enrichment.set(noticeNo, e);
         }
