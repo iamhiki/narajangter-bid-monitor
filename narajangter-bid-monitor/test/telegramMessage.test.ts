@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_MESSAGE_CHARS,
+  buildClosingSoonMessages,
   buildDocumentCaption,
   buildDocumentFilename,
   buildTelegramFailureMessage,
@@ -279,5 +280,22 @@ describe("buildTelegramFailureMessage", () => {
   it("아주 긴 스택트레이스도 상한 이하로 줄인다", () => {
     const message = buildTelegramFailureMessage("x".repeat(10000), new Date());
     expect(message.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
+  });
+});
+
+describe("buildClosingSoonMessages (매일 마감 임박 입찰)", () => {
+  it("D-day를 앞에 붙여 마감 임박 건을 늘어놓는다", () => {
+    const input = makeInput();
+    const m = makeMatch({ notice: makeNotice({ title: "놀이시설 설치", deadline: "2026-09-19 17:00:00" }) });
+    const joined = buildClosingSoonMessages(input, [m], { days: 7 }).join("\n");
+    expect(joined).toContain("마감 임박 입찰 1건");
+    expect(joined).toContain("<b>D-2</b>");
+    expect(joined).toContain("놀이시설 설치");
+  });
+
+  it("0건이어도 없다는 한 줄은 보낸다 (안 오면 고장인지 모른다)", () => {
+    const messages = buildClosingSoonMessages(makeInput(), [], { days: 7 });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("없습니다");
   });
 });

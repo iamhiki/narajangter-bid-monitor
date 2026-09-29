@@ -80,6 +80,28 @@ describe("코드가 없는 그룹", () => {
   });
 });
 
+describe("satisfiedBy (화면 표시용)", () => {
+  it("그룹마다 채운 보유 자격을 보유 목록의 이름과 코드로 남긴다", () => {
+    const r = evaluateQualifications(
+      [
+        { groupNo: "1", allowedNames: ["건축공사업/0002", "실내 건축공사업/0006"] },
+        { groupNo: "2", allowedNames: ["정보통신공사업"] },
+      ],
+      held.products,
+      held.industries
+    );
+    expect(r.satisfiedBy).toEqual([
+      { groupNo: "1", name: "실내건축공사업", code: "0006" },
+      // 코드 없는 그룹은 이름으로만 맞췄으므로 코드를 추측해 붙이지 않는다
+      { groupNo: "2", name: "정보통신공사업", code: null },
+    ]);
+  });
+
+  it("못 채운 그룹은 satisfiedBy에 없다", () => {
+    expect(check(["건축공사업/0002"]).satisfiedBy).toEqual([]);
+  });
+});
+
 describe("fail-open", () => {
   it("자격 정보가 없으면 통과시킨다", () => {
     const r = evaluateQualifications([], held.products, held.industries);

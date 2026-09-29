@@ -1,6 +1,7 @@
 import type { ReportInput, ReportSource } from "../report/buildReport.js";
 import type { MatchedNotice } from "../matching/types.js";
 import { sortMatches } from "../matching/matchEngine.js";
+import { daysUntilDeadline } from "../matching/deadline.js";
 import { formatBudget, formatDateForSubject, formatDisplayValue } from "../report/format.js";
 
 /**
@@ -280,6 +281,58 @@ export function buildTelegramMessages(input: ReportInput, options: { kind?: Tele
   );
 
   return packIntoMessages(blocks);
+}
+
+/**
+ * 매일 마감 임박 보고 (RUN_MODE=daily).
+ *
+ * 대상은 호출부가 골라 넘긴다 — 7일 안에 마감되는 "입찰"(적격심사·최저가 등) 본공고.
+ * 새 공고 알림과 달리 **이미 알린 공고도 마감 전까지 매일 다시 보낸다.** 마감을 놓치지 않게
+ * 하는 게 목적이라서다. 마감 빠른 순으로 늘어놓고 D-day를 맨 앞에 둔다.
+ *
+ * 0건이어도 한 줄은 보낸다 — 매일 오던 보고가 안 오면 "없어서"인지 "고장나서"인지 모른다.
+ */
+export function buildClosingSoonMessages(
+  input: ReportInput,
+  closingSoon: MatchedNotice[],
+  options: { days: number }
+): string[] {
+  const d = input.generatedAt;
+  const header = [
+    `⏰ <b>마감 임박 입찰 ${closingSoon.length}건</b>`,
+    escapeTelegramHtml(`${formatDateForSubject(d)} 기준 · ${options.days}일 안에 마감되는 입찰(적격심사·최저가 등) 본공고`),
+  ];
+  if (closingSoon.length === 0) header.push("", "오늘은 해당 공고가 <b>없습니다.</b>");
+
+  const failures = collectFailures(input);
+  if (failures.length > 0) {
+    header.push("", `⚠️ <b>일부 조회 실패</b>: ${escapeTelegramHtml(truncate(failures.join(", "), 200))}`);
+    header.push("<i>빠진 공고가 있을 수 있습니다.</i>");
+  }
+
+  const items = closingSoon.map((m, i) => {
+    const n = m.notice;
+    const left = daysUntilDeadline(n.deadline, d);
+    const dday = left === null ? "" : left <= 0 ? "🔥<b>D-DAY</b> " : `<b>D-${left}</b> `;
+    const lines = [
+      `${dday}<b>${i + 1}.</b> ${titleLink(m)}`,
+      escapeTelegramHtml(
+        `${formatDisplayValue(n.institution)} · ${formatBudget(n.budgetAmount)} · 마감 ${formatDisplayValue(n.deadline)}`
+      ),
+    ];
+    if (n.bidMethod) lines.push(escapeTelegramHtml(`낙찰방법 ${truncate(n.bidMethod, MAX_BID_METHOD_CHARS)}`));
+    const reason = matchReason(m);
+    if (reason) lines.push(`🏷 ${escapeTelegramHtml(truncate(reason, MAX_BADGES_CHARS))}`);
+    const sync = similarityLine(m);
+    if (sync) lines.push(sync);
+    return lines.join("\n");
+  });
+
+  return packIntoMessages([
+    header.join("\n"),
+    ...items,
+    "<i>※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>",
+  ]);
 }
 
 /** 첨부 HTML에 붙일 한 줄 설명 */

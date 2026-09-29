@@ -27,17 +27,22 @@ export async function applyQualificationFilter(
 
   const kept: MatchedNotice[] = [];
   let excludedCount = 0;
+  // 조회가 실패하면 fetchAllLicenseLimitGroups가 빈 Map을 준다. 조회기간 전체에 면허제한
+  // 공고가 한 건도 없을 리는 없으므로 빈 Map은 실패로 본다.
+  const lookupFailed = groupsByNotice.size === 0;
 
   for (const match of matches) {
     const groups = groupsByNotice.get(match.notice.noticeNo) ?? [];
     if (groups.length === 0) {
       // 자격조건 정보가 없거나 전체조회 자체가 실패함 -> fail-open (통과)
+      match.qualification = { status: lookupFailed ? "조회실패" : "제한없음", totalGroups: 0, satisfiedBy: [] };
       kept.push(match);
       continue;
     }
 
     const result = evaluateQualifications(groups, appConfig.heldProducts, appConfig.heldIndustries);
     if (result.passes) {
+      match.qualification = { status: "충족", totalGroups: result.totalGroups, satisfiedBy: result.satisfiedBy };
       kept.push(match);
     } else {
       excludedCount += 1;

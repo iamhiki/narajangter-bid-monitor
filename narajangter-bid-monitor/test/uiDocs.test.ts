@@ -76,9 +76,12 @@ describe("낙찰방법 필터가 실제로 적용됐다는 사실이 반영돼 �
     expect(html).not.toContain("표시만, 필터 미적용");
   });
 
-  it("현재 동작(fail-open, requireNegotiatedContract)이 적혀 있다", () => {
-    expect(html).toContain("협상에 의한 계약만 통과");
+  it("현재 동작(fail-open, allowedBidMethods)이 적혀 있다", () => {
+    expect(html).toContain("수의계약 제외");
     expect(html).toContain("fail-open");
-    expect(html).toContain("requireNegotiatedContract");
+    expect(html).toContain("allowedBidMethods");
+    // 협상만 통과하던 시절 문구가 남아 있으면 안 된다
+    expect(html).not.toContain("협상에 의한 계약만 통과");
+    expect(html).not.toContain("requireNegotiatedContract");
   });
 });

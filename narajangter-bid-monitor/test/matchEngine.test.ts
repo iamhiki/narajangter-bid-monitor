@@ -30,7 +30,7 @@ const config: AppConfig = {
   excludeKeywords: ["구입", "정비"],
   minBudgetAmount: null,
   businessTypes: ["물품", "용역", "공사"],
-  requireNegotiatedContract: false,
+  allowedBidMethods: ["협상", "규격가격동시", "입찰", "수의"],
   productCodes: [{ code: "5512190301", name: "안내전광판" }],
   industryCodes: [{ code: "6815", name: "전시사업자" }],
   recipients: ["a@example.com"],
@@ -183,8 +183,26 @@ describe("최소 예산금액 필터", () => {
   });
 });
 
-describe("낙찰방법 필터 (requireNegotiatedContract)", () => {
-  const negotiatedConfig: AppConfig = { ...config, requireNegotiatedContract: true };
+describe("낙찰방법 필터 (allowedBidMethods) — 2026-09-29 미팅 기준: 수의계약만 제외", () => {
+  const meetingConfig: AppConfig = { ...config, allowedBidMethods: ["협상", "규격가격동시", "입찰"] };
+
+  it.each([
+    "협상에의한계약-협상에 의한 낙찰자 결정",
+    "규격가격동시입찰-제안적격자 중 예가 내 최저가 투찰자",
+    "적격심사제-추정가격 10억원 미만이면서 고시금액 이상",
+  ])("'%s'는 통과한다", (bidMethod) => {
+    const notice = makeNotice({ businessType: "물품", productClsfcNo: "5512190301", title: "전시 안내전광판 설치", bidMethod });
+    expect(evaluateNotice(notice, meetingConfig)).not.toBeNull();
+  });
+
+  it.each(["수의시담-수의시담", "소액수의견적-소액수의견적(2인 이상 견적 제출)"])("'%s'는 제외된다", (bidMethod) => {
+    const notice = makeNotice({ businessType: "물품", productClsfcNo: "5512190301", title: "전시 안내전광판 설치", bidMethod });
+    expect(evaluateNotice(notice, meetingConfig)).toBeNull();
+  });
+});
+
+describe("낙찰방법 필터 (allowedBidMethods) — 협상만 허용할 때", () => {
+  const negotiatedConfig: AppConfig = { ...config, allowedBidMethods: ["협상"] };
 
   function negotiatedNotice(overrides: Partial<NormalizedNotice> = {}): NormalizedNotice {
     return makeNotice({

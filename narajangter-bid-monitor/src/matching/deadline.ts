@@ -44,3 +44,35 @@ export function excludeExpiredNotices(
   const open = notices.filter((n) => !isDeadlinePassed(n.deadline, now));
   return { open, expiredCount: notices.length - open.length };
 }
+
+/** 매일 마감 임박 보고에서 보는 기간 (2026-09-29 미팅: "입찰"은 7일 안에 마감되는 경우가 있다) */
+export const CLOSING_SOON_DAYS = 7;
+
+/**
+ * 아직 마감 전이고 D-`days` 이내(한국 달력 기준)인 공고만 마감 빠른 순으로 골라낸다.
+ * 시각 기준(정확히 168시간)으로 자르면 메시지에 "D-7"로 찍히는 공고가 오후 마감이라는 이유로
+ * 빠지는 어긋남이 생겨서, 보고에 찍히는 D-day와 같은 기준을 쓴다.
+ * 마감일시를 모르는 공고는 뺀다 — 여기는 "곧 마감"을 알리는 자리라 마감을 모르면 넣을 근거가 없다.
+ */
+export function selectClosingSoon<T extends { notice: NormalizedNotice }>(
+  matches: T[],
+  now: Date,
+  days: number = CLOSING_SOON_DAYS
+): T[] {
+  return matches
+    .map((m) => ({ m, at: parseKstDateTime(m.notice.deadline)?.getTime() ?? null }))
+    .filter(
+      (x): x is { m: T; at: number } =>
+        x.at !== null && x.at >= now.getTime() && daysUntilDeadline(x.m.notice.deadline, now)! <= days
+    )
+    .sort((a, b) => a.at - b.at)
+    .map((x) => x.m);
+}
+
+/** 마감까지 남은 날짜 (KST 달력 기준). 오늘 마감이면 0. */
+export function daysUntilDeadline(deadline: string | null, now: Date): number | null {
+  const at = parseKstDateTime(deadline);
+  if (!at) return null;
+  const kstDay = (d: Date) => Math.floor((d.getTime() + KST_OFFSET_HOURS * 3_600_000) / 86_400_000);
+  return kstDay(at) - kstDay(now);
+}

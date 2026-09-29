@@ -8,6 +8,7 @@ import { loadEnv } from "../src/config/env.js";
 import { loadAppConfig } from "../src/config/loadJsonConfig.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
+import { classifyBidMethod } from "../src/matching/bidMethod.js";
 import type { PastProject } from "../src/corpus/types.js";
 import { SimilarityIndex } from "../src/similarity/index.js";
 import { calibrate } from "../src/similarity/calibrate.js";
@@ -167,9 +168,11 @@ function decorate(m: MatchedNotice): unknown {
     budgetAmount: n.budgetAmount,
     detailUrl: n.detailUrl,
     bidMethod: n.bidMethod,
+    bidMethodCategory: classifyBidMethod(n.bidMethod),
     confidence: m.confidence,
     reason: matchReason(m),
     overseas: m.overseasVenueFlag?.matchedMongoliaKeyword ?? null,
+    qualification: m.qualification ?? null,
     maxScore: calibrate(similarity.maxScore, similarity.basis),
     rawScore: similarity.maxScore,
     basis: similarity.basis,

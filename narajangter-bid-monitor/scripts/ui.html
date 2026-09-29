@@ -222,6 +222,29 @@ body {
 .badge.raw { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Consolas", monospace; font-size: 10.5px; color: var(--faint); }
 .badge.warn { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); font-weight: 600; }
 
+/* 자격판정 배지 — 커서를 올리거나 탭으로 포커스하면 어떤 보유 자격으로 채웠는지 보여준다 */
+.qual { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: help; outline: none; }
+.qual .ico {
+  display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--brand); color: var(--on-brand); font-size: 9px; font-weight: 700; line-height: 1;
+}
+.qual.ok { color: var(--brand); border-color: var(--brand); font-weight: 600; }
+.qual.fail { background: var(--warn-tint); color: var(--warn); border-color: var(--warn); }
+.qual:focus-visible { box-shadow: 0 0 0 2px var(--brand); }
+.qtip {
+  display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 20;
+  width: max-content; max-width: min(340px, calc(100vw - 48px)); white-space: normal;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14);
+  font-size: 12.5px; font-weight: 400; letter-spacing: 0; line-height: 1.5; cursor: default;
+}
+.qual:hover .qtip, .qual:focus .qtip { display: block; }
+.qtip h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--brand); }
+.qtip ul { list-style: none; margin: 0; padding: 0; }
+.qtip li { padding: 6px 0; border-top: 1px solid var(--line-soft); color: var(--ink-strong); }
+.qtip li:first-child { border-top: 0; padding-top: 0; }
+.qtip p { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); }
+
 .simlist { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
 .simlist a.why { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
 .simlist a.why:hover { color: var(--brand); border-bottom-color: var(--brand); }
@@ -496,12 +519,15 @@ footer b { color: var(--muted); }
         <div class="stage-body">
           <h3>규칙 추출 <span class="pill partial">부분</span></h3>
           <p>제외 키워드 <b class="ok">✓</b> · 최소 예산 1억원 <b class="ok">✓</b> ·
-             낙찰방법 <b class="ok">✓ 협상에 의한 계약만 통과</b></p>
-          <p class="sub">2026-09-23부터 적용. <b>fail-open</b>이다 — 낙찰방법을 아직 모르는
-             공고(사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이 빗나가면 그럴 수 있음)는
-             거르지 않는다. 값이 있는데 협상에의한이 <b>아닌 게 확인됐을 때만</b> 제외한다.
-             <code>config/keywords.json</code>의 <code>requireNegotiatedContract</code>만
-             <code>false</code>로 바꾸면 끌 수 있다(코드 수정 불필요).</p>
+             낙찰방법 <b class="ok">✓ 협상·규격가격동시·입찰 통과, 수의계약 제외</b></p>
+          <p class="sub">2026-09-29 미팅 기준. 낙찰방법을 <b>협상</b>(협상에 의한 계약) ·
+             <b>규격가격동시</b>(규격·가격 동시입찰) · <b>입찰</b>(적격심사·최저가 등) · <b>수의</b>로 나누고
+             수의계약만 뺀다. <b>fail-open</b>이다 — 낙찰방법을 아직 모르는 공고(사전규격은 이 단계에서
+             항상 그렇고, 본공고도 필드 인식이 빗나가면 그럴 수 있음)는 거르지 않는다.
+             <code>config/keywords.json</code>의 <code>allowedBidMethods</code> 목록만 고치면
+             바뀐다(코드 수정 불필요).<br>
+             <b>입찰</b>은 7일 안에 마감되는 경우가 있어 매일 아침 텔레그램으로 마감 임박 건을 따로 보고한다
+             (<code>RUN_MODE=daily</code>).</p>
           <code>config/keywords.json · src/matching/bidMethod.ts · src/matching/matchEngine.ts</code>
         </div>
       </div>
@@ -896,7 +922,7 @@ async function loadNotices(refresh) {
 }
 
 /** 현재 걸려 있는 필터 상태 */
-const filters = { grade: "all", source: "all" };
+const filters = { grade: "all", source: "all", method: "all" };
 let lastItems = [];
 
 function renderNotices(items) {
@@ -908,7 +934,8 @@ function applyFilters() {
   const shown = lastItems.filter(
     (n) =>
       (filters.grade === "all" || n.confidence === filters.grade) &&
-      (filters.source === "all" || n.sourceType === filters.source)
+      (filters.source === "all" || n.sourceType === filters.source) &&
+      (filters.method === "all" || n.bidMethodCategory === filters.method)
   );
 
   // 필터 칩의 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
@@ -922,6 +949,9 @@ function applyFilters() {
     chip("source", "all", "본공고+사전규격"),
     chip("source", "본공고", `본공고 ${count((n) => n.sourceType === "본공고")}`),
     chip("source", "사전규격", `사전규격 ${count((n) => n.sourceType === "사전규격")}`),
+    `<span class="chip-gap"></span>`,
+    chip("method", "all", "낙찰방법 전체"),
+    ...["협상", "규격가격동시", "입찰"].map((m) => chip("method", m, `${m} ${count((n) => n.bidMethodCategory === m)}`)),
   ].join("");
 
   if (!lastItems.length) {
@@ -987,7 +1017,9 @@ function renderNotice(n) {
       <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
       ${scoreBadge}
       <span class="badge">${esc(n.businessType)}</span>
+      ${n.bidMethodCategory ? `<span class="badge" title="${esc(n.bidMethod || "")}">${esc(n.bidMethodCategory)}</span>` : ""}
       ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
+      ${qualBadge(n)}
     </div>
     <h3>${title}</h3>
     <div class="meta">${esc(n.institution || "기관 미상")}
@@ -997,6 +1029,40 @@ function renderNotice(n) {
     <div class="meta">규칙 근거: ${esc(n.reason)}</div>
     ${sims ? `<div class="simlist">유사 과거사업 (클릭하면 계산 근거) — ${sims}</div>` : ""}
   </div>`;
+}
+
+/**
+ * 자격판정 배지. 필터에서 떨어진 공고는 화면에 오지 않으므로 "미충족"은 없다 —
+ * 여기 보이는 본공고는 충족했거나, 판정할 제한 정보가 없어 통과한 것이다.
+ */
+function qualBadge(n) {
+  const q = n.qualification;
+  const tip = (title, body) => `<span class="qtip" role="tooltip"><h4>${title}</h4>${body}</span>`;
+  if (!q) {
+    return `<span class="badge qual" tabindex="0">자격 판정 대상 아님${tip(
+      "자격 판정 대상 아님",
+      "<p>사전규격은 나라장터에 면허제한정보 API가 없어 참가자격을 자동으로 대조하지 않습니다. 본공고가 나오면 판정됩니다.</p>"
+    )}</span>`;
+  }
+  if (q.status === "조회실패") {
+    return `<span class="badge qual fail" tabindex="0">자격 확인 실패${tip(
+      "자격 확인 실패",
+      "<p>면허제한정보 조회가 실패해 판정 없이 통과시켰습니다. 원문 공고의 참가자격을 직접 확인하세요.</p>"
+    )}</span>`;
+  }
+  if (q.status === "제한없음") {
+    return `<span class="badge qual" tabindex="0">업종제한 없음${tip(
+      "업종제한 없음",
+      "<p>면허제한정보에 이 공고의 업종제한이 등록되어 있지 않습니다. 지역제한 등 다른 참가자격은 원문 공고에서 확인하세요.</p>"
+    )}</span>`;
+  }
+  const items = q.satisfiedBy
+    .map((s) => `<li>${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}</li>`)
+    .join("");
+  return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.satisfiedBy.length}/${q.totalGroups}${tip(
+    `충족된 자격 ${q.satisfiedBy.length}건`,
+    `<ul>${items}</ul><p>이름 뒤 괄호 속 숫자는 세부품명번호·업종코드입니다. 코드가 없는 항목은 면허제한정보 API에 코드 필드 자체가 없어 이름만 표시됩니다.</p>`
+  )}</span>`;
 }
 
 // ── 점수 근거 ───────────────────────────────────────────────

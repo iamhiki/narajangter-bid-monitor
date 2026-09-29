@@ -1,0 +1,49 @@
+name: 나라장터 마감 임박 입찰 텔레그램 보고 (매일)
+
+# 7일 안에 마감되는 "입찰"(적격심사·최저가 등) 본공고를 매일 아침 텔레그램으로 보낸다.
+# 2026-09-29 미팅: 입찰은 공고 후 7일 안에 마감되는 경우가 있어 주간 리포트로는 늦다.
+# 공고일 기준으로 수집하므로 30일치를 훑어야 "한참 전에 올라왔지만 이번 주에 마감되는" 건까지 잡힌다.
+on:
+  schedule:
+    # 매일 08:10 KST = 전날 23:10 UTC. 정각은 GitHub 예약 실행이 몰려 지연이 커서 피한다.
+    - cron: "10 23 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true로 설정하면 텔레그램을 보내지 않고 미리보기만 출력합니다"
+        required: false
+        default: "false"
+
+defaults:
+  run:
+    working-directory: narajangter-bid-monitor
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: narajangter-bid-monitor/package-lock.json
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 마감 임박 입찰 확인 및 텔레그램 보고
+        env:
+          TZ: Asia/Seoul
+          RUN_MODE: daily
+          LOOKBACK_DAYS: "30"
+          NARA_BID_SERVICE_KEY: ${{ secrets.NARA_BID_SERVICE_KEY }}
+          NARA_PRESTD_SERVICE_KEY: ${{ secrets.NARA_PRESTD_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: npm run report

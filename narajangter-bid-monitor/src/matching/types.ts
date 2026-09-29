@@ -1,6 +1,7 @@
 import type { SimilarityBasis } from "../similarity/index.js";
 import type { NormalizedNotice } from "../api/types.js";
 import type { CodeEntry } from "../config/loadJsonConfig.js";
+import type { SatisfiedQualification } from "./qualificationFilter.js";
 
 export type Confidence = "강력추천" | "참고용";
 
@@ -37,6 +38,21 @@ export interface MatchedNotice {
    * "공동수급불허"로 오해하면 안 된다.
    */
   jointBidStatus?: string;
+  /**
+   * 참가자격(면허제한) 판정 — 본공고에만 붙는다 (사전규격은 면허제한 API가 없음).
+   *
+   * 필터에서 떨어진 공고는 여기까지 오지 않으므로 "미충족" 상태는 없다.
+   * - 충족: 공고의 제한그룹을 모두 보유 자격으로 채움 (satisfiedBy에 무엇으로 채웠는지)
+   * - 제한없음: 면허제한정보에 이 공고가 없음 (업종제한이 없는 공고)
+   * - 조회실패: 면허제한정보 조회 자체가 실패해 fail-open으로 통과시킴
+   */
+  qualification?: QualificationInfo;
+}
+
+export interface QualificationInfo {
+  status: "충족" | "제한없음" | "조회실패";
+  totalGroups: number;
+  satisfiedBy: SatisfiedQualification[];
 }
 
 export interface SimilarityInfo {

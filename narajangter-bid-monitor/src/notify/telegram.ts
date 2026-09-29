@@ -232,6 +232,12 @@ export async function sendTelegramReport(
   });
 }
 
+/** 이미 만든 메시지들을 그대로 보낸다 (매일 마감 임박 보고처럼 보고서 모양이 다른 경우) */
+export async function sendTelegramMessages(messages: string[], options: TelegramSendOptions): Promise<void> {
+  await sendMessages(messages, options);
+  logger.info("텔레그램 발송 완료", { chatIds: options.chatIds, 메시지수: messages.length });
+}
+
 export async function sendTelegramFailureAlert(
   errorMessage: string,
   occurredAt: Date,

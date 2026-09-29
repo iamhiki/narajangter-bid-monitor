@@ -34,6 +34,20 @@ export interface QualificationCheckResult {
   passes: boolean;
   /** 코드를 못 읽어 이름으로 판정할 수밖에 없었던 그룹 수 (진단용) */
   nameFallbackGroups: number;
+  /** 충족된 그룹마다 그 그룹을 채운 보유 자격 (화면 표시용) */
+  satisfiedBy: SatisfiedQualification[];
+}
+
+/**
+ * 그룹 하나를 채운 보유 자격.
+ * 코드로 맞춘 경우 이름은 보유 자격 목록의 이름을 쓴다. 이름으로만 맞춘 경우(공고 쪽에
+ * 코드가 없던 그룹)는 어느 코드인지 특정할 수 없으므로 code가 null이다 —
+ * 실내건축공사업처럼 같은 이름에 코드가 둘인 자격도 있어서 추측해 붙이지 않는다.
+ */
+export interface SatisfiedQualification {
+  groupNo: string;
+  name: string;
+  code: string | null;
 }
 
 /** `"정보통신공사업/0036"` → `"0036"`. 코드가 없으면 null. */
@@ -52,22 +66,26 @@ export function isGroupSatisfied(
   group: LicenseLimitGroup,
   heldCodes: ReadonlySet<string>,
   heldNames: ReadonlySet<string>
-): { satisfied: boolean; usedNameFallback: boolean } {
+): { satisfied: boolean; usedNameFallback: boolean; matched?: { code: string | null; name: string } } {
   let sawCode = false;
 
   for (const allowed of group.allowedNames) {
     const code = extractCode(allowed);
     if (code) {
       sawCode = true;
-      if (heldCodes.has(code)) return { satisfied: true, usedNameFallback: false };
+      if (heldCodes.has(code)) {
+        const name = allowed.replace(/\/\s*\d{4}\s*$/, "").trim();
+        return { satisfied: true, usedNameFallback: false, matched: { code, name } };
+      }
     }
   }
   if (sawCode) return { satisfied: false, usedNameFallback: false };
 
   // 코드가 하나도 없는 그룹 — 이름 완전일치로만 본다.
-  const bare = group.allowedNames.map((n) => n.trim());
-  const satisfied = bare.some((n) => heldNames.has(n));
-  return { satisfied, usedNameFallback: true };
+  const hit = group.allowedNames.map((n) => n.trim()).find((n) => heldNames.has(n));
+  return hit !== undefined
+    ? { satisfied: true, usedNameFallback: true, matched: { code: null, name: hit } }
+    : { satisfied: false, usedNameFallback: true };
 }
 
 /**
@@ -79,16 +97,23 @@ export function evaluateQualifications(
   heldProducts: CodeEntry[],
   heldIndustries: CodeEntry[]
 ): QualificationCheckResult {
-  const heldCodes = new Set([...heldProducts, ...heldIndustries].map((c) => c.code.trim()));
-  const heldNames = new Set([...heldProducts, ...heldIndustries].map((c) => c.name.trim()));
+  const held = [...heldProducts, ...heldIndustries];
+  const heldCodes = new Set(held.map((c) => c.code.trim()));
+  const heldNames = new Set(held.map((c) => c.name.trim()));
+  const heldNameByCode = new Map(held.map((c) => [c.code.trim(), c.name.trim()]));
 
   const missingGroups: LicenseLimitGroup[] = [];
+  const satisfiedBy: SatisfiedQualification[] = [];
   let nameFallbackGroups = 0;
 
   for (const group of groups) {
-    const { satisfied, usedNameFallback } = isGroupSatisfied(group, heldCodes, heldNames);
+    const { satisfied, usedNameFallback, matched } = isGroupSatisfied(group, heldCodes, heldNames);
     if (usedNameFallback) nameFallbackGroups += 1;
     if (!satisfied) missingGroups.push(group);
+    else if (matched) {
+      const name = (matched.code && heldNameByCode.get(matched.code)) || matched.name;
+      satisfiedBy.push({ groupNo: group.groupNo, name, code: matched.code });
+    }
   }
 
   return {
@@ -97,5 +122,6 @@ export function evaluateQualifications(
     missingCount: missingGroups.length,
     passes: missingGroups.length <= MAX_ALLOWED_MISSING_QUALIFICATIONS,
     nameFallbackGroups,
+    satisfiedBy,
   };
 }

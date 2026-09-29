@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { excludeExpiredNotices, isDeadlinePassed, parseKstDateTime } from "../src/matching/deadline.js";
+import {
+  daysUntilDeadline,
+  excludeExpiredNotices,
+  isDeadlinePassed,
+  parseKstDateTime,
+  selectClosingSoon,
+} from "../src/matching/deadline.js";
 import type { NormalizedNotice } from "../src/api/types.js";
 
 function notice(noticeNo: string, deadline: string | null): NormalizedNotice {
@@ -73,5 +79,31 @@ describe("excludeExpiredNotices", () => {
     );
     expect(open.map((n) => n.noticeNo)).toEqual(["B", "C"]);
     expect(expiredCount).toBe(1);
+  });
+});
+
+describe("selectClosingSoon / daysUntilDeadline (매일 마감 임박 보고)", () => {
+  const now = new Date("2026-09-29T08:10:00+09:00");
+  const wrap = (n: NormalizedNotice) => ({ notice: n });
+
+  it("D-7 이내(오후 마감 포함)만 마감 빠른 순으로 고른다", () => {
+    const picked = selectClosingSoon(
+      [
+        wrap(notice("late", "2026-10-06 17:00:00")),
+        wrap(notice("soon", "2026-09-30 10:00:00")),
+        wrap(notice("past", "2026-09-29 08:00:00")), // 이미 마감
+        wrap(notice("far", "2026-10-07 10:00:00")), // D-8
+        wrap(notice("unknown", null)), // 마감 모름 — 넣을 근거가 없다
+      ],
+      now
+    );
+    expect(picked.map((m) => m.notice.noticeNo)).toEqual(["soon", "late"]);
+  });
+
+  it("D-day는 한국 달력 기준으로 센다", () => {
+    expect(daysUntilDeadline("2026-09-29 17:00:00", now)).toBe(0);
+    expect(daysUntilDeadline("2026-09-30 00:30:00", now)).toBe(1);
+    expect(daysUntilDeadline("2026-10-06 17:00:00", now)).toBe(7);
+    expect(daysUntilDeadline(null, now)).toBeNull();
   });
 });

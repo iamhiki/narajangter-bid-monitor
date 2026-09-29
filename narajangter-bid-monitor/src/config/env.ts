@@ -27,12 +27,13 @@ function parseLogLevel(raw: string | undefined): "debug" | "info" | "warn" | "er
   throw new ConfigError(`LOG_LEVEL은 debug|info|warn|error 중 하나여야 합니다. 현재 값: "${raw}"`);
 }
 
-export type RunMode = "weekly" | "hourly";
+export type RunMode = "weekly" | "hourly" | "daily";
 
 export interface Env {
   /**
    * weekly: 기간 전체를 모아 이메일 리포트 발송 (텔레그램 보고서는 보내지 않음).
    * hourly: 새로 나온 공고만 골라 텔레그램으로 즉시 알림 (이메일은 보내지 않음).
+   * daily: 7일 안에 마감되는 "입찰"(적격심사 등) 본공고를 매일 텔레그램으로 보고.
    */
   runMode: RunMode;
   /** hourly 모드에서 이미 알린 공고를 기억하는 파일 */
@@ -93,10 +94,10 @@ export function loadEnv(): Env {
   const naraPrestdServiceKey = (e.NARA_PRESTD_SERVICE_KEY ?? "").trim() || naraBidServiceKey;
 
   const runModeRaw = (e.RUN_MODE ?? "weekly").trim().toLowerCase();
-  if (runModeRaw !== "weekly" && runModeRaw !== "hourly") {
-    errors.push(`RUN_MODE는 weekly 또는 hourly여야 합니다. 현재 값: "${e.RUN_MODE}"`);
+  if (runModeRaw !== "weekly" && runModeRaw !== "hourly" && runModeRaw !== "daily") {
+    errors.push(`RUN_MODE는 weekly, hourly, daily 중 하나여야 합니다. 현재 값: "${e.RUN_MODE}"`);
   }
-  const runMode: RunMode = runModeRaw === "hourly" ? "hourly" : "weekly";
+  const runMode: RunMode = runModeRaw === "hourly" || runModeRaw === "daily" ? runModeRaw : "weekly";
 
   const smtpHost = e.SMTP_HOST?.trim() || undefined;
   const smtpUser = e.SMTP_USER?.trim() || undefined;
@@ -173,8 +174,8 @@ export function loadEnv(): Env {
     errors.push(err instanceof ConfigError ? err.message : String(err));
   }
 
-  if (runMode === "hourly" && !dryRun && !telegramEnabled) {
-    errors.push("RUN_MODE=hourly는 텔레그램으로 알리는 모드입니다. TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_IDS를 설정하세요.");
+  if (runMode !== "weekly" && !dryRun && !telegramEnabled) {
+    errors.push(`RUN_MODE=${runMode}는 텔레그램으로 알리는 모드입니다. TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_IDS를 설정하세요.`);
   }
 
   if (errors.length > 0) {

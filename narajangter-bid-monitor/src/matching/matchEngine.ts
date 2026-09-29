@@ -1,6 +1,6 @@
 import type { NormalizedNotice } from "../api/types.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
-import { isNegotiatedContract } from "./bidMethod.js";
+import { classifyBidMethod } from "./bidMethod.js";
 import { matchCodes } from "./codeMatcher.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
@@ -31,11 +31,12 @@ export function evaluateNotice(
     return null;
   }
 
-  // 낙찰방법이 "협상에 의한 계약"인 공고만 남긴다 — fail-open이다. bidMethod가 null이면
-  // (사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이 빗나가면 null일 수 있음)
+  // 허용한 낙찰방법 분류만 남긴다 (기본 설정은 수의계약만 제외) — fail-open이다. bidMethod가
+  // null이면(사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이 빗나가면 null일 수 있음)
   // 판단할 근거가 없다는 뜻이라 거르지 않는다. "모르면 지운다"로 가면 실제 기회를 놓칠 수
-  // 있어서다 — bidMethod가 값을 갖고 있는데 협상에의한이 아닌 게 확인됐을 때만 제외한다.
-  if (config.requireNegotiatedContract && notice.bidMethod != null && !isNegotiatedContract(notice.bidMethod)) {
+  // 있어서다 — 값이 있고 허용 목록 밖인 게 확인됐을 때만 제외한다.
+  const bidMethodCategory = classifyBidMethod(notice.bidMethod);
+  if (bidMethodCategory !== null && !config.allowedBidMethods.includes(bidMethodCategory)) {
     return null;
   }
 
