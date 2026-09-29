@@ -350,10 +350,12 @@ function qualificationSummary(m: MatchedNotice): string | null {
 
 function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
   if (enrichState.running) return;
-  const bids = matches.filter((m) => m.notice.sourceType === "본공고").map((m) => m.notice);
-  const docTodo = bids.filter((n) => {
+  // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
+  // 공동수급은 g2b 상세 API가 본공고에만 있다.
+  const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
+  const docTodo = matches.map((m) => m.notice).filter((n) => {
     const e = enrichment.get(n.noticeNo);
-    return !e || e.jointBid === undefined || e.qualDoc === undefined;
+    return !e || e.qualDoc === undefined || (isBid(n) && e.jointBid === undefined);
   });
   const aiEnabled = isAiConfigured();
   const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
@@ -370,7 +372,7 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
       const cookie = await getSessionCookie();
       for (const n of docTodo) {
         const e = enrichment.get(n.noticeNo) ?? {};
-        if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
+        if (isBid(n) && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
         if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
         enrichment.set(n.noticeNo, e);
         enrichState.done += 1;

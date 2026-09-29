@@ -241,6 +241,8 @@ body {
 .badge.pstat.muted { background: var(--line); color: var(--muted); border-color: var(--line); }
 .qtip li.miss { color: var(--urgent); }
 .qtip li.fixable { color: var(--warn); }
+.qtip .cls { font-size: 12px; color: var(--ink); }
+.qtip .cls .miss { color: var(--urgent); }
 .qtip .fixline { display: block; font-size: 12px; color: var(--ink); margin: 3px 0 0 14px; }
 .qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; }
 .qtip .rel { display: block; font-size: 11.5px; color: var(--muted); margin: 2px 0 0 14px; }
@@ -1302,20 +1304,26 @@ function jointBadge(n, e) {
 function qualBadge(n, doc) {
   const q = n.qualification;
   const tip = (title, body) => `<span class="qtip" role="tooltip"><h4>${title}</h4>${body}</span>`;
-  if (!q) {
-    return `<span class="badge qual" tabindex="0">자격 판정 대상 아님${tip(
-      "자격 판정 대상 아님",
-      "<p>사전규격은 나라장터에 면허제한정보 API가 없어 참가자격을 자동으로 대조하지 않습니다. 본공고가 나오면 판정됩니다.</p>"
-    )}</span>`;
-  }
   const docSection = doc ? docTipBody(doc) : "";
-  if (q.status === "조회실패" || q.status === "제한없음") {
-    const head = q.status === "조회실패" ? "면허제한정보 조회 실패" : "면허제한정보에 업종제한 없음";
-    if (doc === undefined && enrich.running) return `<span class="badge qual faint">공고문에서 자격 확인 중…</span>`;
-    if (!doc) {
-      return `<span class="badge qual ${q.status === "조회실패" ? "fail" : ""}" tabindex="0">${q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음"}${tip(
+  // 사전규격(q 없음)은 면허제한 API가 없어 첨부 규격서·제안요청서가 유일한 근거 — 본공고의 "업종제한 없음"과 같은 길로 간다
+  if (!q || q.status === "조회실패" || q.status === "제한없음") {
+    const head = !q ? "사전규격 — 면허제한정보 API 없음" : q.status === "조회실패" ? "면허제한정보 조회 실패" : "면허제한정보에 업종제한 없음";
+    const where = !q ? "첨부 규격서" : "공고문";
+    if (doc === undefined && enrich.running) return `<span class="badge qual faint">${where}에서 자격 확인 중…</span>`;
+    if (!doc || (doc.sectionFound === false && !(doc.classifiedItems || []).length)) {
+      const label = !q ? "자격 확인 안 됨" : q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음";
+      return `<span class="badge qual ${q && q.status === "조회실패" ? "fail" : ""}" tabindex="0">${label}${tip(
         head,
-        "<p>공고문 첨부에서도 참가자격 항목을 찾지 못했습니다. 원문 공고를 직접 확인하세요.</p>"
+        `<p>${where} 첨부에서도 참가자격 항목을 찾지 못했습니다. 원문을 직접 확인하세요.</p>${doc ? docSection : ""}`
+      )}</span>`;
+    }
+    if (doc.sectionFound === false) {
+      // 참가자격 문구는 없지만 공고가 분류된 세부품명은 안다
+      const items = doc.classifiedItems;
+      const allHeld = items.every((i) => i.held);
+      return `<span class="badge qual ${allHeld ? "ok" : "fix"}" tabindex="0"><span class="ico" aria-hidden="true">${allHeld ? "✓" : "!"}</span>분류 품목 ${items.filter((i) => i.held).length}/${items.length}${tip(
+        `${head} → 분류 품목으로 확인`,
+        docSection
       )}</span>`;
     }
     const need = doc.requirements;
@@ -1326,7 +1334,7 @@ function qualBadge(n, doc) {
     const tone = need.length > 0 && heldN === need.length ? "ok" : fixable ? "fix" : need.length ? "block" : "fail";
     const text = tone === "fix" ? `등록 추가 필요 ${missing.length}건` : `공고문 자격 ${heldN}/${need.length}`;
     return `<span class="badge qual ${tone}" tabindex="0"><span class="ico" aria-hidden="true">${tone === "ok" ? "✓" : "!"}</span>${text}${tip(
-      `${head} → 공고문에서 확인`,
+      `${head} → ${where}에서 확인`,
       docSection
     )}</span>`;
   }
@@ -1369,6 +1377,18 @@ function howToFix(r, doc) {
 }
 
 function docTipBody(doc) {
+  // 공고가 분류된 세부품명 (사전규격 prdctDtlList / 본공고 dtilPrdctClsfcNo) — 참가자격 문구가 없어도 알 수 있다
+  const heldCodes = new Set(doc.requirements.filter((r) => r.held && r.code).map((r) => r.code));
+  const cls = (doc.classifiedItems || []).filter((i) => !heldCodes.has(i.code) || !i.held);
+  const classified = cls.length
+    ? `<p class="cls">공고 분류 세부품명: ${cls
+        .map((i) => `<span class="${i.held ? "" : "miss"}">${i.held ? "✓" : "✗"} ${esc(i.name)}(${esc(i.code)})</span>`)
+        .join(", ")}</p>`
+    : "";
+  const linked = doc.linkedBidNo ? `<p>본공고가 이미 나왔습니다: <b>${esc(doc.linkedBidNo)}</b> — 본공고 쪽 판정을 기준으로 보세요.</p>` : "";
+  if (doc.sectionFound === false) {
+    return classified + linked + "<p>첨부에서 참가자격 항목은 찾지 못해, 공고가 분류된 품목만 보여줍니다.</p>";
+  }
   const rows = doc.requirements.length
     ? `<ul>${doc.requirements
         .map((r) => {
@@ -1390,6 +1410,8 @@ function docTipBody(doc) {
   ].filter(Boolean);
   return (
     rows +
+    classified +
+    linked +
     (warns.length ? `<p class="warnline">${warns.join("<br>")}</p>` : "") +
     `<p>출처: ${esc(doc.sourceFile)}<br>공고문 문장을 기계적으로 읽은 결과입니다. "A 또는 B" 같은 조건은 원문으로 확인하세요.</p>`
   );

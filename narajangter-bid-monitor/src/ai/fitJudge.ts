@@ -120,7 +120,11 @@ export function buildNoticeMessage(input: FitInput): string {
     `공동수급: ${input.jointBid ?? "확인 안 됨"}`,
     `면허제한정보(API) 판정: ${input.qualificationSummary ?? "대상 아님(사전규격) 또는 정보 없음"}`,
   ];
-  if (input.qualDoc) {
+  if (input.qualDoc?.classifiedItems.length) {
+    lines.push(`공고 분류 세부품명: ${input.qualDoc.classifiedItems.map((i) => `${i.name}(${i.code}) ${i.held ? "보유" : "미보유"}`).join(", ")}`);
+  }
+  if (input.qualDoc?.linkedBidNo) lines.push(`연결된 본공고: ${input.qualDoc.linkedBidNo} (이미 게시됨)`);
+  if (input.qualDoc?.sectionFound) {
     const d = input.qualDoc;
     const req = d.requirements.map((r) => {
       const label = r.name ?? r.docName ?? (r.kind === "품명" ? "세부품명번호" : "업종코드");

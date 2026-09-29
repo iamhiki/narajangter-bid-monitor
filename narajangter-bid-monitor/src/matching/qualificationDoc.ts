@@ -127,6 +127,12 @@ export interface QualificationDocResult {
   jiilDesignated: boolean;
   /** 입찰참가자격 등록 마감 (API bidQlfctRgstDt). 미보유 품목을 추가 등록할 수 있는 기한 */
   registrationDeadline: string | null;
+  /** 공고가 분류된 세부품명 (사전규격 prdctDtlList, 본공고 dtilPrdctClsfcNo) 과 지일 보유 여부 */
+  classifiedItems: { code: string; name: string; held: boolean }[];
+  /** 사전규격에 연결된 본공고 번호 (본공고가 이미 나왔으면) */
+  linkedBidNo: string | null;
+  /** 첨부에서 참가자격 항목을 찾았는지. false면 requirements·지역·지명은 비어 있고 분류 품목만 있다 */
+  sectionFound: boolean;
 }
 
 const INDICATORS = /업종\s*코드|세부\s*품명|물품\s*분류\s*번호|등록|면허|소재지|직접생산/g;
@@ -173,7 +179,7 @@ export function analyzeQualificationText(
   fullText: string,
   heldProducts: CodeEntry[],
   heldIndustries: CodeEntry[]
-): Omit<QualificationDocResult, "sourceFile" | "registrationDeadline"> {
+): Omit<QualificationDocResult, "sourceFile" | "registrationDeadline" | "classifiedItems" | "linkedBidNo" | "sectionFound"> {
   const industryName = new Map(heldIndustries.map((c) => [c.code, c.name]));
   const productName = new Map(heldProducts.map((c) => [c.code, c.name]));
   const requirements: DocRequirement[] = [];
@@ -228,6 +234,7 @@ export function analyzeQualificationText(
 
 /** 입찰공고문으로 보이는 첨부를 우선순위대로. HWPX가 HWP·PDF보다 추출이 깨끗하다. */
 export function pickNoticeDocAttachments(notice: NormalizedNotice): NoticeAttachment[] {
+  if (notice.sourceType === "사전규격") return preStandardAttachments(notice);
   const all = listAttachments(notice);
   const isNoticeDoc = (a: NoticeAttachment) => /공고/.test(a.name) && !/제안요청|과업|시방|규격/.test(a.name);
   const extRank = (name: string) => (/\.hwpx$/i.test(name) ? 0 : /\.pdf$/i.test(name) ? 1 : 2);
@@ -242,6 +249,13 @@ export async function readQualificationFromNotice(
   notice: NormalizedNotice,
   held: { products: CodeEntry[]; industries: CodeEntry[] }
 ): Promise<QualificationDocResult | null> {
+  const raw = (notice.raw ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof raw[k] === "string" && (raw[k] as string).trim() ? (raw[k] as string).trim() : null);
+  const heldProductName = new Map(held.products.map((c) => [c.code, c.name]));
+  const classifiedItems = classifiedItemsOf(notice).map((i) => ({ ...i, held: heldProductName.has(i.code) }));
+  const linkedBidNo = str("bidNtceNoList")?.split(/[,\s]+/)[0] ?? null;
+  const common = { registrationDeadline: str("bidQlfctRgstDt"), classifiedItems, linkedBidNo };
+
   for (const attachment of pickNoticeDocAttachments(notice)) {
     const path = await downloadAttachment(attachment);
     if (!path) continue;
@@ -249,16 +263,61 @@ export async function readQualificationFromNotice(
       const { text } = await extractDocumentText(path, { ocr: "auto", maxPages: 12 });
       const section = findQualificationSection(text);
       if (!section) continue;
-      const raw = (notice.raw ?? {}) as Record<string, unknown>;
-      const deadline = typeof raw.bidQlfctRgstDt === "string" && raw.bidQlfctRgstDt.trim() ? raw.bidQlfctRgstDt.trim() : null;
       return {
         sourceFile: attachment.name,
         ...analyzeQualificationText(section, text, held.products, held.industries),
-        registrationDeadline: deadline,
+        ...common,
+        sectionFound: true,
       };
     } catch (err) {
       logger.debug?.("공고문 참가자격 읽기 실패", { noticeNo: notice.noticeNo, file: attachment.name, error: String(err) });
     }
   }
+  // 참가자격 항목은 못 찾았어도 공고가 분류된 세부품명·연결된 본공고는 알려줄 수 있다.
+  if (classifiedItems.length || linkedBidNo) {
+    return {
+      sourceFile: "",
+      excerpt: "",
+      requirements: [],
+      region: null,
+      designated: false,
+      jiilDesignated: false,
+      ...common,
+      sectionFound: false,
+    };
+  }
   return null;
+}
+
+/**
+ * 사전규격 첨부. 본공고와 달리 파일명 필드가 없고 URL(specDocFileUrl1~N)만 온다. 형식은 내려받은
+ * 파일의 앞 바이트로 판별하므로(extractText.detectFormat) 이름이 없어도 읽힌다.
+ * 실측(2026-09-29): 매칭된 사전규격 9건 중 8건의 첨부(규격서·제안요청서)에 참가자격 항목이 있었다.
+ */
+export function preStandardAttachments(notice: NormalizedNotice): NoticeAttachment[] {
+  const raw = (notice.raw ?? {}) as Record<string, unknown>;
+  const out: NoticeAttachment[] = [];
+  for (let i = 1; i <= 10; i++) {
+    const url = String(raw[`specDocFileUrl${i}`] ?? "").trim();
+    if (url) out.push({ name: `사전규격 첨부 ${i}`, url, isSpec: true });
+  }
+  return out;
+}
+
+/**
+ * 공고가 분류된 세부품명. 사전규격은 prdctDtlList("[1^6010989901^실물모형및전시물]" 여러 개),
+ * 본공고(물품)는 dtilPrdctClsfcNo/dtilPrdctClsfcNoNm에 온다. 참가자격 문구가 없어도
+ * "이 공고는 어떤 품목으로 발주되는가"를 알려준다.
+ */
+export function classifiedItemsOf(notice: NormalizedNotice): { code: string; name: string }[] {
+  const raw = (notice.raw ?? {}) as Record<string, unknown>;
+  const items: { code: string; name: string }[] = [];
+  for (const m of String(raw.prdctDtlList ?? "").matchAll(/\[\s*\d+\^(\d{10})\^([^\]]+)\]/g)) {
+    items.push({ code: m[1]!, name: m[2]!.trim() });
+  }
+  const code = String(raw.dtilPrdctClsfcNo ?? "").trim();
+  if (/^\d{10}$/.test(code) && !items.some((i) => i.code === code)) {
+    items.push({ code, name: String(raw.dtilPrdctClsfcNoNm ?? "").trim() || code });
+  }
+  return items;
 }

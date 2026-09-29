@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { analyzeQualificationText, findQualificationSection, pickNoticeDocAttachments } from "../src/matching/qualificationDoc.js";
+import {
+  analyzeQualificationText,
+  classifiedItemsOf,
+  findQualificationSection,
+  pickNoticeDocAttachments,
+} from "../src/matching/qualificationDoc.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
 import type { NormalizedNotice } from "../src/api/types.js";
 
@@ -145,6 +150,35 @@ describe("analyzeQualificationText", () => {
     expect(analyze(text)).toMatchObject({ designated: true, jiilDesignated: false });
     expect(analyze(text + " ㈜지일")).toMatchObject({ designated: true, jiilDesignated: true });
     expect(analyze("참가자격 가. 일반경쟁 입찰로서 등록 업체").designated).toBe(false);
+  });
+});
+
+describe("사전규격", () => {
+  // 2026-09-29 사전규격 실측 응답 형태
+  const pre = {
+    sourceType: "사전규격",
+    raw: {
+      specDocFileUrl1: "https://www.g2b.go.kr/pn/pnz/pnza/UntyAtchFile/downloadFile.do?bfSpecRegNo=R26BD00275861&f=1",
+      specDocFileUrl2: "https://www.g2b.go.kr/pn/pnz/pnza/UntyAtchFile/downloadFile.do?bfSpecRegNo=R26BD00275861&f=2",
+      prdctDtlList: "[1^6010989901^실물모형및전시물][2^6010999901^교육훈련장비]",
+      bidNtceNoList: "R26BK01742555",
+    },
+  } as unknown as NormalizedNotice;
+
+  it("파일명 없이 URL만 오는 첨부(specDocFileUrlN)를 읽을 대상으로 잡는다", () => {
+    expect(pickNoticeDocAttachments(pre).map((a) => a.url.slice(-3))).toEqual(["f=1", "f=2"]);
+  });
+
+  it("공고가 분류된 세부품명을 prdctDtlList에서 읽는다", () => {
+    expect(classifiedItemsOf(pre)).toEqual([
+      { code: "6010989901", name: "실물모형및전시물" },
+      { code: "6010999901", name: "교육훈련장비" },
+    ]);
+  });
+
+  it("본공고는 dtilPrdctClsfcNo에서 읽는다", () => {
+    const bid = { sourceType: "본공고", raw: { dtilPrdctClsfcNo: "6010999901", dtilPrdctClsfcNoNm: "교육훈련장비" } } as unknown as NormalizedNotice;
+    expect(classifiedItemsOf(bid)).toEqual([{ code: "6010999901", name: "교육훈련장비" }]);
   });
 });
 
