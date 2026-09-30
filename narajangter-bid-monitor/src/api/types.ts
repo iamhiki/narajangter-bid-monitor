@@ -10,6 +10,7 @@ export interface NormalizedNotice {
   sourceType: SourceType;
   postedAt: string | null;
   deadline: string | null;
+  /** 추정가격(원, 부가세 제외). 사전규격은 배정예산을 1.1로 나눈 환산값. 모르면 null */
   budgetAmount: number | null;
   detailUrl: string | null;
   /** 업종코드 매칭에 사용되는 원문 텍스트 (투찰가능업종명 등) */

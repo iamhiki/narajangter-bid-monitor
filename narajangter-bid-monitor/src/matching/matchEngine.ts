@@ -20,11 +20,22 @@ import type { MatchedNotice } from "./types.js";
  * overseasVenueFilter.ts의 loadMongoliaKeywords()로 config/overseas-venue-keywords.json을
  * 읽어 넘긴다.
  */
+/**
+ * 사전규격에 연결된 본공고 번호 (bidNtceNoList). 본공고가 이미 나왔으면 할 일은 본공고 쪽에 있다 —
+ * 사전규격까지 남기면 같은 사업이 두 번 나온다. 본공고는 본공고 목록에서 따로 거르고 보여준다.
+ */
+export function linkedBidNoticeNo(notice: NormalizedNotice): string | null {
+  if (notice.sourceType !== "사전규격") return null;
+  const v = notice.raw?.["bidNtceNoList"];
+  return typeof v === "string" && v.trim() ? v.trim().split(/[,\s]+/)[0]! : null;
+}
+
 export function evaluateNotice(
   notice: NormalizedNotice,
   config: AppConfig,
   mongoliaKeywords: string[] = []
 ): MatchedNotice | null {
+  if (linkedBidNoticeNo(notice)) return null;
   if (matchExcludeKeyword(notice, config.excludeKeywords)) return null;
 
   if (config.minBudgetAmount != null && notice.budgetAmount != null && notice.budgetAmount < config.minBudgetAmount) {

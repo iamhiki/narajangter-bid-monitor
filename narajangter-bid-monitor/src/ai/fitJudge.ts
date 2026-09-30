@@ -116,7 +116,7 @@ export function buildNoticeMessage(input: FitInput): string {
     `공고명: ${n.title}`,
     `구분: ${n.sourceType} / ${n.businessType}`,
     `발주기관: ${n.institution ?? "공고에 없음"}`,
-    `예산(추정가격 등): ${won(n.budgetAmount)}`,
+    `추정가격(부가세 제외): ${won(n.budgetAmount)}`,
     `낙찰방법: ${n.bidMethod ?? "공고에 없음"}`,
     `마감: ${n.deadline ?? "공고에 없음"}`,
     `규칙 매칭 근거: ${input.matchReason}`,

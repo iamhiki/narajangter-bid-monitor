@@ -119,7 +119,7 @@ function renderMatchCardHtml(m: MatchedNotice): string {
     <div style="font-size:15px;font-weight:600;margin-bottom:6px;">${titleHtml}</div>
     <div style="font-size:13px;color:#374151;line-height:1.6;">
       기관: ${escapeHtml(formatDisplayValue(n.institution))}<br/>
-      예산: ${escapeHtml(formatBudget(n.budgetAmount))}<br/>
+      추정가격: ${escapeHtml(formatBudget(n.budgetAmount))}<br/>
       마감/일정: ${escapeHtml(formatDisplayValue(n.deadline))}<br/>
       공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderJointBidHtml(m)}
     </div>
@@ -139,7 +139,7 @@ function renderMatchCardText(m: MatchedNotice): string {
     : "";
   return [
     `- [${m.confidence}][${n.businessType}]${overseasVenueTag} ${n.title}`,
-    `  기관: ${formatDisplayValue(n.institution)} / 예산: ${formatBudget(n.budgetAmount)} / 마감: ${formatDisplayValue(n.deadline)}`,
+    `  기관: ${formatDisplayValue(n.institution)} / 추정가격: ${formatBudget(n.budgetAmount)} / 마감: ${formatDisplayValue(n.deadline)}`,
     `  공고번호: ${n.noticeNo}${n.bidMethod ? ` / 낙찰방법: ${n.bidMethod}` : ""}`,
     `  매칭: ${badges}`,
     renderSimilarityText(m),

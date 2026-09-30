@@ -54,7 +54,9 @@ export type RequirementBasis = "등록" | "직접생산" | "면허";
 export function requirementBasis(section: string, at: number, kind: DocRequirement["kind"]): RequirementBasis {
   if (kind === "업종") return "면허";
   const raw = section.slice(Math.max(0, at - 160), at);
-  const boundary = [...raw.matchAll(/(?:\d+\)|[가-하]\s?\.(?!\d)|[○◦※]|다\s?\.)/g)].pop();
+  // 항목 번호 "6)"는 한두 자리만 — "영상정보디스플레이 장치(4511189301), 교육용로봇(…"의 "4511189301)"을
+  // 항목 경계로 보면 앞의 "직접생산확인증명서"를 놓친다 (수정유스센터 공고 실측)
+  const boundary = [...raw.matchAll(/(?:(?<!\d)\d{1,2}\)|[가-하]\s?\.(?!\d)|[○◦※]|다\s?\.)/g)].pop();
   const before = boundary ? raw.slice(boundary.index! + boundary[0].length) : raw;
   return /직\s*접\s*생\s*산/.test(before) ? "직접생산" : "등록";
 }
@@ -109,6 +111,12 @@ export function nameNearCode(section: string, index: number, length: number): st
     // 공백으로 자르면 안 된다 — HWP 추출은 "교 육훈련장비"처럼 단어 중간에 공백을 넣는다.
     // "및"은 띄어 쓴 경우만 연결어로 본다 — "전시부스설치및디자인서비스"처럼 이름 안에도 들어간다
     const words = d[1]!.split(/번호|분류|등록|의한|따른|자리|또는|\s및\s|(?:로서|으로|로)\s/);
+    return clean(words[words.length - 1]);
+  }
+  // 라벨 없이 이름 바로 뒤 괄호에 번호: "세부품명 영상정보디스플레이 장치(4511189301), 교육용로봇(6010621401)"
+  const e = /([가-힣·ㆍ][가-힣·ㆍ\s]{1,30})[\(（]\s*$/.exec(before);
+  if (e) {
+    const words = e[1]!.split(/품명|번호|분류|등록|의한|따른|자리|또는|증명서|\s및\s|(?:로서|으로|로)\s/);
     return clean(words[words.length - 1]);
   }
   return null;
@@ -265,8 +273,15 @@ export function analyzeQualificationText(
   for (const m of section.matchAll(/업종\s*코드\s*[:：]?\s*\[?\s*(\d{4})\b/g)) add("업종", m);
   // "[실내건축공사(4990)]", "정보통신공사업(0036)" — 업종명 바로 뒤 괄호 속 4자리
   for (const m of section.matchAll(/(?:업|공사|분야|사업)\s*[(（]\s*(\d{4})\s*[)）]/g)) add("업종", m);
-  // "세부품명번호: 6012100201", "물품분류번호 4924159701", "(세부품명번호 1...)"
-  for (const m of section.matchAll(/(?:세부\s*품명\s*번호|물품\s*분류\s*번호|분류번호\s*10자리)[^0-9]{0,20}(\d{10})\b/g)) add("품명", m);
+  // PDF 추출은 글 순서가 섞여 "(업종코드: 4442)"가 "( )( : 4442)"로 나온다 (울산박물관 재공고문 실측)
+  for (const m of section.matchAll(/[(（]\s*[:：]\s*(\d{4})\s*[)）]/g)) add("업종", m);
+  // "세부품명번호: 6012100201", "물품분류번호 4924159701", "세부품명번호 10자리 6010989901"(울진해양과학관 재공고서)
+  for (const m of section.matchAll(/(?:세부\s*품명\s*번호|물품\s*분류\s*번호|분류번호)(?:\s*10\s*자리)?[^0-9]{0,20}(\d{10})\b/g)) add("품명", m);
+  // 라벨과 번호 사이가 PDF 추출로 흩어진 경우: "세부품명 10 [ : , 번호 자리 10 (6010989901)" — 앞 60자 안에
+  // "품명"·"분류번호"가 있는 10자리 숫자는 세부품명번호로 본다 (참가자격 부분 안에서만 찾으니 다른 숫자와 섞이지 않는다)
+  for (const m of section.matchAll(/(?<!\d)(\d{10})(?!\d)/g)) {
+    if (/품\s*명|분\s*류\s*번\s*호/.test(section.slice(Math.max(0, m.index! - 60), m.index!))) add("품명", m);
+  }
   // 코드 없이 이름만 적은 보유 자격 (예: "전문건설업(…금속구조물·창호·온실공사업…)")
   const flat = normalize(section);
   for (const c of heldIndustries) {
@@ -321,6 +336,10 @@ export async function readQualificationFromNotice(
   const linkedBidNo = str("bidNtceNoList")?.split(/[,\s]+/)[0] ?? null;
   const common = { registrationDeadline: str("bidQlfctRgstDt"), classifiedItems, linkedBidNo };
 
+  // 같은 공고문이 HWP·PDF로 함께 붙거나 공고문·재공고문이 따로 붙는다. 추출 품질이 파일마다 달라
+  // (PDF는 글 순서가 섞여 코드가 이름과 떨어진다) 전부 읽고 코드가 가장 많이 나온 쪽을 쓴다.
+  let best: QualificationDocResult | null = null;
+  const codedCount = (r: QualificationDocResult) => r.requirements.filter((x) => x.code).length;
   for (const attachment of pickNoticeDocAttachments(notice)) {
     const path = await downloadAttachment(attachment);
     if (!path) continue;
@@ -328,16 +347,18 @@ export async function readQualificationFromNotice(
       const { text } = await extractDocumentText(path, { ocr: "auto", maxPages: 12 });
       const section = findQualificationSection(text);
       if (!section) continue;
-      return {
+      const result: QualificationDocResult = {
         sourceFile: attachment.name,
         ...analyzeQualificationText(section, text, held.products, held.industries),
         ...common,
         sectionFound: true,
       };
+      if (!best || codedCount(result) > codedCount(best)) best = result;
     } catch (err) {
       logger.debug?.("공고문 참가자격 읽기 실패", { noticeNo: notice.noticeNo, file: attachment.name, error: String(err) });
     }
   }
+  if (best) return best;
   // 참가자격 항목은 못 찾았어도 공고가 분류된 세부품명·연결된 본공고는 알려줄 수 있다.
   if (classifiedItems.length || linkedBidNo) {
     return {

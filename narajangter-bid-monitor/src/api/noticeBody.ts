@@ -3,6 +3,7 @@ import { extractDocumentText } from "../corpus/extractText.js";
 import { redactPersonal } from "../redactPersonal.js";
 import type { NormalizedNotice } from "./types.js";
 import { logger } from "../logger.js";
+import { preStandardAttachments } from "../matching/qualificationDoc.js";
 
 /**
  * 공고의 과업 내용을 첨부파일에서 읽어온다 (③.5 단계).
@@ -39,7 +40,8 @@ export async function fetchNoticeBody(
   notice: NormalizedNotice,
   options: FetchBodyOptions = {}
 ): Promise<NoticeBody | null> {
-  const candidates = pickSpecAttachments(notice);
+  // 사전규격은 첨부 파일명이 없고 URL만 온다 — 붙은 첨부가 곧 규격서·제안요청서라 순서대로 읽는다.
+  const candidates = notice.sourceType === "사전규격" ? preStandardAttachments(notice) : pickSpecAttachments(notice);
   if (candidates.length === 0) return null;
 
   for (const attachment of candidates) {

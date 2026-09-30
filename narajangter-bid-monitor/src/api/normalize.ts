@@ -8,6 +8,27 @@ function fallbackNoticeNo(raw: RawItem, title: string, institution: string | nul
   return `GEN-${createHash("sha1").update(seed).digest("hex").slice(0, 16)}`;
 }
 
+/** 0이나 음수는 금액이 아니라 "미입력"이다 — 그대로 쓰면 최소금액 필터에서 부당하게 걸러진다(7일치 75건). */
+function pickPositive(raw: RawItem, candidates: string[]): number | null {
+  for (const key of candidates) {
+    const v = pickNumber(raw, [key]);
+    if (v !== null && v > 0) return v;
+  }
+  return null;
+}
+
+/**
+ * 추정가격(부가세 제외). 추정가격 필드가 없으면 부가세 포함 금액을 1.1로 나눠 환산한다.
+ * 금액 기준을 추정가격 하나로 통일한다(2026-09-30 담당자 결정) — 예전에는 물품·용역은 배정예산(부가세 포함),
+ * 공사는 추정가격(부가세 제외)이 섞여 쓰여 같은 "1억 이상"이 종류마다 다르게 적용됐다.
+ */
+export function estimatedPrice(raw: RawItem, fields: FieldCandidates): number | null {
+  const price = pickPositive(raw, fields.budgetAmount);
+  if (price !== null) return price;
+  const withVat = pickPositive(raw, fields.budgetVatIncluded);
+  return withVat === null ? null : Math.round(withVat / 1.1);
+}
+
 export function normalizeRawItem(
   raw: RawItem,
   businessType: BusinessType,
@@ -36,7 +57,7 @@ export function normalizeRawItem(
     sourceType,
     postedAt: pickString(raw, fields.postedAt),
     deadline: pickString(raw, fields.deadline),
-    budgetAmount: pickNumber(raw, fields.budgetAmount),
+    budgetAmount: estimatedPrice(raw, fields),
     detailUrl: pickString(raw, fields.detailUrl),
     industryText: pickString(raw, fields.industryText),
     productClsfcNo: pickString(raw, fields.productClsfcNo),

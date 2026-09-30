@@ -6,6 +6,7 @@ import { matchCodes } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
+import { linkedBidNoticeNo } from "./matchEngine.js";
 import { evaluateQualifications, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
@@ -21,6 +22,7 @@ import { evaluateQualifications, uniqueSatisfied } from "./qualificationFilter.j
 
 export const DIAGNOSE_STEPS = [
   "마감",
+  "본공고 게시",
   "제외키워드",
   "최소예산",
   "낙찰방법",
@@ -74,6 +76,13 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
     steps.push({ step: "마감", ok: true, detail: notice.deadline ? `마감 ${notice.deadline}` : "마감일시 없음 — 통과" });
   }
 
+  const linked = linkedBidNoticeNo(notice);
+  steps.push(
+    linked
+      ? { step: "본공고 게시", ok: false, detail: `본공고가 이미 게시됨 (${linked}) — 본공고로 확인` }
+      : { step: "본공고 게시", ok: true, detail: isBid ? "본공고" : "아직 본공고 없음" }
+  );
+
   const excluded = matchExcludeKeyword(notice, config.excludeKeywords);
   steps.push(
     excluded
@@ -83,9 +92,9 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
 
   const budget = notice.budgetAmount;
   if (config.minBudgetAmount != null && budget != null && budget < config.minBudgetAmount) {
-    steps.push({ step: "최소예산", ok: false, detail: `${won(budget)} < 기준 ${won(config.minBudgetAmount)}` });
+    steps.push({ step: "최소예산", ok: false, detail: `추정가격 ${won(budget)} < 기준 ${won(config.minBudgetAmount)}` });
   } else {
-    steps.push({ step: "최소예산", ok: true, detail: budget == null ? "예산 정보 없음 — 통과" : won(budget) });
+    steps.push({ step: "최소예산", ok: true, detail: budget == null ? "금액 정보 없음 — 통과" : `추정가격 ${won(budget)}` });
   }
 
   const category = classifyBidMethod(notice.bidMethod);

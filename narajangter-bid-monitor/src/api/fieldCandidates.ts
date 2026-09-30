@@ -10,7 +10,16 @@ export interface FieldCandidates {
   institution: string[];
   postedAt: string[];
   deadline: string[];
+  /**
+   * 추정가격(부가세 제외) — 금액 필터·표시의 기준. 0은 "정보 없음"으로 본다.
+   * 입찰공고는 물품·용역·공사 모두 presmptPrce가 온다(2026-09-30 실측 7일치 99% 이상).
+   */
   budgetAmount: string[];
+  /**
+   * 추정가격이 없을 때 쓰는 부가세 포함 금액(배정예산·기초금액). 1.1로 나눠 추정가격으로 환산한다.
+   * 사전규격은 presmptPrce가 아예 없고 asignBdgtAmt만 온다. 같은 공고의 배정예산/추정가격 비율은 1.1(면세 용역은 1.0)이었다.
+   */
+  budgetVatIncluded: string[];
   detailUrl: string[];
   /** 투찰가능업종명 등 업종코드 매칭에 사용할 텍스트 필드 (용역/공사) */
   industryText: string[];
@@ -32,7 +41,8 @@ export const BID_NOTICE_FIELD_CANDIDATES: FieldCandidates = {
   institution: ["ntceInsttNm", "dmndInsttNm"],
   postedAt: ["bidNtceDate", "bidNtceBgnDt", "bidNtceBgn", "rgstDt"],
   deadline: ["bidClseDate", "bidClseDt", "opengDate", "opengDt"],
-  budgetAmount: ["asignBdgtAmt", "presmptPrce", "bssamt", "bssAmt"],
+  budgetAmount: ["presmptPrce"],
+  budgetVatIncluded: ["asignBdgtAmt", "bssamt", "bssAmt"],
   detailUrl: ["bidNtceDtlUrl", "bidNtceUrl"],
   // 실측(2026-09-22): 세부품명번호의 실제 필드명은 `dtilPrdctClsfcNo`다.
   // 기존 후보 `prdctClsfcNo`는 응답에 존재하지 않아 **7,376건 전부 null**이었고,
@@ -74,7 +84,8 @@ export const PRE_STANDARD_FIELD_CANDIDATES: FieldCandidates = {
   institution: ["orderInsttNm", "ntceInsttNm", "dmndInsttNm"],
   postedAt: ["bfSpecRgstDate", "bfSpecRgstDt", "rgstDt"],
   deadline: ["opninRgstClseDt", "opninRgstClseDate", "bfSpecClseDt"],
-  budgetAmount: ["asignBdgtAmt", "presmptPrce"],
+  budgetAmount: ["presmptPrce"],
+  budgetVatIncluded: ["asignBdgtAmt"],
   detailUrl: ["bfSpecDocFileUrl1", "specDocFileUrl1", "bfSpecRgstUrl"],
   // 본공고와 같은 이유로 `dtilPrdctClsfcNo`를 먼저 본다 (위 주석 참고).
   industryText: ["bidprcPsblIndstrytyNm", "indstrytyNm", "pubPrcrmntClsfcNm"],
