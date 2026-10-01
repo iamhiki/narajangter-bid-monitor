@@ -204,7 +204,8 @@ let noticeCache: NoticeCache | null = null;
 let lastDiagnostics: CollectionDiagnostics | null = null;
 /** 제외된 후보 목록 계산 결과 (같은 조회에 대해서는 한 번만 계산) */
 let excludedCache: { source: CollectionDiagnostics; items: unknown[]; byStage: Record<string, number> } | null = null;
-let inFlight: Promise<NoticeCache> | null = null;
+/** 기간별로 진행 중인 조회. 한 개만 두면 14일 조회 중에 "마감 전 전체"를 눌러도 14일 결과가 돌아왔다(2026-10-01) */
+const inFlight = new Map<string, Promise<NoticeCache>>();
 
 /** 어떤 규칙이 이 공고를 걸었는지 한 줄로 (feedbackRow.ts의 표기와 같은 형식) */
 function matchReason(m: MatchedNotice): string {
@@ -953,17 +954,20 @@ const server = createServer((req, res) => {
 
     // 조회가 도는 중에 새로고침을 또 누르면 같은 약속을 돌려준다 —
     // API를 두 번 때리면 느려질 뿐 아니라 일일 호출 한도를 두 배로 쓴다.
-    if (!inFlight) {
-      inFlight = fetchNotices(period).then((result) => {
+    // 기간이 다르면 따로 조회한다.
+    let running = inFlight.get(period);
+    if (!running) {
+      running = fetchNotices(period).then((result) => {
         noticeCache = result;
-        inFlight = null;
+        inFlight.delete(period);
         return result;
       });
+      inFlight.set(period, running);
     }
-    inFlight
+    running
       .then((result) => json(res, { ...result, cached: false }))
       .catch((err: unknown) => {
-        inFlight = null;
+        inFlight.delete(period);
         json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], error: String(err), cached: false });
       });
     return;
