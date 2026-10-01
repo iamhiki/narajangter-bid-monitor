@@ -1,7 +1,7 @@
 import type { NormalizedNotice } from "../api/types.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { hasStandaloneProductMatch, matchCodes } from "./codeMatcher.js";
+import { hasStandaloneProductMatch, matchCodes, matchServiceClasses } from "./codeMatcher.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import type { MatchedNotice } from "./types.js";
@@ -73,13 +73,16 @@ export function evaluateNotice(
   // requiresKeyword 품목(영상정보디스플레이장치 등)은 키워드 없이 단독으로는 수집하지 않는다.
   // 2026-09-30 실측: 인천공항 "경비보안시스템 유지관리용 관제시스템 개선사업"이 관제실 모니터 품목으로
   // 걸렸다. 키워드가 같이 있으면 그대로 품목 매칭으로 쳐서 강력추천 판정에 쓴다.
-  if (!overseasVenue.isMongolia && !hasStandaloneProductMatch(matchedProductCodes) && !keywordMatched) return null;
+  // 조달분류(전시장치설치및디자인서비스 등)는 제목 키워드가 없어도 수집한다 — 등급은 참고용, 첨부 과업으로 다시 확인
+  const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
+  if (!overseasVenue.isMongolia && !hasStandaloneProductMatch(matchedProductCodes) && !keywordMatched && matchedServiceClasses.length === 0) return null;
 
   return {
     notice,
     matchedProductCodes,
     matchedIndustryCodes,
     matchedKeywords,
+    ...(matchedServiceClasses.length > 0 ? { matchedServiceClasses } : {}),
     confidence: codeMatched && keywordMatched ? "강력추천" : "참고용",
     overseasVenueFlag: overseasVenue.isMongolia
       ? { matchedMongoliaKeyword: overseasVenue.matchedMongoliaKeyword! }

@@ -189,13 +189,18 @@ npm run ui            # 이 PC에서만 (http://localhost:5173)
 npm run ui -- --lan   # 사내망 팀원과 공유 — 첫머리에 팀원에게 보낼 주소가 찍힌다
 ```
 
-이 PC에 로그인하면 공유 모드 화면이 자동으로 뜨게 하려면 Windows 작업 스케줄러에 한 번 등록한다.
+공유 모드에서는 사내망에 `jiil-bid.local`이라는 이름을 알린다(프린터가 이름을 알리는 방식, mDNS). 팀원은 IP 대신
+`http://jiil-bid.local`로 들어온다 — 이 PC의 IP가 DHCP로 바뀌어도 주소는 그대로다. 처음 한 번은 토큰이 붙은 링크(`?t=…`)로
+들어와야 하고, 그 뒤 1년 동안은 즐겨찾기한 `http://jiil-bid.local`만으로 열린다. 이름은 `UI_HOSTNAME`으로 바꿀 수 있다.
+
+이 PC에 로그인하면 공유 모드 화면이 자동으로 뜨게 하려면 Windows 작업 스케줄러에 한 번 등록한다 (관리자 권한 PowerShell).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\register-ui-task.ps1
 ```
 
-- 작업 이름: `지일 입찰 공고 검토 서버` — 창 없이 돌고, 죽으면 1분 뒤 다시 뜬다.
+- 작업 이름: `지일 입찰 공고 검토 서버` — 창 없이 돌고, 죽으면 1분 뒤 다시 뜬다. 80번 포트로 떠서 주소에 `:5173`이 붙지 않는다.
+- 방화벽: 같은 스크립트가 개인 네트워크에서 TCP 80(화면)·UDP 5353(이름 알리기)을 연다.
 - 기록: `output\ui-server.log` (팀원 공유 주소도 여기 첫머리에 있다)
 - 지우기: `Unregister-ScheduledTask -TaskName "지일 입찰 공고 검토 서버" -Confirm:$false`
 

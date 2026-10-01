@@ -223,3 +223,33 @@ describe("SimilarityIndex", () => {
     expect(index.findSimilar("전시물 제작설치", 2).top).toHaveLength(2);
   });
 });
+
+describe("싱크로율 근거 — 겹친 말", () => {
+  it("과거사업과 실제로 겹친 구간을 공고 원문에서 잘라 돌려준다", () => {
+    const index = SimilarityIndex.build([
+      project("a", "남원 수학체험관 전시물 설계 및 제작설치", "수학 체험관 전시물 제작 설치 과업"),
+      project("b", "여수항 포토존 및 미니 조형물 제작설치"),
+    ]);
+    const terms = index.sharedTerms("○○ 수학체험관 전시물 개선", "a")!;
+    expect(terms.name.length).toBeGreaterThan(0);
+    expect(terms.name.some((t) => t.includes("체험관") || t.includes("전시물"))).toBe(true);
+    // 공고 제목에서 실제로 겹친 구간만 (띄어쓰기 없는 제목도 통째로 나오지 않는다)
+    for (const t of terms.name) expect("○○수학체험관전시물개선").toContain(t);
+    expect(terms.name).not.toContain("개선");
+    const glued = index.sharedTerms("○○수학체험관재단장전시물제작설치", "a")!;
+    expect(glued.name.every((t) => t.length < "○○수학체험관재단장전시물제작설치".length - 4)).toBe(true);
+    expect(terms.name.join("")).not.toMatch(/포토존/);
+    expect(index.sharedTerms("아무 공고", "없는-id")).toBeNull();
+  });
+});
+
+describe("공통 키워드는 두 쪽에 그 말 그대로 있는 것만", () => {
+  it("'AI체험관'과 '지질체험시설'은 '체험'만 공통이다", () => {
+    const index = SimilarityIndex.build([project("a", "펀치볼 지오체험파크 조성사업 지질체험시설 제작·설치")]);
+    const terms = index.sharedTerms("수정유스센터 AI체험관 체험시설 제작 설치", "a")!;
+    expect(terms.name).toContain("체험시설");
+    expect(terms.name.some((t) => /ai/i.test(t) || t.includes("체험관"))).toBe(false);
+    // 설치·제작처럼 모든 사업에 나오는 말은 키워드로 보이지 않는다
+    expect(terms.name).not.toContain("제작");
+  });
+});

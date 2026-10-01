@@ -10,6 +10,8 @@ export interface MatchedNotice {
   matchedProductCodes: CodeEntry[];
   matchedIndustryCodes: CodeEntry[];
   matchedKeywords: string[];
+  /** 조달분류로 걸린 경우 (codes.json serviceClasses). 제목 키워드 없이 이것만으로 들어온 공고는 첨부 과업으로 다시 확인한다 */
+  matchedServiceClasses?: CodeEntry[];
   confidence: Confidence;
   /**
    * 해외 개최(전시회/박람회/엑스포 + 한국관/단체관) 몽골 예외 플래그.

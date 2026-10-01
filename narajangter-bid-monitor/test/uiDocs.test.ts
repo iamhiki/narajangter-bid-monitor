@@ -11,6 +11,14 @@ import { HIGH_BAND, LOW_BAND } from "../src/similarity/calibrate.js";
 
 const html = readFileSync(resolve("scripts/ui.html"), "utf8");
 
+/**
+ * 싱크로율 근거 패널(scoreWhyHtml)은 % 숫자를 눌러야만 열리는 개발·검수용이라 원점수를 보여도 된다
+ * (2026-10-01 요청: "개발자는 그걸 확인해야 하니까"). 그 함수만 빼고 검사한다.
+ */
+const whyStart = html.indexOf("function scoreWhyHtml(");
+const whyEnd = html.indexOf("\n}\n", whyStart);
+const staffHtml = whyStart >= 0 ? html.slice(0, whyStart) + html.slice(whyEnd) : html;
+
 describe("화면 구간 상수", () => {
   it("UI 스크립트의 구간 상수가 calibrate.ts와 같다", () => {
     const match = /const HIGH = ([\d.]+), LOW = ([\d.]+);/.exec(html);
@@ -28,7 +36,13 @@ describe("담당자 화면에 개발자용 정보가 없다", () => {
     ["보정 전 원점수", /원점수|rawScore/],
     ["동작 원리 탭", /data-tab="how"/],
   ])("%s", (_label, pattern) => {
-    expect(html).not.toMatch(pattern);
+    expect(staffHtml).not.toMatch(pattern);
+  });
+
+  it("싱크로율 근거 패널은 기본으로 닫혀 있다 (숫자를 눌러야 열림)", () => {
+    expect(whyStart).toBeGreaterThan(0);
+    expect(html).toMatch(/\.score-why \{\s*display: none;/);
+    expect(html).toMatch(/\.card-score\.open \.score-why \{ display: block; \}/);
   });
 });
 

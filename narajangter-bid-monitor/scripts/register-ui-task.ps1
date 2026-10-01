@@ -19,3 +19,13 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interac
 
 Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 "등록됨: $name (로그인하면 자동 실행)"
+
+# 사내망(개인 네트워크)에서 80번 포트(화면)와 5353번(jiil-bid.local 이름 알리기)을 연다. 관리자 권한으로 실행해야 한다.
+foreach ($rule in @(
+    @{ Name = "$name (화면 80)"; Protocol = "TCP"; Port = 80 },
+    @{ Name = "$name (이름 알리기 5353)"; Protocol = "UDP"; Port = 5353 }
+  )) {
+  Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+  New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Action Allow -Protocol $rule.Protocol -LocalPort $rule.Port -Profile Private,Domain | Out-Null
+  "방화벽 허용: $($rule.Name)"
+}

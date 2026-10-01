@@ -42,3 +42,21 @@ export function matchCodes(notice: NormalizedNotice, productCodes: CodeEntry[], 
 export function hasStandaloneProductMatch(matchedProductCodes: CodeEntry[]): boolean {
   return matchedProductCodes.some((c) => !c.requiresKeyword);
 }
+
+/**
+ * 용역 공고의 조달분류(공공조달분류 품명번호, pubPrcrmntClsfcNo)가 등록 분류인가.
+ * 제목에 키워드가 없어도 발주기관이 '전시장치설치및디자인서비스'로 분류한 공고는 본업일 가능성이 높다 —
+ * 2026-10-01 60일치 시험에서 '고성 마동호 습지센터 전시설계 및 제작·설치'(27억), '호국평화공원 미디어월 및
+ * 콘텐츠 제작·설치', '국립인천해양박물관 《기억의 서재》 공간 연출 및 제작·설치'가 이 분류로만 잡혔다.
+ * 같은 분류로 박람회 부스·방송 세트·팝업스토어도 올라와서, 제목에 excludeWords가 있으면 분류만으로는 걸지 않는다.
+ */
+export function matchServiceClasses(notice: NormalizedNotice, serviceClasses: CodeEntry[] = [], excludeWords: string[] = []): CodeEntry[] {
+  if (notice.businessType !== "용역" || serviceClasses.length === 0) return [];
+  const code = String(notice.raw?.["pubPrcrmntClsfcNo"] ?? "").trim();
+  if (!code) return [];
+  const hits = serviceClasses.filter((c) => c.code === code);
+  if (hits.length === 0) return [];
+  const title = notice.title.replace(/\s+/g, "").toLowerCase();
+  if (excludeWords.some((w) => title.includes(w.replace(/\s+/g, "").toLowerCase()))) return [];
+  return hits;
+}

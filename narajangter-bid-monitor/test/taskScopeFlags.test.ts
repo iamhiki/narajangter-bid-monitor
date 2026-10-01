@@ -52,3 +52,15 @@ describe("과업에 섞인 본업 밖 업무 찾기 (2026-10-01 실측 문장)",
     expect(kinds("다양한 관람객 참여를 유도하고 SNS 홍보를 위한 AR 포토존 설치")).toEqual([]);
   });
 });
+
+describe("운송이 콘텐츠의 주제일 때", () => {
+  it("'전시품 포장ㆍ운송ㆍ등록이 담긴 기록영상'은 운송 업무가 아니다", () => {
+    const text = "□ 보이는 수장고 전면 수장대, 디지털 유물 정보와 보존처리, 전시품 포장ㆍ운송ㆍ등록이 담긴 기록영상 등 어린이용 콘텐츠";
+    expect(detectScopeFlags(text).filter((f) => f.kind === "운송")).toEqual([]);
+  });
+
+  it("실제 운송 과업은 그대로 잡는다", () => {
+    const text = "- 전시유물 운송 및 유물종합보험 가입";
+    expect(detectScopeFlags(text).some((f) => f.kind === "운송")).toBe(true);
+  });
+});

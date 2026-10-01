@@ -11,6 +11,9 @@ import { meetsRegion, readQualificationFromNotice, type QualificationDocResult }
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
+import { CORE_CONTENT_TERMS, keywordEvidence, type KeywordEvidence } from "../src/similarity/keywordEvidence.js";
+import { announceName } from "../src/net/mdns.js";
+import { findCoreWords } from "../src/matching/coreWork.js";
 import { mainWorkOf } from "../src/matching/mainWork.js";
 import { taskExcerpt } from "../src/corpus/taskExcerpt.js";
 import { lookupProductClass, type ProductClassInfo } from "../src/api/productClassApi.js";
@@ -95,6 +98,12 @@ function persistedToken(): string {
   }
   return token;
 }
+
+/**
+ * --lan일 때 사내망에 알릴 이름 — 팀원은 http://jiil-bid.local 로 들어온다 (src/net/mdns.ts).
+ * IP는 DHCP로 바뀔 수 있어 이름으로 안내한다. UI_HOSTNAME으로 바꿀 수 있고, 빈 값이면 알리지 않는다.
+ */
+const HOSTNAME = (process.env.UI_HOSTNAME ?? "jiil-bid").trim();
 
 /** 첫 번째 사설 IPv4 주소 (공유 링크 안내용) */
 function lanAddress(): string {
@@ -203,6 +212,7 @@ function matchReason(m: MatchedNotice): string {
     ...m.matchedProductCodes.map((c) => `품목 ${c.name}`),
     ...m.matchedIndustryCodes.map((c) => `업종 ${c.name}`),
     ...m.matchedKeywords.map((k) => `키워드 ${k}`),
+    ...(m.matchedServiceClasses ?? []).map((c) => `분류 ${c.name}`),
   ];
   return parts.length > 0 ? parts.join(" / ") : "(근거 없음)";
 }
@@ -225,18 +235,56 @@ interface SimilarityView {
   maxScore: number;
   rawScore: number;
   basis: string;
-  similar: { id: string; name: string; year: number; score: number }[];
+  /**
+   * 싱크로율 근거 — 화면에서 % 숫자를 눌러야 보인다(개발·검수용). 과거사업마다 원점수·표시값,
+   * 사업명 점수·본문 점수, 사업명끼리 겹친 조각 수, 실제로 겹친 말.
+   */
+  similar: {
+    id: string;
+    name: string;
+    year: number;
+    score: number;
+    shown: number;
+    nameScore: number;
+    bodyScore: number | null;
+    sharedNameTokens: number;
+    /** 사업명 공통 키워드 (공고 제목과 과거 사업명에 그 말 그대로 함께 있는 것) */
+    nameKeywords: string[];
+    /** 과업 본문 근거 — 지일 핵심 키워드가 두 과업지시서에 함께 나온 문맥 (similarity/keywordEvidence.ts) */
+    bodyEvidence: KeywordEvidence[];
+  }[];
 }
 
 /** 싱크로율. 과업지시서·제안요청서 본문을 읽었으면 그 본문으로, 아니면 제목으로 과거사업과 비교한다. */
+/** 과업 본문 근거로 볼 핵심 키워드 — 등록 키워드 + 본업 내용어 */
+function evidenceVocabulary(): string[] {
+  return [...loadAppConfig().keywords, ...CORE_CONTENT_TERMS];
+}
+
 function similarityView(title: string, body?: string): SimilarityView {
   const s = index.findSimilar(title, 3, body ? { body } : {});
   return {
     maxScore: calibrate(s.maxScore, s.basis),
     rawScore: s.maxScore,
     basis: s.basis,
-    similar: s.top.map((t) => ({ id: t.id, name: t.name, year: t.year, score: t.score })),
+    similar: s.top.map((t) => ({
+      id: t.id,
+      name: t.name,
+      year: t.year,
+      score: t.score,
+      shown: calibrate(t.score, s.basis),
+      nameScore: t.nameScore,
+      bodyScore: t.bodyScore,
+      sharedNameTokens: t.sharedNameTokens,
+      nameKeywords: index.sharedTerms(title, t.id, {}, 6)?.name ?? [],
+      bodyEvidence: body ? keywordEvidence(body, byId.get(t.id)?.body ?? "", evidenceVocabulary(), 4) : [],
+    })),
   };
+}
+
+/** 제목 키워드·품목 없이 조달분류만으로 들어온 공고 — 첨부 과업으로 본업인지 다시 확인한다 */
+function isClassOnly(m: MatchedNotice): boolean {
+  return (m.matchedServiceClasses?.length ?? 0) > 0 && m.matchedKeywords.length === 0 && m.matchedProductCodes.length === 0;
 }
 
 function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
@@ -260,6 +308,7 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     overseas: m.overseasVenueFlag?.matchedMongoliaKeyword ?? null,
     qualification: m.qualification ?? null,
     mainWork: mainWorkOf(n, appConfig.heldIndustries),
+    classOnly: isClassOnly(m),
     ...similarity,
   };
 }
@@ -366,6 +415,11 @@ interface Enrichment {
   similarity?: SimilarityView | null;
   /** 과업 본문에서 찾은 본업 밖 업무(유물 운송·대여·운영·홍보). 본문을 못 읽었으면 null */
   scope?: { flags: ScopeFlag[]; sourceFile: string } | null;
+  /**
+   * 조달분류만으로 들어온 공고의 과업 확인. 확인: 본문에 본업 낱말이 있음, 없음: 본문을 읽었는데 없음(화면에서 숨김),
+   * 못읽음: 첨부를 읽지 못함(목록에 두고 직접 확인하라고 알림)
+   */
+  core?: { status: "확인" | "없음" | "못읽음"; words: string[]; sourceFile: string | null };
   ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
@@ -459,9 +513,18 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
   // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
   // 공동수급은 g2b 상세 API가 본공고에만 있다.
   const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
+  const classOnly = new Set(matches.filter(isClassOnly).map((m) => m.notice.noticeNo));
   const docTodo = matches.map((m) => m.notice).filter((n) => {
     const e = enrichment.get(n.noticeNo);
-    return !e || e.qualDoc === undefined || e.classes === undefined || e.similarity === undefined || e.scope === undefined || (isBid(n) && e.jointBid === undefined);
+    return (
+      !e ||
+      e.qualDoc === undefined ||
+      e.classes === undefined ||
+      e.similarity === undefined ||
+      e.scope === undefined ||
+      (classOnly.has(n.noticeNo) && e.core === undefined) ||
+      (isBid(n) && e.jointBid === undefined)
+    );
   });
   const aiEnabled = isAiConfigured();
   const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
@@ -481,10 +544,15 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
         if (isBid(n) && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
         if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
         if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
-        if (e.similarity === undefined || e.scope === undefined) {
+        const needCore = classOnly.has(n.noticeNo) && e.core === undefined;
+        if (e.similarity === undefined || e.scope === undefined || needCore) {
           const body = await fetchNoticeBody(n).catch(() => null);
           e.similarity = body ? similarityView(n.title, body.text) : null;
           e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
+          if (needCore) {
+            const words = body ? findCoreWords(body.text, appConfig.keywords) : [];
+            e.core = { status: !body ? "못읽음" : words.length ? "확인" : "없음", words: words.slice(0, 4), sourceFile: body?.sourceFile ?? null };
+          }
         }
         enrichment.set(n.noticeNo, e);
         enrichState.done += 1;
@@ -555,7 +623,8 @@ function authorized(req: IncomingMessage, url: URL, res: ServerResponse): boolea
   if (url.searchParams.get("t") === TOKEN) {
     // HttpOnly: 페이지 스크립트가 토큰을 읽을 이유가 없다. SameSite=Lax: 외부 사이트가
     // 이 서버로 요청을 걸어도 쿠키가 따라가지 않게 한다.
-    res.setHeader("set-cookie", `ui_token=${TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`);
+    // 1년 — 한 번 링크로 들어온 뒤에는 즐겨찾기한 http://jiil-bid.local 만으로 들어올 수 있게
+    res.setHeader("set-cookie", `ui_token=${TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000`);
     return true;
   }
 
@@ -896,9 +965,12 @@ server.listen(PORT, HOST, () => {
     console.log(`\n  http://localhost:${PORT}`);
     console.log(`\n  이 PC에서만 열립니다. 팀원과 공유하려면:  npm run ui -- --lan`);
   } else {
-    const share = `http://${lanAddress()}:${PORT}/?t=${TOKEN}`;
+    const port = PORT === 80 ? "" : `:${PORT}`;
+    if (HOSTNAME) announceName(HOSTNAME, lanAddress, (msg) => console.log(`\n  ${msg}`));
+    const share = `http://${HOSTNAME ? `${HOSTNAME}.local` : lanAddress()}${port}/?t=${TOKEN}`;
     console.log(`\n  팀원에게 보낼 주소 (이 줄 전체를 복사하세요)`);
     console.log(`  ${share}`);
+    if (HOSTNAME) console.log(`  (이름으로 안 열리는 기기는: http://${lanAddress()}${port}/?t=${TOKEN})`);
     console.log(`\n  · 같은 사내망에 있는 기기만 접속할 수 있습니다.`);
     console.log(`  · 이 PC가 켜져 있고 이 창이 떠 있는 동안만 동작합니다.`);
     console.log(`  · 화면에 과업지시서 본문과 발주기관 담당자 연락처가 나옵니다.`);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extractBudgetAmount, extractOfficialName, normalizeWhitespace } from "../src/corpus/extractText.js";
 import { xmlToText, stripImageNoise } from "../src/corpus/hwpxText.js";
+import { joinTextItems } from "../src/corpus/pdfText.js";
 import { cleanFolderName } from "../src/corpus/scanArchive.js";
 
 describe("cleanFolderName", () => {
@@ -66,6 +67,35 @@ describe("xmlToText", () => {
 
   it("XML 엔티티를 복원한다", () => {
     expect(xmlToText("<hp:t>설계 &amp; 제작</hp:t>")).toContain("설계 & 제작");
+  });
+
+  it("글자 서식이 낱말 중간에서 바뀌어도 낱말을 끊지 않는다 (\"기 술능력\" 방지)", () => {
+    const xml = '<hp:p><hp:run charPrIDRef="3"><hp:t>기</hp:t></hp:run><hp:run charPrIDRef="4"><hp:t>술능력 평가</hp:t></hp:run></hp:p>';
+    expect(xmlToText(xml).trim()).toBe("기술능력 평가");
+  });
+
+  it("탭과 표 칸 경계는 띄운다", () => {
+    const xml = "<hp:tc><hp:p><hp:t>사업명</hp:t></hp:p></hp:tc><hp:tc><hp:p><hp:t>전시관</hp:t><hp:tab/><hp:t>조성</hp:t></hp:p></hp:tc>";
+    expect(xmlToText(xml).replace(/\s+/g, " ").trim()).toBe("사업명 전시관 조성");
+  });
+});
+
+describe("PDF 텍스트 조각 잇기", () => {
+  // transform = [a, b, c, d, x, y], 글자 크기 10. 오른쪽 끝은 x=200
+  const item = (str: string, x: number, y: number, width: number) => ({ str, transform: [10, 0, 0, 10, x, y], width });
+
+  it("같은 줄에서 붙어 있는 조각은 붙이고, 벌어진 조각은 띄운다", () => {
+    expect(joinTextItems([item("기", 0, 100, 10), item("술능력", 10, 100, 30), item("평가", 45, 100, 20), item("끝", 180, 100, 20)])).toBe("기술능력 평가 끝");
+  });
+
+  it("오른쪽 끝까지 찬 줄에서 한글 낱말이 다음 줄로 넘어가면 붙인다", () => {
+    expect(joinTextItems([item("전시 콘", 0, 100, 200), item("텐츠와 체험", 0, 85, 60)])).toBe("전시 콘텐츠와 체험");
+  });
+
+  it("다 차지 않은 줄(문단 끝)이나 항목 기호로 시작하는 줄은 줄을 바꾼다", () => {
+    expect(joinTextItems([item("높이고자 함", 0, 100, 200), item("다. 창의적이고", 0, 85, 80), item("짧은 줄", 0, 70, 40), item("새 문단", 0, 55, 40)])).toBe(
+      "높이고자 함\n다. 창의적이고\n짧은 줄\n새 문단"
+    );
   });
 });
 

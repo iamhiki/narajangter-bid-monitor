@@ -2,7 +2,7 @@ import type { NormalizedNotice } from "../api/types.js";
 import type { LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { hasStandaloneProductMatch, matchCodes } from "./codeMatcher.js";
+import { hasStandaloneProductMatch, matchCodes, matchServiceClasses } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
@@ -115,10 +115,12 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
 
   const { matchedProductCodes, matchedIndustryCodes } = matchCodes(notice, config.productCodes, config.industryCodes);
   const matchedKeywords = matchKeywords(notice, config.keywords);
+  const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
   const candidate =
-    hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia;
+    hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia || matchedServiceClasses.length > 0;
   const hits = [
     ...matchedProductCodes.map((c) => `품목 ${c.name}`),
+    ...matchedServiceClasses.map((c) => `분류 ${c.name}`),
     ...matchedKeywords.map((k) => `키워드 ${k}`),
     ...(overseas.isMongolia ? ["몽골 해외개최"] : []),
   ];

@@ -48,6 +48,12 @@ const NOT_OURS = /별도\s*(?:발주|계약|용역|추진)|발주\s*(?:처|기�
 /** 운영요원을 "교육하라", "최소화하라", "매뉴얼을 만들라"는 문장은 운영 업무가 아니라 설계·인수인계 조건이다 */
 const OPS_NOT_OURS = /교육|매뉴얼|최소/;
 
+/**
+ * "전시품 포장ㆍ운송ㆍ등록이 담긴 기록영상"처럼 운송·대여가 **콘텐츠의 주제**인 경우 — 바로 뒤에 "담긴/담은/기록영상"이 온다.
+ * 2026-10-01 국립충주박물관 중원팔경(프로젝션 매핑·수장대 제작) 사전규격이 이 문구로 운송 업무가 있는 것처럼 잡혔다.
+ */
+const AS_CONTENT = /^[\s가-힣ㆍ·,]{0,16}?(?:이|을|를)?\s*(?:담긴|담은|담아|소개하는|보여주는|기록\s*영상|영상)/;
+
 /** 목차 줄("과업 범위 ------ 7")은 건너뛴다 */
 const TOC = /-{6,}|·{6,}|…{3,}/;
 
@@ -77,6 +83,7 @@ export function detectScopeFlags(text: string, perKind = 3): ScopeFlag[] {
       const sentence = sentenceAround(flat, m.index!, m[0].length);
       if (TOC.test(sentence) || NOT_OURS.test(sentence)) continue;
       if (kind === "운영" && OPS_NOT_OURS.test(sentence)) continue;
+      if ((kind === "운송" || kind === "대여") && AS_CONTENT.test(flat.slice(m.index! + m[0].length, m.index! + m[0].length + 30))) continue;
       const key = sentence.replace(/\s+/g, "").slice(0, 40);
       if (seen.has(key)) continue;
       seen.add(key);

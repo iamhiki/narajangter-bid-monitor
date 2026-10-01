@@ -52,6 +52,7 @@ function matchReason(m: MatchedNotice): string {
     ...m.matchedProductCodes.map((c) => `품목 ${c.name}`),
     ...m.matchedIndustryCodes.map((c) => `업종 ${c.name}`),
     ...m.matchedKeywords.map((k) => `키워드 ${k}`),
+    ...(m.matchedServiceClasses ?? []).map((c) => `분류 ${c.name}`),
   ].join(", ");
 }
 

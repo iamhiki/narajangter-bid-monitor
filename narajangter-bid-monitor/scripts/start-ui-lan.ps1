@@ -11,6 +11,8 @@ Set-Location $root
 New-Item -ItemType Directory -Force (Join-Path $root "output") | Out-Null
 $log = Join-Path $root "output\ui-server.log"
 [IO.File]::WriteAllText($log, "=== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') start ===`r`n", (New-Object Text.UTF8Encoding $false))
+# 80번 포트로 띄워 주소에 :5173이 붙지 않게 한다 — 팀원 주소는 http://jiil-bid.local (방화벽 허용은 register-ui-task.ps1)
+$env:UI_PORT = "80"
 # 출력은 cmd로 그대로 덧붙인다 — PowerShell 5.1의 >> 는 UTF-16으로 바꿔 써서 기록이 깨진다
 & cmd.exe /c "npm run ui -- --lan >> `"$log`" 2>&1"
 exit $LASTEXITCODE

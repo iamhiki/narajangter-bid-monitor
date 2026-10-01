@@ -282,6 +282,33 @@ body {
 
 .card-score.hi b { color: var(--brand); }
 .card-score.edge b, .card-score.edge small { color: var(--warn); }
+/* 숫자를 누르면 근거 패널 (개발·검수용 — 평소에는 숨김) */
+.card-score { position: relative; cursor: pointer; }
+.card-score:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.card-score small u { text-decoration: none; border-bottom: 1px dotted currentColor; }
+.score-why {
+  display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 25;
+  width: min(440px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow-y: auto;
+  text-align: left; line-height: 1.5; cursor: default;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  padding: 12px 14px; box-shadow: 0 2px 6px rgba(0, 0, 0, .08); font-size: 12.5px;
+}
+.card-score.open .score-why { display: block; }
+.score-why h4 { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--brand); }
+.score-why .meta { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.score-why ol { margin: 0; padding: 0; list-style: none; }
+.score-why li { padding: 8px 0; border-top: 1px solid var(--line-soft); }
+/* 바깥 % 숫자(.card-score b — 24px 제목 글꼴)를 물려받지 않게 되돌린다 */
+.card-score .score-why b,
+.card-score.hi .score-why b,
+.card-score.edge .score-why b { display: inline; font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0; color: var(--ink-strong); }
+.score-why .nums { display: block; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.score-why .terms { display: block; font-size: 12px; margin-top: 2px; }
+.score-why ul.ev { list-style: none; margin: 2px 0 0; padding: 0; }
+.score-why ul.ev li { padding: 4px 0 4px 8px; border-top: 0; border-left: 2px solid var(--line); margin-top: 4px; }
+.score-why ul.ev small { color: var(--faint); font-size: 11px; }
+.score-why ul.ev q { display: block; quotes: none; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.score-why .note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
 
 /* 내 이름 */
 .me-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; font-size: 12.5px; color: var(--faint); }
@@ -344,6 +371,13 @@ body {
   background: var(--panel); color: var(--urgent); border: 1px solid var(--urgent); white-space: nowrap;
 }
 .due-tag.today { background: var(--urgent); color: var(--on-urgent); }
+/* 회사 방향과 다른 공고 — 맨 아래 접힌 칸 */
+.off-group { margin-top: 28px; }
+.off-group > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px; }
+.off-group > summary::-webkit-details-marker { display: none; }
+.off-group > summary::before { content: "▸"; color: var(--muted); font-size: 13px; }
+.off-group[open] > summary::before { content: "▾"; }
+.off-group > summary h2 { color: var(--muted); }
 .enrich-meta { margin: -10px 0 14px; color: var(--brand); font-size: 12.5px; min-height: 1em; }
 
 /* AI 판단 */
@@ -911,8 +945,37 @@ function matchesLiveQuery(n) {
   return [n.title, n.demandInstitution, n.institution, n.noticeNo].some((v) => String(v || "").replace(/\s+/g, "").toLowerCase().includes(q));
 }
 
+/**
+ * 회사 방향과 다른 공고 — 첨부 과업지시서를 읽어 보니
+ *  · 과업에 인력 운영(운영요원·도슨트), 유물 운송, 전시품 대여가 들어 있거나 (특별전·행사형)
+ *  · 제목 키워드 없이 분류로만 들어왔는데 전시·제작 내용이 없는 공고.
+ * 자격이 되더라도 본공고 목록에 섞여 있으면 판단에 도움이 안 된다(2026-10-01 요청) — 맨 아래 접힌 칸으로 뺀다.
+ * '홍보·도록'만 있는 공고는 도록 인쇄 정도라 그대로 둔다.
+ */
+const OFF_KINDS = { 운영: "인력 운영", 운송: "유물 운송", 대여: "전시품 대여" };
+function offDirection(n) {
+  const e = enrich.byNo[n.noticeNo];
+  if (n.classOnly && e?.core?.status === "없음") return "과업지시서에 전시·제작 내용 없음";
+  const kinds = [...new Set((e?.scope?.flags || []).map((f) => f.kind))].filter((k) => OFF_KINDS[k]);
+  return kinds.length ? "과업에 " + kinds.map((k) => OFF_KINDS[k]).join("·") + " 포함" : null;
+}
+let offOpen = false;
+let lastOffKey = "";
+const offKeyOf = () => lastItems.filter(offDirection).map((n) => n.noticeNo).join(",");
+
 function applyFilters() {
-  const shown = lastItems.filter(
+  const offItems = lastItems.filter(offDirection);
+  lastOffKey = offItems.map((n) => n.noticeNo).join(",");
+  const items = lastItems.filter((n) => !offDirection(n));
+  const offShown = offItems.filter(matchesLiveQuery);
+  const offGroup = offShown.length
+    ? '<details class="group off-group" id="offGroup"' + (offOpen ? " open" : "") + ">" +
+      '<summary><h2>회사 방향과 다른 공고 <span class="group-n">' + offShown.length + "건</span></h2></summary>" +
+      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없는 공고입니다. 참가 자격이 되더라도 지일이 하는 일과 성격이 달라 따로 모았습니다.</p>' +
+      offShown.map(renderNotice).join("") +
+      "</details>"
+    : "";
+  const shown = items.filter(
     (n) =>
       matchesLiveQuery(n) &&
       (filters.grade === "all" || n.confidence === filters.grade) &&
@@ -923,9 +986,9 @@ function applyFilters() {
 
   // 필터 칩의 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
   // "지금 뭘 숨기고 있는지"를 알 수 없다.
-  const count = (fn) => lastItems.filter(fn).length;
+  const count = (fn) => items.filter(fn).length;
   $("filters").innerHTML = [
-    chip("grade", "all", `전체 ${lastItems.length}`),
+    chip("grade", "all", `전체 ${items.length}`),
     chip("grade", "강력추천", `강력추천 ${count((n) => n.confidence === "강력추천")}`, "urgent"),
     chip("grade", "참고용", `참고용 ${count((n) => n.confidence === "참고용")}`),
     `<span class="chip-gap"></span>`,
@@ -947,12 +1010,12 @@ function applyFilters() {
       : []),
   ].join("");
 
-  if (!lastItems.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>';
+  if (!items.length) {
+    $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>' + offGroup;
     return;
   }
   if (!shown.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>';
+    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>' + offGroup;
     return;
   }
 
@@ -981,7 +1044,7 @@ function applyFilters() {
           ${list.map(renderNotice).join("")}
         </div>`;
     })
-    .join("");
+    .join("") + offGroup;
 }
 
 function chip(group, value, label, tone = "") {
@@ -992,12 +1055,38 @@ function chip(group, value, label, tone = "") {
 const scoreBand = (n) => (n.confidence === "강력추천" ? "urgent" : n.maxScore >= HIGH ? "strong" : n.maxScore >= LOW ? "edge" : "");
 
 /** 점수는 카드 오른쪽 위에 따로 — 배지 줄에 섞으면 정보가 전부 왼쪽에 몰린다. 담당자에게는 싱크로율(%)만 보인다 */
-function scoreBoxHtml(n) {
+function scoreBoxHtml(n, open = false) {
   const tone = n.maxScore >= HIGH ? "hi" : n.maxScore >= LOW ? "edge" : "";
-  return `<div class="card-score ${tone}" data-score="${esc(n.noticeNo)}">
+  return `<div class="card-score ${tone} ${open ? "open" : ""}" data-score="${esc(n.noticeNo)}" role="button" tabindex="0" aria-expanded="${open}" title="눌러서 근거 보기">
       <b>${Math.round(n.maxScore * 100)}<i>%</i></b>
-      <small>싱크로율</small>
+      <small><u>싱크로율</u></small>
+      <div class="score-why" role="dialog" aria-label="싱크로율 근거">${scoreWhyHtml(n)}</div>
     </div>`;
+}
+
+/**
+ * 싱크로율 근거 — 어느 과거 사업과 무엇이 겹쳐서 이 숫자가 나왔는지. 카드 공간을 차지하지 않게
+ * % 숫자를 눌렀을 때만 연다 (점수 계산을 확인하는 개발·검수용).
+ */
+const fix = (v) => (v == null ? "—" : Number(v).toFixed(3));
+function scoreWhyHtml(n) {
+  const list = n.similar || [];
+  const basis = n.basis === "제목+과업내용" ? "공고 제목 + 첨부 과업지시서" : "공고 제목만 (첨부를 아직 못 읽었거나 읽지 못함)";
+  const head = `<h4>싱크로율 근거</h4>
+    <p class="meta">비교한 것: ${esc(basis)}<br>원점수 ${fix(n.rawScore)} → 표시 ${Math.round(n.maxScore * 100)}%</p>`;
+  if (!list.length) return head + `<p class="meta">겹치는 과거 사업이 없습니다.</p>`;
+  const rows = list
+    .map((t, i) => {
+      const nameKw = t.nameKeywords || [];
+      const ev = t.bodyEvidence || [];
+      return `<li><b>${i + 1}. ${esc(t.name)}</b> (${esc(t.year)}) — ${Math.round((t.shown ?? t.score) * 100)}%
+        <span class="nums">원점수 ${fix(t.score)} = 사업명 ${fix(t.nameScore)} · 본문 ${fix(t.bodyScore)} · 사업명 겹친 조각 ${t.sharedNameTokens ?? "—"}개</span>
+        ${nameKw.length ? `<span class="terms">사업명 공통 키워드: ${esc(nameKw.join(", "))}</span>` : ""}
+        ${ev.length ? `<span class="terms">과업 본문 핵심 키워드:</span><ul class="ev">${ev.map((e) => `<li><b>${esc(e.keyword)}</b> <small>공고 ${e.noticeCount}회 · 과거 ${e.pastCount}회</small><q>공고 ${esc(e.noticeContext)}</q><q>과거 ${esc(e.pastContext)}</q></li>`).join("")}</ul>` : n.basis === "제목+과업내용" ? `<span class="terms">과업 본문 핵심 키워드: 함께 나온 말 없음</span>` : ""}</li>`;
+    })
+    .join("");
+  return head + `<ol>${rows}</ol>
+    <p class="note">원점수 = 사업명 비교 65% + 과업 본문 비교 35%. 사업명이 세 글자 이상 통째로 겹치지 않으면(조각 3개 미만) 사업명 점수는 0으로 봅니다. 본문이 없는 과거 사업은 사업명 점수의 약 83%만 줍니다. 표시 %는 원점수 순서를 바꾸지 않고 눈금만 바꾼 값입니다.</p>`;
 }
 
 /**
@@ -1007,7 +1096,7 @@ function scoreBoxHtml(n) {
 function applyBodyScores() {
   for (const n of lastItems) {
     const s = enrich.byNo[n.noticeNo]?.similarity;
-    if (!s || s.maxScore === n.maxScore) continue;
+    if (!s || (s.maxScore === n.maxScore && s.basis === n.basis)) continue;
     const before = scoreBand(n);
     Object.assign(n, s);
     const box = document.querySelector(`[data-score="${CSS.escape(n.noticeNo)}"]`);
@@ -1015,7 +1104,7 @@ function applyBodyScores() {
     const card = box.closest(".notice");
     if (card && before) card.classList.remove(before);
     if (card && scoreBand(n)) card.classList.add(scoreBand(n));
-    box.outerHTML = scoreBoxHtml(n);
+    box.outerHTML = scoreBoxHtml(n, box.classList.contains("open"));
   }
 }
 
@@ -1157,6 +1246,8 @@ async function pollEnrich() {
     return;
   }
   refreshCards("enrich");
+  // 과업 확인으로 숨길 공고가 바뀌었을 때만 목록을 다시 그린다
+  if (offKeyOf() !== lastOffKey) applyFilters();
   if (enrich.running) enrichTimer = setTimeout(pollEnrich, 3000);
   else if (filters.ai !== "all") applyFilters(); // AI 필터가 걸려 있을 때만 — 전체를 다시 그리면 쓰던 대화가 날아간다
 }
@@ -1176,6 +1267,7 @@ function enrichBadges(n) {
   }
   if (doc?.region) out.push(regionBadge(doc, e.regionOk));
   if (doc?.performance?.length) out.push(performanceBadge(doc));
+  if (n.classOnly) out.push(coreBadge(e.core));
   if (e.scope?.flags?.length) out.push(scopeBadge(e.scope));
   if (n.mainWork && !n.mainWork.held) out.push(mainWorkBadge(n.mainWork));
   out.push(jointBadge(n, e));
@@ -1192,7 +1284,9 @@ function jointBadge(n, e) {
   if (e.jointBid === null) return `<span class="badge faint" title="g2b 상세 조회 실패 — 원문 공고에서 확인하세요">공동수급 확인 안 됨</span>`;
   const short = e.jointBid.replace(/^\([^)]*\)\s*/, "");
   const tone = /불허/.test(short) ? "warn" : "";
-  return `<span class="badge ${tone}" title="${esc(e.jointBid)}">공동수급 · ${esc(short)}</span>`;
+  // "공동수급불허"는 앞에 "공동수급"이 이미 있다 — "공동수급 · 공동수급불허"로 겹치지 않게 "공동수급 불허"로
+  const label = /^공동수급\s*/.test(short) ? `공동수급 ${short.replace(/^공동수급\s*/, "")}` : `공동수급 · ${short}`;
+  return `<span class="badge ${tone}" title="${esc(e.jointBid)}">${esc(label)}</span>`;
 }
 
 /**
@@ -1405,6 +1499,25 @@ function performanceBadge(doc) {
  * 과업에 본업(설계·제작·설치) 밖 업무가 섞인 공고 — 과업지시서·제안요청서 본문에서 찾은 문장.
  * 빼지 않고 알려만 준다. 제작·설치가 중심이면 하청·비용을 견적에 넣고 참가할 수 있다.
  */
+/**
+ * 제목에 우리 키워드는 없지만 나라장터가 '전시장치설치및디자인서비스'로 분류한 공고.
+ * 첨부 과업지시서에서 전시·제작 내용을 찾았는지 알려 준다 (못 찾으면 목록에서 숨긴다 — applyFilters).
+ */
+function coreBadge(core) {
+  const intro = `<p>공고 제목에는 우리 키워드가 없지만, 나라장터가 이 공고를 <b>전시장치 설치·디자인</b> 사업으로 분류해 목록에 올렸습니다.</p>`;
+  if (!core) return enrich.running ? `<span class="badge faint">과업 내용 확인 중…</span>` : "";
+  if (core.status === "확인") {
+    const body = intro + `<p>과업지시서에서 찾은 말: <b>${esc(core.words.join(", "))}</b></p>` + (core.sourceFile ? `<p>출처: ${esc(core.sourceFile)}</p>` : "");
+    return `<span class="badge qual okb" tabindex="0">분류로 찾음 · 과업에 전시 내용 있음${qtip("제목 밖에서 찾은 공고", body)}</span>`;
+  }
+  if (core.status === "못읽음") {
+    const body = intro + `<p>첨부 파일을 읽지 못해 과업 내용을 확인하지 못했습니다. 공고를 열어 과업지시서를 직접 확인해 주세요.</p>`;
+    return `<span class="badge qual warn" tabindex="0">⚠ 분류로 찾음 · 과업 직접 확인${qtip("제목 밖에서 찾은 공고", body)}</span>`;
+  }
+  const body = intro + `<p>과업지시서를 읽어 봤지만 전시·체험·제작 내용이 보이지 않아 평소에는 목록에서 숨깁니다.</p>` + (core.sourceFile ? `<p>출처: ${esc(core.sourceFile)}</p>` : "");
+  return `<span class="badge qual warn" tabindex="0">⚠ 분류로 찾음 · 과업에 전시 내용 없음${qtip("제목 밖에서 찾은 공고", body)}</span>`;
+}
+
 const SCOPE_LABEL = { 운송: "유물 운송", 대여: "전시품 대여", 운영: "인력 운영", "홍보·도록": "홍보·도록" };
 function scopeBadge(scope) {
   const kinds = [...new Set(scope.flags.map((f) => f.kind))];
@@ -1738,7 +1851,44 @@ $("exFilters").onclick = (ev) => {
 };
 try { $("judge").value = localStorage.getItem("ui-judge") || ""; } catch (e) { /* 무시 */ }
 $("judge").onchange = () => { try { localStorage.setItem("ui-judge", $("judge").value.trim()); } catch (e) { /* 무시 */ } };
+/** 싱크로율 % 숫자를 누르면 근거 패널을 열고 닫는다. 패널 안을 누를 때는 닫지 않고, 바깥을 누르면 닫는다 */
+function toggleScoreWhy(box) {
+  const open = !box.classList.contains("open");
+  document.querySelectorAll(".card-score.open").forEach((el) => {
+    el.classList.remove("open");
+    el.setAttribute("aria-expanded", "false");
+  });
+  if (open) {
+    box.classList.add("open");
+    box.setAttribute("aria-expanded", "true");
+  }
+}
+// '회사 방향과 다른 공고' 칸을 펼친 채로 두기 — 목록을 다시 그려도 접히지 않게
+document.addEventListener("toggle", (ev) => {
+  if (ev.target.id === "offGroup") offOpen = ev.target.open;
+}, true);
+
+document.addEventListener("keydown", (ev) => {
+  const box = ev.target.closest?.(".card-score");
+  if (box && (ev.key === "Enter" || ev.key === " ") && !ev.target.closest(".score-why")) {
+    ev.preventDefault();
+    toggleScoreWhy(box);
+  }
+  if (ev.key === "Escape") document.querySelectorAll(".card-score.open").forEach((el) => toggleScoreWhy(el));
+});
+
 document.addEventListener("click", (ev) => {
+  if (!ev.target.closest(".score-why")) {
+    const box = ev.target.closest(".card-score");
+    if (box) {
+      toggleScoreWhy(box);
+      return;
+    }
+    document.querySelectorAll(".card-score.open").forEach((el) => {
+      el.classList.remove("open");
+      el.setAttribute("aria-expanded", "false");
+    });
+  }
   const ask = ev.target.closest("[data-ai-ask]");
   if (ask) askAi(ask);
 

@@ -55,6 +55,8 @@ const keywordsFileSchema = z.object({
 const codesFileSchema = z.object({
   productCodes: z.array(codeEntrySchema).min(1, "productCodes 배열이 비어있습니다"),
   industryCodes: z.array(codeEntrySchema).min(1, "industryCodes 배열이 비어있습니다"),
+  serviceClasses: z.array(codeEntrySchema).default([]),
+  serviceClassExcludeWords: z.array(z.string().trim().min(1)).default([]),
 });
 
 const recipientsFileSchema = z.object({
@@ -125,6 +127,10 @@ export interface AppConfig {
   allowedBidMethods: BidMethodCategory[];
   productCodes: CodeEntry[];
   industryCodes: CodeEntry[];
+  /** 용역 조달분류(8자리 품명번호). 제목 키워드가 없어도 이 분류면 수집한다 — matching/codeMatcher.ts matchServiceClasses */
+  serviceClasses?: CodeEntry[];
+  /** 제목에 이 말이 있으면 조달분류만으로는 수집하지 않는다 (박람회 부스·방송 세트 등) */
+  serviceClassExcludeWords?: string[];
   recipients: string[];
   heldProducts: CodeEntry[];
   heldIndustries: CodeEntry[];
@@ -217,6 +223,8 @@ export function loadAppConfig(): AppConfig {
     allowedBidMethods: keywordsData.allowedBidMethods,
     productCodes: codesData.productCodes,
     industryCodes: codesData.industryCodes,
+    serviceClasses: codesData.serviceClasses,
+    serviceClassExcludeWords: codesData.serviceClassExcludeWords,
     recipients: recipientsData.recipients,
     heldProducts: heldQualificationsData.heldProducts,
     heldIndustries: heldQualificationsData.heldIndustries,
