@@ -182,6 +182,23 @@ npm run typecheck
 (data.go.kr이 API 스키마를 개정하며 필드명이 바뀌는 경우가 종종 있어, 코드 로직을 건드리지 않고
 후보 목록만 수정하면 되도록 설계했습니다.)
 
+## 담당자 화면 (입찰 공고 검토)
+
+```bash
+npm run ui            # 이 PC에서만 (http://localhost:5173)
+npm run ui -- --lan   # 사내망 팀원과 공유 — 첫머리에 팀원에게 보낼 주소가 찍힌다
+```
+
+이 PC에 로그인하면 공유 모드 화면이 자동으로 뜨게 하려면 Windows 작업 스케줄러에 한 번 등록한다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\register-ui-task.ps1
+```
+
+- 작업 이름: `지일 입찰 공고 검토 서버` — 창 없이 돌고, 죽으면 1분 뒤 다시 뜬다.
+- 기록: `output\ui-server.log` (팀원 공유 주소도 여기 첫머리에 있다)
+- 지우기: `Unregister-ScheduledTask -TaskName "지일 입찰 공고 검토 서버" -Confirm:$false`
+
 ## 매주 월요일 자동 발송 (GitHub Actions)
 
 저장소 루트의 `.github/workflows/weekly-bid-report.yml`이 매주 월요일 07:00(KST)에
