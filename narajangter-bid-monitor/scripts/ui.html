@@ -304,10 +304,6 @@ body {
 .card-score.edge .score-why b { display: inline; font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0; color: var(--ink-strong); }
 .score-why .nums { display: block; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .score-why .terms { display: block; font-size: 12px; margin-top: 2px; }
-.score-why ul.ev { list-style: none; margin: 2px 0 0; padding: 0; }
-.score-why ul.ev li { padding: 4px 0 4px 8px; border-top: 0; border-left: 2px solid var(--line); margin-top: 4px; }
-.score-why ul.ev small { color: var(--faint); font-size: 11px; }
-.score-why ul.ev q { display: block; quotes: none; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .score-why .note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
 
 /* 내 이름 */
@@ -1078,11 +1074,11 @@ function scoreWhyHtml(n) {
   const rows = list
     .map((t, i) => {
       const nameKw = t.nameKeywords || [];
-      const ev = t.bodyEvidence || [];
+      const bodyKw = t.bodyKeywords || [];
       return `<li><b>${i + 1}. ${esc(t.name)}</b> (${esc(t.year)}) — ${Math.round((t.shown ?? t.score) * 100)}%
         <span class="nums">원점수 ${fix(t.score)} = 사업명 ${fix(t.nameScore)} · 본문 ${fix(t.bodyScore)} · 사업명 겹친 조각 ${t.sharedNameTokens ?? "—"}개</span>
         ${nameKw.length ? `<span class="terms">사업명 공통 키워드: ${esc(nameKw.join(", "))}</span>` : ""}
-        ${ev.length ? `<span class="terms">과업 본문 핵심 키워드:</span><ul class="ev">${ev.map((e) => `<li><b>${esc(e.keyword)}</b> <small>공고 ${e.noticeCount}회 · 과거 ${e.pastCount}회</small><q>공고 ${esc(e.noticeContext)}</q><q>과거 ${esc(e.pastContext)}</q></li>`).join("")}</ul>` : n.basis === "제목+과업내용" ? `<span class="terms">과업 본문 핵심 키워드: 함께 나온 말 없음</span>` : ""}</li>`;
+        ${bodyKw.length ? `<span class="terms">과업 본문 공통 키워드: ${esc(bodyKw.join(", "))}</span>` : ""}</li>`;
     })
     .join("");
   return head + `<ol>${rows}</ol>

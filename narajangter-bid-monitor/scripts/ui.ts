@@ -11,7 +11,7 @@ import { meetsRegion, readQualificationFromNotice, type QualificationDocResult }
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
-import { CORE_CONTENT_TERMS, keywordEvidence, type KeywordEvidence } from "../src/similarity/keywordEvidence.js";
+import { CORE_CONTENT_TERMS, keywordEvidence } from "../src/similarity/keywordEvidence.js";
 import { announceName } from "../src/net/mdns.js";
 import { findCoreWords } from "../src/matching/coreWork.js";
 import { mainWorkOf } from "../src/matching/mainWork.js";
@@ -250,8 +250,11 @@ interface SimilarityView {
     sharedNameTokens: number;
     /** 사업명 공통 키워드 (공고 제목과 과거 사업명에 그 말 그대로 함께 있는 것) */
     nameKeywords: string[];
-    /** 과업 본문 근거 — 지일 핵심 키워드가 두 과업지시서에 함께 나온 문맥 (similarity/keywordEvidence.ts) */
-    bodyEvidence: KeywordEvidence[];
+    /**
+     * 과업 본문 공통 키워드 — 지일 핵심 키워드 중 두 과업지시서에 함께 나온 것 (similarity/keywordEvidence.ts).
+     * 사업명 공통 키워드와 같은 말(포함 관계 포함)은 빼서 같은 정보를 두 번 보이지 않는다.
+     */
+    bodyKeywords: string[];
   }[];
 }
 
@@ -259,6 +262,18 @@ interface SimilarityView {
 /** 과업 본문 근거로 볼 핵심 키워드 — 등록 키워드 + 본업 내용어 */
 function evidenceVocabulary(): string[] {
   return [...loadAppConfig().keywords, ...CORE_CONTENT_TERMS];
+}
+
+/** 사업명 공통 키워드와, 그와 겹치지 않는 과업 본문 공통 키워드 */
+function keywordsFor(title: string, projectId: string, body?: string): { nameKeywords: string[]; bodyKeywords: string[] } {
+  const named = index.sharedTerms(title, projectId, {}, 6)?.name ?? [];
+  // "체험시설, 체험"처럼 다른 키워드 안에 든 짧은 말은 뺀다
+  const nameKeywords = named.filter((k) => !named.some((o) => o !== k && o.includes(k)));
+  const fromBody = body ? keywordEvidence(body, byId.get(projectId)?.body ?? "", evidenceVocabulary(), 6).map((e) => e.keyword) : [];
+  // 사업명 키워드를 지우고도 새 내용이 두 글자 이상 남는 것만 — "상징조형물"(상징+조형물)은 빼고 "전시공간"(+공간)은 남긴다
+  const leftover = (k: string) => nameKeywords.reduce((rest, n) => rest.split(n).join(""), k);
+  const bodyKeywords = fromBody.filter((k) => leftover(k).length >= 2).slice(0, 4);
+  return { nameKeywords, bodyKeywords };
 }
 
 function similarityView(title: string, body?: string): SimilarityView {
@@ -276,8 +291,7 @@ function similarityView(title: string, body?: string): SimilarityView {
       nameScore: t.nameScore,
       bodyScore: t.bodyScore,
       sharedNameTokens: t.sharedNameTokens,
-      nameKeywords: index.sharedTerms(title, t.id, {}, 6)?.name ?? [],
-      bodyEvidence: body ? keywordEvidence(body, byId.get(t.id)?.body ?? "", evidenceVocabulary(), 4) : [],
+      ...keywordsFor(title, t.id, body),
     })),
   };
 }
