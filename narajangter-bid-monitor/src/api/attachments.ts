@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
+import { unzipSync } from "fflate";
 import type { NormalizedNotice } from "./types.js";
 import { logger } from "../logger.js";
 
@@ -24,6 +25,13 @@ export interface NoticeAttachment {
   isSpec: boolean;
 }
 
+/** 텍스트를 뽑을 문서 하나. ZIP 첨부는 안에 든 문서마다 하나씩 나온다. */
+export interface AttachmentDocument {
+  /** 화면·로그에 쓸 이름. ZIP 안 문서는 "묶음.zip › 제안요청서.hwpx" */
+  name: string;
+  path: string;
+}
+
 /**
  * 과업 내용이 담긴 문서의 파일명 패턴.
  *
@@ -34,7 +42,13 @@ const SPEC_PATTERN = /과업|제안요청|요청서|과업내용|시방|규격�
 const EXCLUDE_PATTERN = /내역서|산출|계약정보요약|낙찰자|유의서|청렴|서식|양식/;
 
 /** 우리가 텍스트를 뽑을 수 있는 형식만 받는다. */
-const SUPPORTED = /\.(hwp|hwpx|pdf)$/i;
+const DOCUMENT = /\.(hwp|hwpx|pdf)$/i;
+/**
+ * ZIP도 받는다 — 국립중앙박물관처럼 제안요청서를 "제안요청서 등.zip"에만 넣는 기관이 있다.
+ * 2026-10-01 실측: 리스트에 남은 특별전 9건 중 3건의 제안요청서가 ZIP 안에만 있었다.
+ */
+const SUPPORTED = /\.(hwp|hwpx|pdf|zip)$/i;
+const ARCHIVE = /\.zip$/i;
 
 /** 응답 항목에서 첨부파일 목록을 뽑는다. 최대 10개 슬롯이 규격이다. */
 export function listAttachments(notice: NormalizedNotice): NoticeAttachment[] {
@@ -47,30 +61,104 @@ export function listAttachments(notice: NormalizedNotice): NoticeAttachment[] {
     const url = String(raw[`ntceSpecDocUrl${i}`] ?? "").trim();
     if (!name || !url) continue;
     if (!SUPPORTED.test(name)) continue;
-    const normalized = name.replace(/[_\-.]+/g, " ");
-    out.push({
-      name,
-      url,
-      isSpec: SPEC_PATTERN.test(normalized) && !EXCLUDE_PATTERN.test(normalized),
-    });
+    out.push({ name, url, isSpec: isSpecName(name) || (ARCHIVE.test(name) && !isExcludedName(name)) });
   }
   return out;
 }
 
+const normalizeName = (name: string) => name.replace(/[_\-.]+/g, " ");
+const isExcludedName = (name: string) => EXCLUDE_PATTERN.test(normalizeName(name));
+/** 파일명으로 본 과업 문서 여부. ZIP은 이름이 "첨부.zip"처럼 막연해도 과업 문서를 묶어 두는 경우가 많아 따로 받는다. */
+export function isSpecName(name: string): boolean {
+  const normalized = normalizeName(name);
+  return SPEC_PATTERN.test(normalized) && !EXCLUDE_PATTERN.test(normalized);
+}
+
+/** 과업지시서 > 제안요청서 > 나머지. 과업지시서가 과업 내용을 가장 직접적으로 담는다. 같은 순위면 ZIP을 뒤로. */
+export function specRank(name: string): number {
+  const base = /과업지시|과업내용/.test(name) ? 0 : /제안요청|요청서/.test(name) ? 1 : 2;
+  return base + (ARCHIVE.test(name) ? 0.5 : 0);
+}
+
 /** 과업 내용이 담긴 첨부만, 우선순위대로. */
 export function pickSpecAttachments(notice: NormalizedNotice): NoticeAttachment[] {
-  const specs = listAttachments(notice).filter((a) => a.isSpec);
-  // 과업지시서 > 제안요청서 > 나머지. 과업지시서가 과업 내용을 가장 직접적으로 담는다.
-  const rank = (name: string): number => (/과업지시|과업내용/.test(name) ? 0 : /제안요청|요청서/.test(name) ? 1 : 2);
-  return specs.sort((a, b) => rank(a.name) - rank(b.name));
+  return listAttachments(notice)
+    .filter((a) => a.isSpec)
+    .sort((a, b) => specRank(a.name) - specRank(b.name));
+}
+
+/**
+ * ZIP 안 파일명 복원. 한국 관공서 ZIP은 대부분 UTF-8 표시 없이 CP949로 이름을 넣어서,
+ * fflate가 latin1로 읽은 "Á¦¾È¿äÃ»¼­"를 바이트로 되돌려 EUC-KR로 다시 읽는다.
+ */
+function decodeEntryName(name: string): string {
+  if ([...name].some((c) => c.charCodeAt(0) > 0xff)) return name; // 이미 UTF-8로 읽힘
+  try {
+    const decoded = new TextDecoder("euc-kr", { fatal: true }).decode(Uint8Array.from(name, (c) => c.charCodeAt(0)));
+    return decoded;
+  } catch {
+    return name;
+  }
+}
+
+/**
+ * ZIP을 풀어 안의 hwp·hwpx·pdf를 꺼낸다. `<zip 경로>.d/`에 풀어 두고 다음부터는 다시 풀지 않는다.
+ * 과업 문서로 보이는 이름을 앞에 둔다. 압축이 깨졌으면 빈 배열.
+ */
+export function expandArchive(zipPath: string, zipName: string, maxBytes?: number): AttachmentDocument[] {
+  const dir = `${zipPath}.d`;
+  const indexPath = join(dir, "index.json");
+  let entries: { name: string; file: string }[];
+  if (existsSync(indexPath)) {
+    entries = JSON.parse(readFileSync(indexPath, "utf8"));
+  } else {
+    let unzipped: Record<string, Uint8Array>;
+    try {
+      unzipped = unzipSync(new Uint8Array(readFileSync(zipPath)), {
+        // 문서만 푼다 — 작품 목록 엑셀(58MB)·도면 같은 큰 파일을 메모리에 올리지 않는다.
+        filter: (f) => DOCUMENT.test(decodeEntryName(f.name)) && f.originalSize <= (maxBytes ?? defaultMaxBytes(decodeEntryName(f.name))),
+      });
+    } catch (err) {
+      logger.warn("ZIP 첨부를 풀지 못했습니다", { file: zipName, error: String(err) });
+      return [];
+    }
+    mkdirSync(dir, { recursive: true });
+    entries = Object.entries(unzipped).map(([raw, data], i) => {
+      const name = decodeEntryName(raw).split("/").pop()!;
+      const file = `${i}${extname(name).toLowerCase()}`;
+      writeFileSync(join(dir, file), data);
+      return { name, file };
+    });
+    writeFileSync(indexPath, JSON.stringify(entries), "utf8");
+  }
+  return entries
+    .sort((a, b) => specRank(a.name) - specRank(b.name))
+    .map((e) => ({ name: `${zipName} › ${e.name}`, path: join(dir, e.file) }));
+}
+
+/** 첨부 하나를 받아 텍스트를 뽑을 문서 목록으로 만든다 (ZIP이면 풀어서). 실패하면 빈 배열. */
+export async function downloadDocuments(attachment: NoticeAttachment, options: DownloadOptions = {}): Promise<AttachmentDocument[]> {
+  const path = await downloadAttachment(attachment, options);
+  if (!path) return [];
+  if (ARCHIVE.test(attachment.name)) return expandArchive(path, attachment.name, options.maxBytes);
+  return [{ name: attachment.name, path }];
 }
 
 export interface DownloadOptions {
   /** 캐시 디렉터리. null이면 캐시하지 않는다. */
   cacheDir?: string | null;
   timeoutMs?: number;
-  /** 이 크기를 넘으면 받지 않는다 (기본 40MB). 스캔 PDF가 100MB를 넘는 경우가 있다. */
+  /** 이 크기를 넘으면 받지 않는다 (기본: PDF·HWP 40MB, HWPX·ZIP 150MB). 스캔 PDF가 100MB를 넘는 경우가 있다. */
   maxBytes?: number;
+}
+
+/**
+ * HWPX·ZIP은 사진이 많으면 커지지만 우리는 안의 본문 XML·문서만 꺼낸다 — 2026-10-01 실측:
+ * 지심도 산마루문화놀이터 과업내용서 HWPX가 80MB라 40MB 제한에 걸려 과업을 못 읽었다.
+ * 스캔 PDF는 OCR을 끈 정기 실행에선 어차피 글자가 없어 받아도 쓸모가 없으니 40MB를 유지한다.
+ */
+function defaultMaxBytes(name: string): number {
+  return /\.(hwpx|zip)$/i.test(name) ? 150 * 1024 * 1024 : 40 * 1024 * 1024;
 }
 
 /**
@@ -101,7 +189,7 @@ export async function downloadAttachment(
     }
 
     const declared = Number(res.headers.get("content-length") ?? "0");
-    const limit = options.maxBytes ?? 40 * 1024 * 1024;
+    const limit = options.maxBytes ?? defaultMaxBytes(attachment.name);
     if (declared > limit) {
       logger.warn("첨부파일이 너무 커서 건너뜁니다", { file: attachment.name, bytes: declared });
       return null;

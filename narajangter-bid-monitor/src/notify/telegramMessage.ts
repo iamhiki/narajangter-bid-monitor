@@ -82,6 +82,8 @@ function renderPriorityItem(m: MatchedNotice, index: number): string {
   if (reason) lines.push(`🏷 ${escapeTelegramHtml(truncate(reason, MAX_BADGES_CHARS))}`);
   const sync = similarityLine(m);
   if (sync) lines.push(sync);
+  const missing = missingQualificationLine(m);
+  if (missing) lines.push(missing);
   const jointBid = jointBidLine(m);
   if (jointBid) lines.push(jointBid);
   lines.push(`<code>${escapeTelegramHtml(n.noticeNo)}</code>`);
@@ -100,6 +102,18 @@ export function similarityLine(m: MatchedNotice): string | null {
   const best = m.similarity.top[0];
   const detail = best && best.score > 0.02 ? ` · ${truncate(`${best.year} ${best.name}`, 40)}` : "";
   return `🔗 싱크로율 ${percent}%${escapeTelegramHtml(detail)}`;
+}
+
+/**
+ * 나라장터 업종제한 미보유 한 줄. 미보유 공고도 빼지 않는다 — 공동수급이 허용되면 함께 참가할 수 있어서
+ * 바로 아래 공동수급 줄과 같이 보도록 표시만 한다.
+ */
+export function missingQualificationLine(m: MatchedNotice): string | null {
+  const q = m.qualification;
+  if (q?.status !== "미충족") return null;
+  // 참가 방법끼리는 "또는" — 이 중 하나만 갖추면 된다
+  const names = q.missing.map((g) => g.text ?? g.names.join(" 또는 ")).join(" / 또는 ");
+  return `⚠ 자격 미보유 — 필요: ${escapeTelegramHtml(truncate(names, 80))}`;
 }
 
 /**

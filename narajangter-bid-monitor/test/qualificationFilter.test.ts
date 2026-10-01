@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateQualifications,
   extractCode,
-  MAX_ALLOWED_MISSING_QUALIFICATIONS,
+  missingLabels,
   uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
@@ -50,16 +50,21 @@ describe("코드 대조 (이름 부분일치 금지)", () => {
   });
 });
 
-describe("부족 허용치 0", () => {
-  it("그룹 1개짜리도 못 채우면 제외한다", () => {
-    // 이전 값 1은 면허제한 공고의 72%(그룹 1개짜리)에 대해 필터를 무력화했다.
-    expect(MAX_ALLOWED_MISSING_QUALIFICATIONS).toBe(0);
+describe("미충족 판정", () => {
+  it("그룹 1개짜리도 못 채우면 미충족이다", () => {
     const r = check(["식품판매업(기타 식품판매업)/5212"]);
     expect(r.missingCount).toBe(1);
     expect(r.passes).toBe(false);
   });
 
-  it("그룹은 AND — 하나라도 못 채우면 제외", () => {
+  it("미충족 그룹은 화면 표기(업종명(코드))로 뽑는다", () => {
+    const r = check(["건축공사업/0002", "토목건축공사업/0001"]);
+    expect(missingLabels(r.missingGroups)).toEqual([
+      { groupNo: "1", names: ["건축공사업(0002)", "토목건축공사업(0001)"], text: "건축공사업(0002) 또는 토목건축공사업(0001)" },
+    ]);
+  });
+
+  it("그룹끼리는 '또는' — 하나만 채우면 충족 (나라장터: '[건축공사업] 업종 또는 [토목건축공사업] 업종')", () => {
     const r = evaluateQualifications(
       [
         { groupNo: "1", allowedNames: ["실내건축공사업/0006"] },
@@ -68,8 +73,46 @@ describe("부족 허용치 0", () => {
       held.products,
       held.industries
     );
-    expect(r.missingCount).toBe(1);
+    expect(r.passes).toBe(true);
+    expect(r.missingCount).toBe(0);
+  });
+
+  it("그룹을 하나도 못 채우면 모든 그룹이 '이 중 하나 필요'로 나온다", () => {
+    const g = (groupNo: string, rows: string[][]) => ({ groupNo, allowedNames: rows.flat(), rows });
+    const r = evaluateQualifications(
+      [g("1", [["건축공사업/0002", "토목건축공사업/0003"]]), g("2", [["토목건축공사업/0003"]])],
+      held.products,
+      held.industries
+    );
     expect(r.passes).toBe(false);
+    expect(r.missingGroups.map((x) => x.groupNo)).toEqual(["1", "2"]);
+    // 그룹2(토목건축공사업)는 그룹1 선택지에 이미 들어 있어 표시에서는 한 줄로 (백령 점박이물범 체험관)
+    expect(missingLabels(r.missingGroups).map((x) => x.text)).toEqual(["건축공사업(0002) 또는 토목건축공사업(0003)"]);
+  });
+
+  it("그룹 안의 순번은 '그리고' — 순번을 모두 채워야 그 그룹이 충족 (가양4단지 공고문: '…과 …을 모두 등록한 자')", () => {
+    const g = (groupNo: string, rows: string[][]) => ({ groupNo, allowedNames: rows.flat(), rows });
+    const groups = [g("1", [["토목공사업/0001", "토목건축공사업/0003"]]), g("2", [["지반조성ㆍ포장공사업/4989"], ["상ㆍ하수도설비공사업/4996"]])];
+    const one = evaluateQualifications(groups, [], [{ code: "4989", name: "지반조성ㆍ포장공사업" }]);
+    expect(one.passes).toBe(false);
+    expect(missingLabels(one.missingGroups).map((x) => x.text)).toEqual([
+      "토목공사업(0001) 또는 토목건축공사업(0003)",
+      "지반조성ㆍ포장공사업(4989) + 상ㆍ하수도설비공사업(4996)",
+    ]);
+    const both = evaluateQualifications(groups, [], [
+      { code: "4989", name: "지반조성ㆍ포장공사업" },
+      { code: "4996", name: "상ㆍ하수도설비공사업" },
+    ]);
+    expect(both.passes).toBe(true);
+  });
+
+  it("순번의 허용업종(대체 업종)도 인정한다", () => {
+    const r = evaluateQualifications(
+      [{ groupNo: "1", allowedNames: [], rows: [["건축공사업/0002", "토목건축공사업/0003"]] }],
+      [],
+      [{ code: "0003", name: "토목건축공사업" }]
+    );
+    expect(r.passes).toBe(true);
   });
 });
 

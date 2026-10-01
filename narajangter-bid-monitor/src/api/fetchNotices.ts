@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
-import { toApiDateTime } from "./dateUtil.js";
 import type { FieldCandidates } from "./fieldCandidates.js";
-import { fetchAllPages } from "./httpClient.js";
+import { fetchAllPagesInWindow } from "./httpClient.js";
+import { fetchAllPagesIncremental } from "./incrementalFetch.js";
 import { normalizeRawItem } from "./normalize.js";
 import type { BusinessType, FetchResult, FetchWindow, NormalizedNotice, SourceType } from "./types.js";
 import { toErrorMessage } from "../errors.js";
@@ -22,6 +22,8 @@ export interface FetchNoticesConfig {
   requestIntervalMs: number;
   /** 2페이지 이후를 동시에 받을 개수 (env.apiPageConcurrency) */
   pageConcurrency?: number;
+  /** 받아둔 공고에 새로 올라온 것만 이어 받을지 (api/incrementalFetch.ts). 기본 꺼짐 — 매번 전체를 새로 받는다. */
+  incremental?: boolean;
 }
 
 /**
@@ -42,21 +44,19 @@ export async function fetchNoticesBySourceType(config: FetchNoticesConfig): Prom
       const label = `${config.sourceLabel}/${businessType}`;
 
       try {
-        const rawItems = await fetchAllPages(
+        const fetchRows = config.incremental ? fetchAllPagesIncremental : fetchAllPagesInWindow;
+        const rawItems = await fetchRows(
           {
             baseUrl: config.baseUrl,
             operation,
             serviceKey: config.serviceKey,
-            params: {
-              inqryDiv: "1",
-              inqryBgnDt: toApiDateTime(config.window.begin),
-              inqryEndDt: toApiDateTime(config.window.end),
-            },
+            params: { inqryDiv: "1" },
             timeoutMs: config.timeoutMs,
             maxRetries: config.maxRetries,
             retryDelayMs: config.retryDelayMs,
             label,
           },
+          config.window,
           {
             numOfRows: config.numOfRows,
             maxPages: config.maxPages,

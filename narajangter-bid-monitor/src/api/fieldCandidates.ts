@@ -72,7 +72,8 @@ export const LICENSE_LIMIT_FIELD_CANDIDATES: LicenseLimitFieldCandidates = {
   noticeNo: ["bidNtceNo"],
   // lmtGrpNo가 npm run verify:api 실제 응답으로 확인된 필드명 (2026-07-28)
   groupNo: ["lmtGrpNo", "rstrctGroupNo", "prtcptLmtGroupNo", "lmtGroupNo", "rstrctGrupNo"],
-  seqNo: ["rstrctSeqNo", "lmtSeqNo"],
+  // lmtSno가 실제 응답 필드명 (2026-09-30 실측: {"lmtGrpNo":"2","lmtSno":"1",…})
+  seqNo: ["lmtSno", "rstrctSeqNo", "lmtSeqNo"],
   licenseLimitName: ["lcnsLmtNm", "licenseLmtNm", "lmtLicenseNm", "prtcptLcnsLmtNm"],
   // permsnIndstrytyList가 npm run verify:api 실제 응답으로 확인된 필드명 (2026-07-28)
   allowedIndustryList: ["permsnIndstrytyList", "alwIndstrytyNm", "admisIndstrytyNm", "prmisnIndstrytyNm", "aloneIndstrytyNm"],

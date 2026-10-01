@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { ConfigError } from "../errors.js";
@@ -20,6 +20,7 @@ const emailSchema = z.string().trim().email();
 const codeEntrySchema = z.object({
   code: z.string().trim().min(1, "code는 비어있을 수 없습니다"),
   name: z.string().trim().min(1, "name은 비어있을 수 없습니다"),
+  requiresKeyword: z.boolean().optional(),
 });
 
 /**
@@ -31,6 +32,9 @@ const businessTypeSchema = z.enum(["물품", "용역", "공사"]);
 const keywordsFileSchema = z.object({
   keywords: z.array(z.string().trim().min(1)).min(1, "keywords 배열이 비어있습니다"),
   excludeKeywords: z.array(z.string().trim().min(1)).default([]),
+  softExcludeKeywords: z.array(z.string().trim().min(1)).default([]),
+  makeSignals: z.array(z.string().trim().min(1)).default([]),
+  excludeKeywordExceptions: z.record(z.array(z.string().trim().min(1))).default({}),
   minBudgetAmount: z.number().nonnegative().nullable().default(null),
   businessTypes: z
     .array(businessTypeSchema)
@@ -100,11 +104,22 @@ function findDuplicates(values: string[]): string[] {
 export interface CodeEntry {
   code: string;
   name: string;
+  /**
+   * productCodes 전용. true면 이 품목만으로는 수집하지 않고 제목 키워드가 같이 걸려야 한다.
+   * 쓰임새가 넓은 품목(영상정보디스플레이장치 — 보안 관제실·상황실 모니터 구매에도 쓰인다)용.
+   */
+  requiresKeyword?: boolean;
 }
 
 export interface AppConfig {
   keywords: string[];
+  /** 제목에 있으면 무조건 제외 */
   excludeKeywords: string[];
+  /** 제목에 있으면 제외하되, 제작 신호(makeSignals)가 함께 있으면 통과 — "전시연출 및 제작·설치" 같은 본업 공고를 살린다 */
+  softExcludeKeywords?: string[];
+  makeSignals?: string[];
+  /** 제외 키워드가 이 말 안에만 들어 있으면 걸지 않는다 — 예: "건축"은 "실내건축"에서는 무시 */
+  excludeKeywordExceptions?: Record<string, string[]>;
   minBudgetAmount: number | null;
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
@@ -116,15 +131,36 @@ export interface AppConfig {
 }
 
 let cached: AppConfig | null = null;
+/** 캐시를 만들 때의 설정 파일 경로·수정 시각. 달라지면 다시 읽는다. */
+let cachedSignature = "";
+
+/**
+ * 설정 파일들의 경로와 수정 시각을 이어 붙인 값.
+ * 웹 UI·텔레그램 봇처럼 계속 떠 있는 프로세스에서 keywords.json을 고치면 재시작 없이 다음 조회부터
+ * 반영돼야 한다 — 예전에는 처음 읽은 설정을 끝까지 들고 있어서, 제외 키워드를 넣어도 서버를 다시
+ * 켜기 전까지 목록에 그대로 나왔다 (2026-09-30 '건설공사').
+ */
+function configSignature(paths: string[]): string {
+  return paths
+    .map((p) => {
+      try {
+        return `${p}@${statSync(p).mtimeMs}`;
+      } catch {
+        return `${p}@missing`;
+      }
+    })
+    .join("|");
+}
 
 export function loadAppConfig(): AppConfig {
-  if (cached) return cached;
-
   const configDir = resolveConfigDir();
   const keywordsPath = path.join(configDir, "keywords.json");
   const codesPath = path.join(configDir, "codes.json");
   const recipientsPath = path.join(configDir, "recipients.json");
   const heldQualificationsPath = path.join(configDir, "held-qualifications.json");
+
+  const signature = configSignature([keywordsPath, codesPath, recipientsPath, heldQualificationsPath]);
+  if (cached && signature === cachedSignature) return cached;
 
   const keywordsData = parseOrThrow(keywordsFileSchema, readJsonFile(keywordsPath), keywordsPath);
   const codesData = parseOrThrow(codesFileSchema, readJsonFile(codesPath), codesPath);
@@ -140,7 +176,7 @@ export function loadAppConfig(): AppConfig {
     throw new ConfigError(`keywords.json에 중복된 키워드가 있습니다: ${dupKeywords.join(", ")}`);
   }
 
-  const dupExcludeKeywords = findDuplicates(keywordsData.excludeKeywords);
+  const dupExcludeKeywords = findDuplicates([...keywordsData.excludeKeywords, ...keywordsData.softExcludeKeywords]);
   if (dupExcludeKeywords.length > 0) {
     throw new ConfigError(`keywords.json excludeKeywords에 중복된 키워드가 있습니다: ${dupExcludeKeywords.join(", ")}`);
   }
@@ -173,6 +209,9 @@ export function loadAppConfig(): AppConfig {
   cached = {
     keywords: keywordsData.keywords,
     excludeKeywords: keywordsData.excludeKeywords,
+    softExcludeKeywords: keywordsData.softExcludeKeywords,
+    makeSignals: keywordsData.makeSignals,
+    excludeKeywordExceptions: keywordsData.excludeKeywordExceptions,
     minBudgetAmount: keywordsData.minBudgetAmount,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,
@@ -182,10 +221,12 @@ export function loadAppConfig(): AppConfig {
     heldProducts: heldQualificationsData.heldProducts,
     heldIndustries: heldQualificationsData.heldIndustries,
   };
+  cachedSignature = signature;
   return cached;
 }
 
 /** 테스트에서 캐시를 리셋하기 위한 헬퍼 */
 export function _resetAppConfigCacheForTests(): void {
   cached = null;
+  cachedSignature = "";
 }

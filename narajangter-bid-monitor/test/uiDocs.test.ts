@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { HIGH_BAND, LOW_BAND } from "../src/similarity/calibrate.js";
-import { MAX_ALLOWED_MISSING_QUALIFICATIONS } from "../src/matching/qualificationFilter.js";
 
 /**
  * 웹 화면은 입찰 담당자(비개발자)가 쓴다. 계산 과정·원점수·설정 파일 이름 같은 개발자용 정보가
@@ -33,9 +32,10 @@ describe("담당자 화면에 개발자용 정보가 없다", () => {
   });
 });
 
-describe("자격 필터 상수", () => {
-  it("부족 허용치는 0이다", () => {
-    // 1이면 면허제한 공고의 72%(그룹 1개짜리)에 대해 필터가 무력해진다.
-    expect(MAX_ALLOWED_MISSING_QUALIFICATIONS).toBe(0);
+describe("자격 미보유 표기", () => {
+  it("나라장터 업종제한 미보유 배지가 공동수급 허용 여부를 함께 보여준다", () => {
+    // 미보유 공고는 빼지 않고 표시만 한다 — 공동수급이 되면 참가할 수 있어서
+    expect(html).toMatch(/q\.status === "미충족"/);
+    expect(html).toMatch(/공동수급 불허/);
   });
 });

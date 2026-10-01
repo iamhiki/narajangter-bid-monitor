@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   meetsRegion,
+  findPerformanceRequirements,
+  findPerformanceReviewDeadline,
+  parseWon,
   analyzeQualificationText,
   classifiedItemsOf,
   findQualificationSection,
@@ -141,6 +144,37 @@ describe("analyzeQualificationText", () => {
     expect(analyze("참가자격 가. [실내건축공사(4990)] 등록", full).region).toBe("충청남도 또는 세종");
   });
 
+  it("'세부품명번호 10자리 6010989901'처럼 자릿수 설명이 끼어도 품명 코드를 읽는다 (울진해양과학관 재공고서)", () => {
+    const r = analyze(
+      "참가자격 ① 나라장터에 입찰참가자격등록 마감일시까지 실물모형및전시물(세부품명번호 10자리 6010989901)을 제조물 품 으로 입찰참가 등록한 자 " +
+        "③ 직접생산확인증명서[세부품명 : 실물모형및전시물, 세부품명번호 10자리 : 6010989901 ] 을 소지한 자 " +
+        "④ 실내건축공사업[업종코드 4990] 으로 입찰참가 등록 한 자"
+    );
+    expect(r.requirements.filter((x) => x.kind === "품명").map((x) => x.code)).toEqual(["6010989901"]);
+    expect(r.requirements.filter((x) => x.kind === "업종").map((x) => x.code)).toEqual(["4990"]);
+  });
+
+  it("PDF 추출로 글 순서가 섞인 '( )( : 4442)'·'번호 자리 10 (6010989901)'도 코드로 읽는다 (울산박물관 재공고문)", () => {
+    const r = analyze(
+      "참가자격 나 나라장터에 산업디자인진흥법 제 조에 따라 산업디자인전문회사 환경디자인분야 업종코드 또는 산업디자인전문 ( )( : 4442) " +
+        "회사 종합디자인분야 업종코드 으로 등록된 업체 ( )( : 4444) 라 직접생산확인증명서 세부품명 실물모형및전시물 세부품명 10 [ : , 번호 자리 10 (6010989901)"
+    );
+    expect(r.requirements.map((x) => x.code)).toEqual(["4442", "4444", "6010989901"]);
+    expect(r.requirements.find((x) => x.code === "6010989901")!.kind).toBe("품명");
+  });
+
+  it("직접생산 품명을 여러 개 나열해도 모두 직접생산으로, 이름과 함께 읽는다 (수정유스센터 공고)", () => {
+    const r = analyze(
+      "참가자격 6)「중소기업제품 구매촉진 및 판로지원에 관한 법률」제9조 및 같은 법 시행령 제10조에 의한 직접생산확인증명서 세부품명 " +
+        "영상정보디스플레이 장치(4511189301), 교육용로봇(6010621401), 안내전광판(5512190301)을 모두 보유한 업체"
+    );
+    expect(r.requirements.map((x) => [x.code, x.docName, x.bases])).toEqual([
+      ["4511189301", "영상정보디스플레이장치", ["직접생산"]],
+      ["6010621401", "교육용로봇", ["직접생산"]],
+      ["5512190301", "안내전광판", ["직접생산"]],
+    ]);
+  });
+
   it("지역제한은 본점 소재지로 판정하고, 같은 지역의 다른 표기(강원도·강원특별자치도)는 같게 본다", () => {
     expect(meetsRegion("강원도", "강원특별자치도")).toBe(true);
     expect(meetsRegion("경기도", "강원특별자치도")).toBe(false);
@@ -222,5 +256,39 @@ describe("설계공모 참가자격", () => {
     expect(r.requirements).toEqual([
       { kind: "업종", code: null, name: null, held: false, docName: "건축사사무소 개설(건축사법)", related: null, bases: ["면허"] },
     ]);
+  });
+});
+
+describe("실적 요건", () => {
+  // 2026-10-01 캐시된 실제 공고문 문장
+  it("전시장 제작·설치 단일 건 10억원 준공실적 (기간 앞 항목에서)", () => {
+    const text =
+      "7) 국세 체납이 없는 업체 8) 입찰공고일 기준으로 최근 3년 이내에 건축법 시행령 제3조의 5에 따른 [별표 1]의 5. 문화 및 집회시설의 “라”에 의한 " +
+      "전시장(박물관, 미술관, 과학관, 그 밖에 이와 비슷한 것을 말한다)의 제작·설치 실적이 단일 건으로 10억원 이상 준공실적이 있는 업체 m 제안서 제출일 기준 국세 및 지방세 체납 사실이 없는 업체";
+    const [r, ...rest] = findPerformanceRequirements(text);
+    expect(rest).toEqual([]);
+    expect(r).toMatchObject({ years: 3, single: true, minAmountWon: 1_000_000_000 });
+    expect(r!.sentence).toMatch(/^입찰공고일 기준으로 최근 3년/);
+  });
+
+  it("원 단위 금액과 실적심사신청서 마감", () => {
+    const text =
+      "를 소지한 자 ○ 입찰공고일 기준 최근 10년 이내 단일 계약 건으로 추정가격 110,121,000원 이상(부가가치세 제외) 실물모형및전시물 을 제조하여 납품 완료한 실적을 보유한 업체 " +
+      "※ 이 입찰은 실적제한 입찰이며, 실적심사신청서를 나라장터를 통하여 2026/10/06 18:00 까지 전자로 제출한 업체만 입찰에 참여할 수 있으며";
+    expect(findPerformanceRequirements(text)).toMatchObject([{ years: 10, single: true, minAmountWon: 110_121_000 }]);
+    expect(findPerformanceReviewDeadline(text)).toBe("2026/10/06 18:00");
+  });
+
+  it("평가 배점표·참여인력 조건의 '실적'은 요건으로 보지 않는다", () => {
+    expect(findPerformanceRequirements("주요사업 실적 5점 최근3년간 단일 사업2억원 이상 실적 보유 시5점, 미 보유 시3점")).toEqual([]);
+    expect(findPerformanceRequirements("- 책임연구원은 정책효과분석 연구 수행 실적을 보유한 자로 구성")).toEqual([]);
+  });
+
+  it("금액 표기", () => {
+    expect(parseWon("단일사업 7천만원 이상")).toBe(70_000_000);
+    expect(parseWon("단일 건, 50,000천원 이상")).toBe(50_000_000);
+    expect(parseWon("3억원(부가가치세 포함) 이상")).toBe(300_000_000);
+    expect(parseWon("3억 5천만원 이상")).toBe(350_000_000);
+    expect(parseWon("도급금액 이상")).toBeNull();
   });
 });

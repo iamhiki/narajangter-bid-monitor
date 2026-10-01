@@ -1,6 +1,6 @@
 import type { CodeEntry } from "../config/loadJsonConfig.js";
 import type { NormalizedNotice } from "../api/types.js";
-import { downloadAttachment, listAttachments, type NoticeAttachment } from "../api/attachments.js";
+import { downloadDocuments, listAttachments, type NoticeAttachment } from "../api/attachments.js";
 import { extractDocumentText } from "../corpus/extractText.js";
 import { logger } from "../logger.js";
 
@@ -141,6 +141,25 @@ export interface QualificationDocResult {
   linkedBidNo: string | null;
   /** 첨부에서 참가자격 항목을 찾았는지. false면 requirements·지역·지명은 비어 있고 분류 품목만 있다 */
   sectionFound: boolean;
+  /** 실적제한 — "최근 3년 이내 … 단일 건 10억원 이상 … 실적이 있는 업체". 없으면 빈 배열 */
+  performance: PerformanceRequirement[];
+  /** 실적제한 입찰의 실적심사신청서 제출 마감 (공고문 표기 그대로, 예: "2026/10/06 18:00") */
+  performanceReviewDeadline: string | null;
+}
+
+/**
+ * 공고문의 실적 요건 한 건. 지일 실적 목록이 없어 충족 여부는 판정하지 않는다 — 기간·금액만 뽑아
+ * 배지로 띄우고 원문 문장을 함께 보여 사람이 판단하게 한다.
+ */
+export interface PerformanceRequirement {
+  /** 공고문 문장 (공백 정리, 최대 300자 — 넘으면 앞을 자르고 "…") */
+  sentence: string;
+  /** "최근 3년 이내" → 3. 기간 제한이 없으면 null */
+  years: number | null;
+  /** "단일 건/단일 계약/단일사업" — 여러 건 합산 불가 */
+  single: boolean;
+  /** 최소 금액(원). 금액 없이 "도급금액 이상"처럼 쓰면 null */
+  minAmountWon: number | null;
 }
 
 const INDICATORS = /업종\s*코드|세부\s*품명|물품\s*분류\s*번호|등록|면허|소재지|직접생산/g;
@@ -227,6 +246,70 @@ export function meetsRegion(required: string, headquartersRegion: string | null)
 const normalize = (s: string): string => s.replace(/[\s·ㆍ.,()（）]/g, "");
 
 /**
+ * 실적 요건 문장의 끝. "실적이 있는 업체", "실적을 보유한 업체", "실적이 1건 이상 있는 자".
+ * "실적을 보유한 자로 구성"은 참여인력 조건이라 뺀다 (연구용역 과업지시서 실측).
+ */
+const PERFORMANCE_END = /실\s*적[^.]{0,120}?(?:있는|보유한|보유하고\s*있는)\s*(?:업체|자)(?!\s*로)/g;
+/** 문장 앞 경계: 항목 기호, 앞 항목의 끝("…소지한 자 ○", "…업체 ", "다.") */
+const CLAUSE_BOUNDARY = /(?:(?<![\d,])\d{1,2}\)\s|[가-하]\s?\.(?!\d)\s|[○◦▪※ㅇ•□-]\s|(?:업체|[한는된]\s?자)\s|다\s?\.)/g;
+/** 평가 배점표·제출 서식의 "실적" 문장 — 참가 자격이 아니라 점수 항목이다 */
+const SCORING = /배\s*점|\d\s*점(?![가-힣])|평\s*가|서\s*식|실\s*적\s*건\s*수/;
+
+/** "10억원", "7천만원", "110,121,000원", "50,000천원", "3억 5천만원" → 원 */
+export function parseWon(text: string): number | null {
+  const s = text.replace(/\s/g, "");
+  const n = (v: string | undefined) => (v ? Number(v.replace(/,/g, "")) : 0);
+  let m = /([\d,.]+)억(?:([\d,]+)천만?)?(?:([\d,]+)만)?원/.exec(s);
+  if (m) return Math.round(n(m[1]) * 1e8 + n(m[2]) * 1e7 + n(m[3]) * 1e4);
+  m = /([\d,]+)천만원/.exec(s);
+  if (m) return n(m[1]) * 1e7;
+  m = /([\d,]+)백만원/.exec(s);
+  if (m) return n(m[1]) * 1e6;
+  m = /([\d,]+)천원/.exec(s);
+  if (m) return n(m[1]) * 1e3;
+  m = /([\d,]+)만원/.exec(s);
+  if (m) return n(m[1]) * 1e4;
+  m = /(\d{1,3}(?:,\d{3})+|\d{5,})원/.exec(s);
+  if (m) return n(m[1]);
+  return null;
+}
+
+/** 공고문 전체에서 실적 요건 문장을 찾는다. 같은 문장이 공고문·서식에 되풀이되면 한 번만. */
+export function findPerformanceRequirements(fullText: string): PerformanceRequirement[] {
+  const whole = fullText.replace(/\s+/g, " ");
+  const out: PerformanceRequirement[] = [];
+  for (const m of whole.matchAll(PERFORMANCE_END)) {
+    const end = m.index! + m[0].length;
+    const windowStart = Math.max(0, m.index! - 300);
+    const before = whole.slice(windowStart, m.index!);
+    const boundary = [...before.matchAll(CLAUSE_BOUNDARY)].pop();
+    const start = boundary ? windowStart + boundary.index! + boundary[0].length : windowStart;
+    const sentence = whole.slice(start, end).trim();
+    if (SCORING.test(sentence)) continue;
+    // 기간·금액·건수 중 아무것도 없으면 요건이 아니라 일반 서술이다 ("제안서는 20쪽 이내로"는 기간이 아니다)
+    if (!/최근|\d\s*년\s*이내|단\s*일|원\s*이상|금액\s*이상|\d\s*건\s*이상|%\s*이상/.test(sentence)) continue;
+    const years = /(?:최근|기준)\s*(\d{1,2})\s*년/.exec(sentence) ?? /(\d{1,2})\s*년\s*이내/.exec(sentence);
+    const req: PerformanceRequirement = {
+      // 길면 앞을 자른다 — 요건의 핵심(금액, "실적이 있는 업체")은 끝에 있다
+      sentence: sentence.length > 300 ? `…${sentence.slice(-300)}` : sentence,
+      years: years ? Number(years[1]) : null,
+      single: /단\s*일/.test(sentence),
+      minAmountWon: parseWon(sentence),
+    };
+    const dup = out.find((r) => r.years === req.years && r.single === req.single && r.minAmountWon === req.minAmountWon);
+    if (!dup) out.push(req);
+  }
+  return out;
+}
+
+/** "실적심사신청서를 … 2026/10/06 18:00 까지" */
+export function findPerformanceReviewDeadline(fullText: string): string | null {
+  const whole = fullText.replace(/\s+/g, " ");
+  const m = /실\s*적\s*심\s*사\s*신\s*청\s*서[^.]{0,80}?(\d{4}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{1,2}\.?\s*(?:\(\S\)\s*)?\d{1,2}\s*:\s*\d{2})\s*까\s*지/.exec(whole);
+  return m ? m[1]!.replace(/\s+/g, " ").replace(/\s*([/.:-])\s*/g, "$1") : null;
+}
+
+/**
  * 업종 이름이 면허 요건으로 나왔는지. 바로 뒤에 "법"이 붙은 건 법령 이름이라 뺀다 —
  * 「정보통신공사업법」에 따른 용역업자와 공동도급 같은 문구가 정보통신공사업 보유로 잡혔다(거제 지심도 실측).
  */
@@ -309,6 +392,9 @@ export function analyzeQualificationText(
     region,
     designated,
     jiilDesignated,
+    // 실적 요건은 참가자격 뒤쪽 항목(8번째 등)에 있어 발췌 1500자를 넘기도 해서 전체에서 찾는다
+    performance: findPerformanceRequirements(fullText),
+    performanceReviewDeadline: findPerformanceReviewDeadline(fullText),
   };
 }
 
@@ -316,9 +402,13 @@ export function analyzeQualificationText(
 export function pickNoticeDocAttachments(notice: NormalizedNotice): NoticeAttachment[] {
   if (notice.sourceType === "사전규격") return preStandardAttachments(notice);
   const all = listAttachments(notice);
-  const isNoticeDoc = (a: NoticeAttachment) => /공고/.test(a.name) && !/제안요청|과업|시방|규격/.test(a.name);
-  const extRank = (name: string) => (/\.hwpx$/i.test(name) ? 0 : /\.pdf$/i.test(name) ? 1 : 2);
-  return all.filter(isNoticeDoc).sort((a, b) => extRank(a.name) - extRank(b.name));
+  const extRank = (name: string) => (/\.hwpx$/i.test(name) ? 0 : /\.pdf$/i.test(name) ? 1 : /\.hwp$/i.test(name) ? 2 : 3);
+  return all.filter((a) => isNoticeDocName(a.name)).sort((a, b) => extRank(a.name) - extRank(b.name));
+}
+
+/** 파일명으로 본 입찰공고문 여부 */
+function isNoticeDocName(name: string): boolean {
+  return /공고/.test(name) && !/제안요청|과업|시방|규격/.test(name);
 }
 
 /**
@@ -341,21 +431,23 @@ export async function readQualificationFromNotice(
   let best: QualificationDocResult | null = null;
   const codedCount = (r: QualificationDocResult) => r.requirements.filter((x) => x.code).length;
   for (const attachment of pickNoticeDocAttachments(notice)) {
-    const path = await downloadAttachment(attachment);
-    if (!path) continue;
-    try {
-      const { text } = await extractDocumentText(path, { ocr: "auto", maxPages: 12 });
-      const section = findQualificationSection(text);
-      if (!section) continue;
-      const result: QualificationDocResult = {
-        sourceFile: attachment.name,
-        ...analyzeQualificationText(section, text, held.products, held.industries),
-        ...common,
-        sectionFound: true,
-      };
-      if (!best || codedCount(result) > codedCount(best)) best = result;
-    } catch (err) {
-      logger.debug?.("공고문 참가자격 읽기 실패", { noticeNo: notice.noticeNo, file: attachment.name, error: String(err) });
+    // ZIP("공고문 등.zip")이면 안에서 공고문으로 보이는 것만 읽는다
+    const docs = (await downloadDocuments(attachment)).filter((d, _, all) => all.length === 1 || isNoticeDocName(d.name.split(" › ").pop()!));
+    for (const doc of docs) {
+      try {
+        const { text } = await extractDocumentText(doc.path, { ocr: "auto", maxPages: 12 });
+        const section = findQualificationSection(text);
+        if (!section) continue;
+        const result: QualificationDocResult = {
+          sourceFile: doc.name,
+          ...analyzeQualificationText(section, text, held.products, held.industries),
+          ...common,
+          sectionFound: true,
+        };
+        if (!best || codedCount(result) > codedCount(best)) best = result;
+      } catch (err) {
+        logger.debug?.("공고문 참가자격 읽기 실패", { noticeNo: notice.noticeNo, file: doc.name, error: String(err) });
+      }
     }
   }
   if (best) return best;
@@ -368,6 +460,8 @@ export async function readQualificationFromNotice(
       region: null,
       designated: false,
       jiilDesignated: false,
+      performance: [],
+      performanceReviewDeadline: null,
       ...common,
       sectionFound: false,
     };

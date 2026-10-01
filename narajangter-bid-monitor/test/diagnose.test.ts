@@ -71,8 +71,11 @@ describe("diagnoseNotice", () => {
     expect(d.candidate).toBe(false);
   });
 
-  it("참가자격 미보유를 잡아낸다", () => {
-    expect(diagnoseNotice(makeNotice({ noticeNo: "N-NO" }), ctx).excludedAt).toBe("참가자격");
+  it("참가자격 미보유는 빼지 않고 표시만 한다 (공동수급으로 참가할 수 있어서)", () => {
+    const no = diagnoseNotice(makeNotice({ noticeNo: "N-NO" }), ctx);
+    expect(no.excludedAt).toBeNull();
+    expect(no.steps.at(-1)?.detail).toContain("자격 미보유");
+    expect(no.steps.at(-1)?.detail).toContain("건축공사업(0002)");
     const ok = diagnoseNotice(makeNotice({ noticeNo: "N-OK" }), ctx);
     expect(ok.excludedAt).toBeNull();
     expect(ok.steps.at(-1)?.detail).toContain("실내건축공사업(0006)");

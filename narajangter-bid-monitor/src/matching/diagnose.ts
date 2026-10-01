@@ -2,12 +2,12 @@ import type { NormalizedNotice } from "../api/types.js";
 import type { LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { matchCodes } from "./codeMatcher.js";
+import { hasStandaloneProductMatch, matchCodes } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import { linkedBidNoticeNo } from "./matchEngine.js";
-import { evaluateQualifications, uniqueSatisfied } from "./qualificationFilter.js";
+import { evaluateQualifications, missingLabels, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
  * 공고 한 건이 수집 파이프라인의 각 단계를 통과했는지 하나씩 짚는다 (② 정제 · ③ 미수집 원인 파악용).
@@ -83,7 +83,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
       : { step: "본공고 게시", ok: true, detail: isBid ? "본공고" : "아직 본공고 없음" }
   );
 
-  const excluded = matchExcludeKeyword(notice, config.excludeKeywords);
+  const excluded = matchExcludeKeyword(notice, config.excludeKeywords, config);
   steps.push(
     excluded
       ? { step: "제외키워드", ok: false, detail: `제목에 제외 키워드 '${excluded}'` }
@@ -115,7 +115,8 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
 
   const { matchedProductCodes, matchedIndustryCodes } = matchCodes(notice, config.productCodes, config.industryCodes);
   const matchedKeywords = matchKeywords(notice, config.keywords);
-  const candidate = matchedProductCodes.length > 0 || matchedKeywords.length > 0 || overseas.isMongolia;
+  const candidate =
+    hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia;
   const hits = [
     ...matchedProductCodes.map((c) => `품목 ${c.name}`),
     ...matchedKeywords.map((k) => `키워드 ${k}`),
@@ -125,15 +126,19 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
     matchedIndustryCodes.length > 0
       ? ` (업종 ${matchedIndustryCodes.map((c) => c.name).join(", ")}은 맞지만 업종만으로는 수집하지 않음)`
       : "";
+  const keywordOnlyProducts = matchedProductCodes.filter((c) => c.requiresKeyword);
+  const productNote =
+    keywordOnlyProducts.length > 0
+      ? `제목에 등록 키워드가 없음 — 세부품명(${keywordOnlyProducts.map((c) => c.name).join(", ")})이 등록 품목이긴 하지만 ` +
+        `쓰임새가 넓어 키워드가 같이 있을 때만 수집함`
+      : `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님`;
   steps.push(
     candidate
       ? { step: "키워드·품목", ok: true, detail: hits.join(", ") }
       : {
           step: "키워드·품목",
           ok: false,
-          detail:
-            `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님` +
-            industryNote,
+          detail: productNote + industryNote,
         }
   );
 
@@ -158,8 +163,7 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
     const held = uniqueSatisfied(result.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name));
     return { step: "참가자격", ok: true, detail: `충족 — ${held.join(", ")}` };
   }
-  // "업종명/0002" → "업종명(0002)" — 자격판정 툴팁과 같은 표기
-  const label = (name: string) => name.replace(/\s*\/\s*(\d{4})\s*$/, "($1)");
-  const missing = result.missingGroups.map((g) => g.allowedNames.slice(0, 4).map(label).join(" 또는 "));
-  return { step: "참가자격", ok: false, detail: `미보유 — ${missing.join(" / ")}` };
+  // 미보유여도 빼지 않는다 — 공동수급이 허용되면 함께 참가할 수 있어 표시만 한다 (applyQualificationFilter와 같은 판단)
+  const missing = missingLabels(result.missingGroups).map((g) => g.text);
+  return { step: "참가자격", ok: true, detail: `자격 미보유(공동수급 확인 필요) — 아래 중 하나 필요: ${missing.join(" / 또는 ")}` };
 }

@@ -3,6 +3,7 @@ import { ApiError, ApiResultError } from "../errors.js";
 import { logger } from "../logger.js";
 import { RETRYABLE_RESULT_CODES, SUCCESS_RESULT_CODES, describeResultCode } from "./resultCodes.js";
 import type { RawItem } from "./fieldResolver.js";
+import { splitWindow, toApiDateTime } from "./dateUtil.js";
 
 const xmlParser = new XMLParser({ ignoreAttributes: true, trimValues: true });
 
@@ -291,5 +292,42 @@ export async function fetchAllPages(
     `최대 페이지 수(${pageParams.maxPages})에 도달해 조회를 중단했습니다. 일부 데이터가 누락될 수 있습니다.`,
     { label: options.label, collected: all.length }
   );
+  return all;
+}
+
+/**
+ * 조회 기간(inqryBgnDt~inqryEndDt)을 받는 목록 API를 기간 길이와 상관없이 끝까지 받는다.
+ * API 한도(MAX_QUERY_SPAN_DAYS)를 넘는 기간은 조각내 차례로 받고, 조각 경계에서 두 번 온
+ * 똑같은 행은 하나만 남긴다 — 면허제한정보는 같은 행이 두 번 들어오면 요건이 부풀려진다.
+ */
+export async function fetchAllPagesInWindow(
+  options: ApiCallOptions,
+  window: { begin: Date; end: Date },
+  pageParams: Parameters<typeof fetchAllPages>[1]
+): Promise<RawItem[]> {
+  const chunks = splitWindow(window);
+  const all: RawItem[] = [];
+  const seen = new Set<string>();
+  for (const [i, chunk] of chunks.entries()) {
+    const items = await fetchAllPages(
+      {
+        ...options,
+        label: chunks.length > 1 ? `${options.label} (${i + 1}/${chunks.length})` : options.label,
+        params: {
+          ...options.params,
+          inqryBgnDt: toApiDateTime(chunk.begin),
+          inqryEndDt: toApiDateTime(chunk.end),
+        },
+      },
+      pageParams
+    );
+    if (chunks.length === 1) return items;
+    for (const item of items) {
+      const key = JSON.stringify(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push(item);
+    }
+  }
   return all;
 }

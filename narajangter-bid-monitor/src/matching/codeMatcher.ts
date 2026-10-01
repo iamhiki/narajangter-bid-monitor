@@ -37,3 +37,8 @@ export function matchCodes(notice: NormalizedNotice, productCodes: CodeEntry[], 
 
   return { matchedProductCodes, matchedIndustryCodes };
 }
+
+/** 키워드 없이 품목만으로도 수집할 수 있는 매칭이 있는지 (requiresKeyword 품목은 제외) */
+export function hasStandaloneProductMatch(matchedProductCodes: CodeEntry[]): boolean {
+  return matchedProductCodes.some((c) => !c.requiresKeyword);
+}

@@ -1,9 +1,10 @@
-import { downloadAttachment, pickSpecAttachments, type DownloadOptions } from "./attachments.js";
+import { downloadDocuments, pickSpecAttachments, type DownloadOptions } from "./attachments.js";
 import { extractDocumentText } from "../corpus/extractText.js";
 import { redactPersonal } from "../redactPersonal.js";
 import type { NormalizedNotice } from "./types.js";
 import { logger } from "../logger.js";
 import { preStandardAttachments } from "../matching/qualificationDoc.js";
+import { detectScopeFlags, type ScopeFlag } from "../matching/taskScopeFlags.js";
 
 /**
  * 공고의 과업 내용을 첨부파일에서 읽어온다 (③.5 단계).
@@ -21,6 +22,8 @@ export interface NoticeBody {
   sourceFile: string;
   /** 가린 개인정보 요약 */
   redactions: Record<string, number>;
+  /** 과업에 섞인 본업 밖 업무(유물 운송·대여·운영·홍보). 길이 상한으로 자르기 전 전체 본문에서 찾는다 */
+  scopeFlags: ScopeFlag[];
 }
 
 export interface FetchBodyOptions extends DownloadOptions {
@@ -45,24 +48,25 @@ export async function fetchNoticeBody(
   if (candidates.length === 0) return null;
 
   for (const attachment of candidates) {
-    const path = await downloadAttachment(attachment, options);
-    if (!path) continue;
+    // ZIP이면 안에 든 문서를 과업지시서·제안요청서 순으로 하나씩 본다
+    for (const doc of await downloadDocuments(attachment, options)) {
+      const extracted = await extractDocumentText(doc.path, { ocr: options.ocr ?? "off" });
+      if (extracted.text.length === 0) {
+        logger.debug?.("첨부 텍스트 추출 실패", { file: doc.name, reason: extracted.reason });
+        continue;
+      }
 
-    const extracted = await extractDocumentText(path, { ocr: options.ocr ?? "off" });
-    if (extracted.text.length === 0) {
-      logger.debug?.("첨부 텍스트 추출 실패", { file: attachment.name, reason: extracted.reason });
-      continue;
+      // 공고 첨부에도 발주기관 담당자 성명·연락처가 그대로 들어 있다. 이 텍스트는 이후
+      // ⑤ LLM 프롬프트로 나갈 수 있으므로 여기서 한 번 가린 뒤에 넘긴다.
+      const masked = redactPersonal(extracted.text);
+
+      return {
+        text: masked.text.slice(0, options.maxLength ?? DEFAULT_MAX_LENGTH),
+        sourceFile: doc.name,
+        redactions: masked.counts,
+        scopeFlags: detectScopeFlags(masked.text),
+      };
     }
-
-    // 공고 첨부에도 발주기관 담당자 성명·연락처가 그대로 들어 있다. 이 텍스트는 이후
-    // ⑤ LLM 프롬프트로 나갈 수 있으므로 여기서 한 번 가린 뒤에 넘긴다.
-    const masked = redactPersonal(extracted.text);
-
-    return {
-      text: masked.text.slice(0, options.maxLength ?? DEFAULT_MAX_LENGTH),
-      sourceFile: attachment.name,
-      redactions: masked.counts,
-    };
   }
 
   return null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { matchCodes } from "../src/matching/codeMatcher.js";
-import { matchKeywords } from "../src/matching/keywordMatcher.js";
+import { matchExcludeKeyword, matchKeywords } from "../src/matching/keywordMatcher.js";
 import { evaluateNotice, evaluateNotices, sortMatches } from "../src/matching/matchEngine.js";
 import type { NormalizedNotice } from "../src/api/types.js";
 import type { AppConfig } from "../src/config/loadJsonConfig.js";
@@ -352,5 +352,98 @@ describe("sortMatches", () => {
     )!;
     const sorted = sortMatches([weak, strong]);
     expect(sorted[0]?.notice.noticeNo).toBe("strong");
+  });
+});
+
+describe("본공고가 이미 게시된 사전규격", () => {
+  const pre = (raw: Record<string, unknown>) =>
+    makeNotice({ sourceType: "사전규격", title: "전시관 조성 사전규격", raw });
+
+  it("연결된 본공고 번호(bidNtceNoList)가 있으면 사전규격에서 뺀다 — 본공고 목록에 따로 나온다", () => {
+    expect(evaluateNotice(pre({ bidNtceNoList: "R26BK01750015" }), config)).toBeNull();
+  });
+
+  it("아직 본공고가 없으면 그대로 둔다", () => {
+    expect(evaluateNotice(pre({ bidNtceNoList: "" }), config)).not.toBeNull();
+    expect(evaluateNotice(pre({}), config)).not.toBeNull();
+  });
+
+  it("본공고 자신은 이 조건과 무관하다", () => {
+    expect(evaluateNotice(makeNotice({ title: "전시관 조성", raw: { bidNtceNoList: "X" } }), config)).not.toBeNull();
+  });
+});
+
+describe("넓은 제외 키워드 — 제작 신호가 있으면 통과", () => {
+  const rules = {
+    softExcludeKeywords: ["연출", "구매", "고도화"],
+    makeSignals: ["제작설치", "제조구매", "설계 및 제작"],
+    excludeKeywordExceptions: { 건축: ["실내건축"] },
+  };
+  const t = (title: string) => matchExcludeKeyword(makeNotice({ title }), ["건축", "레이아웃 가구"], rules);
+
+  it("제작 신호가 있으면 넓은 단어로 제외하지 않는다 (2026-09 실제 공고 제목)", () => {
+    expect(t("완도 고금도해전 전승수군 체험관 전시연출 설계 및  제작·설치 용역(협상에 의한 계약)")).toBeNull();
+    expect(t("경기북부어린이박물관 전시고도화사업] 상설전시(공룡숲) 개편 설계 및 체험전시물 제작·설치 용역")).toBeNull();
+    expect(t("충주댐 물빛길 경관 특화사업 조형물 제조구매설치")).toBeNull();
+  });
+
+  it("제작 신호가 없으면 넓은 단어로 제외한다", () => {
+    expect(t("국립대구박물관 특별전 전시 연출 용역")).toBe("연출");
+    expect(t("국립부산과학관 AI교육용 휴머노이드 로봇 구매")).toBe("구매");
+  });
+
+  it("무조건 제외 키워드는 제작 신호가 있어도 제외한다", () => {
+    expect(t("인천지점 전체 레이아웃 가구 제작설치")).toBe("레이아웃 가구");
+  });
+
+  it("제작 표현 사이의 여러 구분 기호를 같게 본다 (실측 표기)", () => {
+    for (const sep of ["․", ".", "/", "˙", ",", "ㆍ"]) {
+      expect(t(`OO박물관 특별전 전시 연출 및 전시물 제작${sep}설치`)).toBeNull();
+    }
+  });
+
+  it("구매·구입은 조건부 제외 — 제작 표현이 제목 어디에 있든 통과", () => {
+    const soft = (title: string) =>
+      matchExcludeKeyword(makeNotice({ title }), [], {
+        softExcludeKeywords: ["구매", "구입"],
+        makeSignals: ["제작설치", "제조구매", "설계제작"],
+      });
+    expect(soft("과학관 체험기자재 구입")).toBe("구입");
+    expect(soft("상설전시 영상장비 구매")).toBe("구매");
+    expect(soft("충주댐 물빛길 경관 특화사업 조형물 제조구매설치")).toBeNull();
+    expect(soft("인천도시공사 신사옥 AI도시홍보관 설계 제작 및 공간연출(실물모형및전시물 구매) 구매")).toBeNull();
+  });
+
+  it("예외 표현 안에만 든 제외 키워드는 무시한다 (근대건축물은 2026-09-30부터 제외)", () => {
+    expect(t("근대건축물(학습거점시설) 인테리어 공사")).toBe("건축");
+    expect(t("OO전시관 실내건축공사")).toBeNull();
+    expect(t("수정유스센터 인테리어공사(건축, 기계)")).toBe("건축");
+  });
+});
+
+describe("requiresKeyword 품목 — 쓰임새가 넓은 품목은 키워드가 같이 있어야 수집", () => {
+  const displayConfig: AppConfig = {
+    ...config,
+    productCodes: [
+      ...config.productCodes,
+      { code: "4511189301", name: "영상정보디스플레이장치", requiresKeyword: true },
+    ],
+  };
+
+  it("키워드 없이 그 품목만 걸리면 수집하지 않는다 (보안 관제실 모니터 구매 등)", () => {
+    const notice = makeNotice({ title: "경비보안시스템 유지관리용 관제시스템 개선사업", productClsfcNo: "4511189301" });
+    expect(evaluateNotice(notice, displayConfig)).toBeNull();
+  });
+
+  it("제목 키워드가 같이 있으면 수집하고, 품목+키워드라 강력추천이다", () => {
+    const notice = makeNotice({ title: "상설전시 영상장비 구매", productClsfcNo: "4511189301" });
+    const result = evaluateNotice(notice, displayConfig);
+    expect(result?.confidence).toBe("강력추천");
+    expect(result?.matchedProductCodes[0]?.code).toBe("4511189301");
+  });
+
+  it("표시가 없는 품목(안내전광판)은 지금처럼 품목만으로도 수집한다", () => {
+    const notice = makeNotice({ title: "강의실 LED 스크린 설치", productClsfcNo: "5512190301" });
+    expect(evaluateNotice(notice, displayConfig)?.confidence).toBe("참고용");
   });
 });

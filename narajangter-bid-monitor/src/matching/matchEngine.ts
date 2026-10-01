@@ -1,7 +1,7 @@
 import type { NormalizedNotice } from "../api/types.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { matchCodes } from "./codeMatcher.js";
+import { hasStandaloneProductMatch, matchCodes } from "./codeMatcher.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import type { MatchedNotice } from "./types.js";
@@ -36,7 +36,7 @@ export function evaluateNotice(
   mongoliaKeywords: string[] = []
 ): MatchedNotice | null {
   if (linkedBidNoticeNo(notice)) return null;
-  if (matchExcludeKeyword(notice, config.excludeKeywords)) return null;
+  if (matchExcludeKeyword(notice, config.excludeKeywords, config)) return null;
 
   if (config.minBudgetAmount != null && notice.budgetAmount != null && notice.budgetAmount < config.minBudgetAmount) {
     return null;
@@ -70,7 +70,10 @@ export function evaluateNotice(
 
   const codeMatched = productCodeMatched || industryCodeMatched;
 
-  if (!overseasVenue.isMongolia && !productCodeMatched && !keywordMatched) return null;
+  // requiresKeyword 품목(영상정보디스플레이장치 등)은 키워드 없이 단독으로는 수집하지 않는다.
+  // 2026-09-30 실측: 인천공항 "경비보안시스템 유지관리용 관제시스템 개선사업"이 관제실 모니터 품목으로
+  // 걸렸다. 키워드가 같이 있으면 그대로 품목 매칭으로 쳐서 강력추천 판정에 쓴다.
+  if (!overseasVenue.isMongolia && !hasStandaloneProductMatch(matchedProductCodes) && !keywordMatched) return null;
 
   return {
     notice,

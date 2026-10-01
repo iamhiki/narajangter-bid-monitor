@@ -144,6 +144,7 @@ export function buildNoticeMessage(input: FitInput): string {
       `공고문 참가자격에서 찾은 요건: ${req.length ? req.join(", ") : "코드 없음"}`,
       `지역제한: ${d.region ?? "공고문에서 못 찾음"}`,
       `지명경쟁·조합추천: ${d.designated ? (d.jiilDesignated ? "예 (명단에 지일 있음)" : "예 (명단에 지일 없음)") : "아님"}`,
+      `실적 요건: ${(d.performance ?? []).length ? d.performance.map((p) => p.sentence).join(" / ") : "공고문에서 못 찾음"}${d.performanceReviewDeadline ? ` (실적심사신청서 마감 ${d.performanceReviewDeadline})` : ""}`,
       `공고문 참가자격 발췌:\n${redactPersonal(d.excerpt).text}`
     );
   }

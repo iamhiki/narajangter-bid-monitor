@@ -87,6 +87,26 @@ function renderJointBidText(m: MatchedNotice): string | undefined {
   return `  공동수급: ${m.jointBidStatus}`;
 }
 
+/**
+ * 나라장터 업종제한 미보유 — 빼지 않고 표시만 한다. 공동수급이 허용되면 함께 참가할 수 있어서
+ * 공동수급 줄 바로 앞에 둔다.
+ */
+function missingQualificationText(m: MatchedNotice): string | undefined {
+  const q = m.qualification;
+  if (q?.status !== "미충족") return undefined;
+  return `자격 미보유 (공동수급 확인 필요) — 아래 중 하나 필요: ${q.missing.map((g) => g.text ?? g.names.join(" 또는 ")).join(" / 또는 ")}`;
+}
+
+function renderMissingQualificationHtml(m: MatchedNotice): string {
+  const text = missingQualificationText(m);
+  return text ? `<br/><span style="color:#b45309;font-weight:600;">${escapeHtml(text)}</span>` : "";
+}
+
+function renderMissingQualificationText(m: MatchedNotice): string | undefined {
+  const text = missingQualificationText(m);
+  return text ? `  ${text}` : undefined;
+}
+
 function renderMatchCardHtml(m: MatchedNotice): string {
   const n = m.notice;
   const style = CONFIDENCE_STYLE[m.confidence] ?? DEFAULT_CONFIDENCE_STYLE;
@@ -121,7 +141,7 @@ function renderMatchCardHtml(m: MatchedNotice): string {
       기관: ${escapeHtml(formatDisplayValue(n.institution))}<br/>
       추정가격: ${escapeHtml(formatBudget(n.budgetAmount))}<br/>
       마감/일정: ${escapeHtml(formatDisplayValue(n.deadline))}<br/>
-      공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderJointBidHtml(m)}
+      공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderMissingQualificationHtml(m)}${renderJointBidHtml(m)}
     </div>
     <div style="margin-top:8px;">${badges}</div>
   </div>`;
@@ -143,6 +163,7 @@ function renderMatchCardText(m: MatchedNotice): string {
     `  공고번호: ${n.noticeNo}${n.bidMethod ? ` / 낙찰방법: ${n.bidMethod}` : ""}`,
     `  매칭: ${badges}`,
     renderSimilarityText(m),
+    renderMissingQualificationText(m),
     renderJointBidText(m),
     n.detailUrl ? `  링크: ${n.detailUrl}` : undefined,
   ]

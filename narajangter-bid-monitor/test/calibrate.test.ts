@@ -55,17 +55,24 @@ describe("calibrate — 실측 기준점이 의도한 값으로 간다", () => {
     expect(calibratedPercent(0.801, "제목")).toBeGreaterThanOrEqual(90);
   });
 
-  it("본문 기준: 같은 문서는 100%, 무관은 10% 미만", () => {
+  it("본문 기준 (2026-09-30 실측): 같은 문서 100%, 무관 중앙 12% 이하, 지일 과거사업 중앙 50% 안팎", () => {
     expect(calibratedPercent(1.0, "제목+과업내용")).toBe(100);
-    expect(calibratedPercent(0.048, "제목+과업내용")).toBeLessThan(10);
-    expect(calibratedPercent(0.191, "제목+과업내용")).toBeGreaterThanOrEqual(50);
+    expect(calibratedPercent(0.121, "제목+과업내용")).toBeLessThanOrEqual(12);
+    expect(calibratedPercent(0.294, "제목+과업내용")).toBe(50);
+  });
+
+  it("본문 기준 경계: 0.40부터 높음, 0.20부터 경계선, 비슷해 보이는 비대상 중앙(0.245)은 경계선", () => {
+    expect(bandOf(calibrate(0.4, "제목+과업내용"))).toBe("높음");
+    expect(bandOf(calibrate(0.39, "제목+과업내용"))).toBe("경계선");
+    expect(bandOf(calibrate(0.2, "제목+과업내용"))).toBe("경계선");
+    expect(bandOf(calibrate(0.19, "제목+과업내용"))).toBe("낮음");
+    expect(bandOf(calibrate(0.245, "제목+과업내용"))).toBe("경계선");
   });
 
   it("두 기준이 같은 잣대로 읽힌다", () => {
-    // 보정 전에는 제목 0.388과 본문 0.191이 전혀 다른 숫자였지만,
-    // 둘 다 "가장 비슷한 다른 사업"이라는 같은 의미라 표시값도 비슷해야 한다.
+    // 제목 0.388과 본문 0.294는 둘 다 "지일 분야 공고의 가장 비슷한 과거사업"의 중앙값이라 표시값도 비슷해야 한다.
     const a = calibratedPercent(0.388, "제목");
-    const b = calibratedPercent(0.191, "제목+과업내용");
+    const b = calibratedPercent(0.294, "제목+과업내용");
     expect(Math.abs(a - b)).toBeLessThanOrEqual(10);
   });
 });

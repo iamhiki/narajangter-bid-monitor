@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>싱크로율 탐색기 — (주)지일</title>
+<title>입찰 공고 검토 — (주)지일</title>
 
 <!-- ji1.co.kr과 같은 폰트. 네트워크가 막혀도 아래 폴백 스택으로 읽힌다. -->
 <link rel="stylesheet" href="https://webfontworld.github.io/gmarket/GmarketSans.css">
@@ -170,6 +170,35 @@ body {
 .search button.ghost { background: var(--panel); color: var(--ink); border-color: var(--line); }
 .search button.ghost:hover { background: var(--bg); border-color: var(--muted); }
 
+/* 직접 검색 */
+.search-intro { color: var(--ink); font-size: 14px; line-height: 1.65; margin: 0 0 14px; max-width: 760px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; font-size: 12.5px; color: var(--faint); }
+.chips:empty { display: none; }
+.chips button {
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: var(--radius);
+  padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; max-width: 100%; text-align: left;
+}
+.chips button:hover { border-color: var(--brand); color: var(--brand); }
+#searchOut { margin-top: 16px; }
+.search-empty { color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 16px; }
+.search-empty p { margin: 0 0 6px; color: var(--ink); }
+.search-empty ul { margin: 0; padding-left: 18px; line-height: 1.8; }
+.result-head { display: flex; gap: 18px; align-items: center; padding: 16px 18px; border: 1px solid var(--line); border-left: 4px solid var(--line-strong); background: var(--panel); margin-bottom: 14px; }
+.result-head.hit { border-left-color: var(--brand); background: var(--brand-tint); }
+.result-head.edge { border-left-color: var(--warn); background: var(--warn-tint); }
+.result-head .pct { font-family: var(--head); font-size: 30px; font-weight: 700; color: var(--muted); min-width: 76px; font-variant-numeric: tabular-nums; }
+.result-head.hit .pct { color: var(--brand); }
+.result-head.edge .pct { color: var(--warn); }
+.result-head .pct i { font-style: normal; font-size: 15px; }
+.result-head h3 { margin: 0 0 3px; font-family: var(--head); font-size: 16px; color: var(--ink-strong); }
+.result-head p { margin: 0; font-size: 13.5px; color: var(--ink); line-height: 1.55; }
+.found-notice { border: 1px solid var(--line); background: var(--panel); padding: 14px 18px; margin-bottom: 14px; }
+.found-notice h4 { margin: 6px 0 4px; font-size: 15px; color: var(--ink-strong); }
+.found-notice h4 a { color: inherit; }
+.found-notice .why { margin-top: 6px; font-size: 13px; color: var(--warn); }
+.past-title { font-family: var(--head); font-size: 14px; color: var(--ink-strong); margin: 18px 0 2px; }
+.more-past summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 12px 2px; border-top: 1px solid var(--line); }
+.more-past summary:hover { color: var(--brand); }
 .examples { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; }
 .examples button {
   font-family: inherit; font-size: 12.5px; cursor: pointer; padding: 6px 12px;
@@ -387,11 +416,15 @@ body {
 details.body { margin-top: 10px; }
 details.body summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 details.body summary:hover { color: var(--brand); }
-details.body pre {
-  margin: 10px 0 0; padding: 12px; max-height: 260px; overflow: auto;
-  background: var(--bg); border: 1px solid var(--line-soft);
-  font: 12.5px/1.75 ui-monospace, 'Consolas', monospace; white-space: pre-wrap; word-break: break-word;
+/* 과업 내용 — 한글 문서를 읽는 것이라 고정폭 글꼴 대신 본문 글꼴로 */
+details.body pre, .proj-body pre {
+  margin: 10px 0 0; padding: 12px 14px; max-height: 360px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line-soft); color: var(--ink);
+  font: 13px/1.75 var(--body); white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere;
 }
+.linkish.proj { font-size: inherit; padding: 0; text-align: left; color: var(--ink-strong); text-decoration: none; }
+.linkish.proj:hover { color: var(--brand); text-decoration: underline; }
+.proj-body { margin-bottom: 6px; }
 
 /* ── 통계 · 표 ────────────────────────────────────────────── */
 .stats { margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
@@ -527,7 +560,7 @@ footer b { color: var(--muted); }
          흰색으로 반전시킨다 (사이트는 mix-blend-mode:difference로 같은 효과를 낸다). -->
     <img src="/assets/logo.png" alt="(주)지일" class="logo">
     <span class="slash">|</span>
-    <h1>입찰 공고 싱크로율 탐색기</h1>
+    <h1>입찰 공고 검토</h1>
 
     <div class="theme" role="group" aria-label="화면 테마">
       <button type="button" data-theme-set="light" title="라이트 모드">라이트</button>
@@ -538,8 +571,6 @@ footer b { color: var(--muted); }
 </div>
 
 <div class="wrap">
-  <div class="corpus-line" id="corpusInfo">과거 수행사업 불러오는 중…</div>
-
   <div class="me-bar">
     <label>내 이름 <input id="judge" placeholder="예: 홍길동" maxlength="40" autocomplete="off"></label>
     <span>참가여부·대화·판정에 이 이름이 남습니다. 이 브라우저에 기억됩니다.</span>
@@ -556,27 +587,29 @@ footer b { color: var(--muted); }
     <div class="search">
       <select id="days">
         <option value="3">최근 3일</option>
-        <option value="7" selected>최근 7일</option>
+        <option value="7">최근 7일</option>
         <option value="14">최근 14일</option>
         <option value="30">최근 30일</option>
+        <option value="open" selected>마감 전 공고 전체</option>
       </select>
-      <button type="button" id="load">나라장터에서 불러오기</button>
-      <button type="button" id="refresh" class="ghost">새로 조회</button>
+      <button type="button" id="load">불러오기</button>
+      <button type="button" id="refresh" class="ghost" title="방금 올라온 공고까지 나라장터에서 다시 받아옵니다">최신으로 다시 조회</button>
+      <input id="liveQ" type="search" placeholder="목록에서 찾기 — 공고명·기관·공고번호" autocomplete="off" aria-label="목록에서 찾기">
     </div>
     <div class="filters" id="filters"></div>
-    <p class="sub" id="liveMeta" style="margin:0 0 18px">조회에 40초쯤 걸립니다. 한 번 불러오면 탭을 오가도 다시 기다리지 않습니다.</p>
+    <p class="sub" id="liveMeta" style="margin:0 0 18px">화면을 열면 아직 마감되지 않은 공고를 자동으로 불러옵니다.</p>
     <p class="sub enrich-meta" id="enrichMeta" role="status"></p>
     <div id="liveResults"></div>
   </section>
 
   <section id="tab-excluded" hidden>
-    <p class="sub" style="margin:0 0 14px">
-      키워드·품목으로는 걸렸지만 다른 조건으로 빠진 공고입니다. <b>AI에게 판단 요청</b>을 누르면 지일에 맞는 공고인지,
-      아니라면 왜 아닌지 알려줍니다 — 필터가 좋은 공고를 잘못 뺐는지 확인하는 데 씁니다. 키워드에 아예 안 걸린 공고는 아래 <b>공고 추적</b>으로 찾습니다.
+    <p class="search-intro">
+      우리 키워드·품목에는 걸렸지만 <b>금액·제외 키워드·낙찰방법 같은 조건으로 목록에서 빠진 공고</b>입니다.
+      좋은 공고가 잘못 빠지지 않았는지 훑어보세요. 목록에 아예 없는 공고는 공고번호로 찾을 수 있습니다.
     </p>
     <form class="search" id="traceForm">
-      <input id="traceQ" placeholder="놓친 공고의 공고번호 또는 제목 일부 — 어느 단계에서 왜 빠졌는지 보여줍니다" autocomplete="off">
-      <button type="submit">공고 추적</button>
+      <input id="traceQ" placeholder="공고번호 또는 공고명 일부 — 왜 빠졌는지 보여줍니다" autocomplete="off">
+      <button type="submit">찾기</button>
     </form>
     <div id="traceResults"></div>
     <div class="filters" id="exFilters"></div>
@@ -585,20 +618,38 @@ footer b { color: var(--muted); }
   </section>
 
   <section id="tab-search" hidden>
+    <p class="search-intro">
+      나라장터에서 본 공고가 <b>지일이 해 온 사업과 얼마나 비슷한지</b> 확인합니다.
+      공고 제목을 붙여넣거나 <b>공고번호</b>를 입력하세요. 공고번호로 찾으면 첨부된 과업지시서까지 비교하고,
+      목록에 들어 있는지·왜 빠졌는지도 함께 보여줍니다.
+    </p>
     <form class="search" id="form">
-      <input id="q" placeholder="공고 제목을 붙여넣으세요 — 예: 국립낙동강생물자원관 어린이 체험공간 전시 제작설치" autocomplete="off">
-      <button type="submit" id="go">검색</button>
+      <input id="q" placeholder="공고 제목 또는 공고번호 (예: R26BK01723875)" autocomplete="off" aria-label="공고 제목 또는 공고번호">
+      <button type="submit" id="go">확인</button>
+      <button type="button" id="qClear" class="ghost" hidden>지우기</button>
     </form>
-    <div class="examples" id="examples"></div>
-    <div id="verdict"></div>
-    <div id="results"></div>
+    <div class="chips" id="recent"></div>
+    <div class="chips" id="examples"></div>
+    <div id="searchOut"><div class="search-empty">
+      <p><b>이럴 때 쓰세요</b></p>
+      <ul>
+        <li>메일·메신저로 받은 공고가 우리 일인지 빨리 보고 싶을 때</li>
+        <li>목록에 안 보이는 공고가 왜 빠졌는지 알고 싶을 때 (공고번호 입력)</li>
+        <li>제안서에 참고할 비슷한 과거 사업을 찾을 때</li>
+      </ul>
+    </div></div>
   </section>
 
   <section id="tab-corpus" hidden>
+    <p class="search-intro">지일이 제안하거나 수행한 사업입니다. 공고와 비교하는 기준이 되고, 사업명을 누르면 과업 내용을 볼 수 있습니다.</p>
+    <div class="search">
+      <input id="corpusQ" type="search" placeholder="사업명으로 찾기 — 예: 과학관, 놀이터, 조형물" autocomplete="off" aria-label="사업명으로 찾기">
+      <select id="corpusYear" aria-label="연도"><option value="">전체 연도</option></select>
+    </div>
     <div class="stats" id="stats"></div>
     <div class="scroll">
       <table>
-        <thead><tr><th class="num">연도</th><th>사업명</th><th>과업지시서</th><th class="num">사업비</th></tr></thead>
+        <thead><tr><th class="num">연도</th><th>사업명</th><th>과업 내용</th><th class="num">사업비</th></tr></thead>
         <tbody id="corpusRows"></tbody>
       </table>
     </div>
@@ -653,95 +704,171 @@ const EXAMPLES = [
 let corpus = [];
 
 async function boot() {
+  // 공고 목록은 과거 사업 목록과 상관없이 바로 불러온다 — 담당자가 화면을 열면 가장 먼저 보는 것이다.
+  loadNotices(false);
   let data;
   try {
     data = await getJson("/api/corpus");
   } catch (err) {
     // 여기서 던지면 화면이 "불러오는 중…"에 멈춘 채 콘솔에만 오류가 남는다.
-    $("corpusInfo").innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
+    $("stats").innerHTML = `<span style="color:var(--warn)">과거 사업 목록을 불러오지 못했습니다 — ${esc(err.message)}</span>`;
     return;
   }
   corpus = data.projects;
-  $("corpusInfo").innerHTML =
-    `과거 수행사업 <b>${data.total}</b>건 · ${esc(data.years)}`;
   renderStats(data);
+  const years = [...new Set(corpus.map((p) => p.year))].sort((a, b) => b - a);
+  $("corpusYear").innerHTML = `<option value="">전체 연도</option>` + years.map((y) => `<option value="${y}">${y}년</option>`).join("");
   renderCorpus();
-  $("examples").innerHTML = EXAMPLES.map((e) => `<button type="button" data-q="${esc(e)}">${esc(e.slice(0, 28))}…</button>`).join("");
-  $("examples").onclick = (ev) => {
-    const q = ev.target.closest("button")?.dataset.q;
-    if (q) { $("q").value = q; search(); }
-  };
+  $("examples").innerHTML = `<span>예시</span>` + EXAMPLES.map((e) => `<button type="button" data-q="${esc(e)}">${esc(e)}</button>`).join("");
+  renderRecent();
 }
 
 function renderStats(d) {
-  $("stats").innerHTML = `${esc(d.range)} · 총 <b>${d.total}</b>건 · 과업지시서 보관 <b>${d.withBody}</b>건`;
+  $("stats").innerHTML = `${esc(d.range)} · 총 <b>${d.total}</b>건 · 과업 내용 있음 <b>${d.withBody}</b>건`;
 }
 
+/** 과거 사업 목록 — 사업명·연도로 좁히고, 사업명을 누르면 과업 내용을 펼친다 */
 function renderCorpus() {
-  $("corpusRows").innerHTML = corpus
-    .slice()
-    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, "ko"))
-    .map((p) => `<tr class="${p.hasBody ? "" : "nobody"}">
+  const q = $("corpusQ").value.replace(/\s+/g, "").toLowerCase();
+  const year = $("corpusYear").value;
+  const rows = corpus
+    .filter((p) => (!q || p.name.replace(/\s+/g, "").toLowerCase().includes(q)) && (!year || String(p.year) === year))
+    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, "ko"));
+  $("corpusRows").innerHTML = rows.length
+    ? rows.map((p) => `<tr class="${p.hasBody ? "" : "nobody"}">
       <td class="num">${p.year}</td>
-      <td>${esc(p.name)}</td>
+      <td>${p.hasBody ? `<button type="button" class="linkish proj" data-proj="${esc(p.id)}">${esc(p.name)}</button><div class="proj-body" hidden></div>` : esc(p.name)}</td>
       <td><span class="tag ${p.hasBody ? "" : "none"}">${p.hasBody ? "있음" : "없음"}</span></td>
       <td class="num">${won(p.budgetAmount)}</td>
-    </tr>`).join("");
+    </tr>`).join("")
+    : `<tr><td colspan="4" class="empty">찾는 사업이 없습니다.</td></tr>`;
+  if (q || year) $("stats").dataset.filtered = "1";
 }
 
+async function toggleProject(btn) {
+  const box = btn.nextElementSibling;
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  if (box.dataset.loaded) return;
+  box.innerHTML = `<p class="sub">불러오는 중…</p>`;
+  try {
+    const d = await getJson("/api/project?id=" + encodeURIComponent(btn.dataset.proj));
+    box.innerHTML = d.excerpt ? `<pre>${esc(d.excerpt)}</pre>` : `<p class="sub">과업 내용이 없습니다.</p>`;
+    box.dataset.loaded = "1";
+  } catch (err) {
+    box.innerHTML = `<p class="sub">불러오지 못했습니다 — ${esc(err.message)}</p>`;
+  }
+}
+
+
 // ── 직접 검색 ───────────────────────────────────────────────
+// 최근 검색어는 이 브라우저에만 남긴다 (사람마다 다르고, 잃어도 되는 편의 기능).
+const RECENT_KEY = "jiil.recentSearches";
+function loadRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]").filter((s) => typeof s === "string"); } catch { return []; }
+}
+function saveRecent(q) {
+  const list = [q, ...loadRecent().filter((s) => s !== q)].slice(0, 5);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* 저장 못 해도 검색은 된다 */ }
+  renderRecent();
+}
+function renderRecent() {
+  const list = loadRecent();
+  $("recent").innerHTML = list.length
+    ? `<span>최근 검색</span>` + list.map((s) => `<button type="button" data-q="${esc(s)}" title="${esc(s)}">${esc(s.length > 34 ? s.slice(0, 34) + "…" : s)}</button>`).join("")
+    : "";
+}
+function runQuery(q) { $("q").value = q; $("qClear").hidden = false; search(); }
+
+const isNoticeNo = (q) => /^[A-Za-z]\d{2}[A-Za-z]{2}\d{6,}(-\d+)?$|^\d{11,}(-\d+)?$/.test(q);
+
 async function search() {
   const q = $("q").value.trim();
   if (!q) return;
   $("go").disabled = true;
-  $("results").innerHTML = '<div class="empty">계산 중…</div>';
+  $("searchOut").innerHTML = `<div class="empty">${isNoticeNo(q) ? "공고를 찾아 첨부 과업지시서와 함께 과거 사업과 비교하는 중… (처음 보는 공고는 10초쯤 걸립니다)" : "과거 사업과 비교하는 중…"}</div>`;
   try {
     const data = await getJson("/api/search?q=" + encodeURIComponent(q));
-    renderVerdict(data.maxScore);
-    renderResults(data.top, q);
+    if (data.error) throw new Error(data.error);
+    if (data.noticeMissing) { $("searchOut").innerHTML = missingNotice(data.noticeMissing); return; }
+    saveRecent(q);
+    $("searchOut").innerHTML = resultHead(data) + (data.notice ? foundNotice(data.notice) : "") + pastList(data.top);
   } catch (err) {
-    $("results").innerHTML = '<div class="empty">검색 실패: ' + esc(err.message) + "</div>";
+    $("searchOut").innerHTML = `<div class="verdict edge">확인하지 못했습니다 — ${esc(err.message)}</div>`;
   } finally {
     $("go").disabled = false;
   }
 }
 
-function renderVerdict(max) {
-  const el = $("verdict");
-  if (max >= HIGH) {
-    el.className = "verdict hit";
-    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — 과거 수행사업과 뚜렷하게 겹칩니다. <b>검토 대상</b>입니다.`;
-  } else if (max >= LOW) {
-    el.className = "verdict edge";
-    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — <b>경계선</b>입니다. 비슷한 부분이 일부 있으니 공고 내용을 직접 확인하세요.`;
-  } else {
-    el.className = "verdict";
-    el.innerHTML = `최고 싱크로율 <b>${Math.round(max*100)}%</b> — 과거 수행사업과 겹치는 부분이 거의 없습니다.`;
-  }
+function missingNotice(kind) {
+  return kind === "notLoaded"
+    ? `<div class="verdict edge">공고번호로 찾으려면 먼저 <b>실제 공고</b> 탭에서 나라장터 공고를 불러와 주세요. 기간은 <b>마감 전 공고 전체</b>로 고르면 가장 많이 찾을 수 있습니다.<br>바로 보고 싶다면 공고 제목을 붙여넣어도 됩니다.</div>`
+    : `<div class="verdict edge">불러온 공고 중에 이 번호가 없습니다. 번호를 다시 확인하거나, <b>실제 공고</b> 탭에서 기간을 늘려 다시 불러와 주세요.<br>공고 제목을 붙여넣으면 지금 바로 비교할 수 있습니다.</div>`;
 }
 
-function renderResults(top, query) {
-  if (!top.length) { $("results").innerHTML = '<div class="empty">결과 없음</div>'; return; }
-  $("results").innerHTML = top.map((m, i) => {
-    return `<div class="card">
-      <div class="row">
-        <div class="score">${Math.round((m.shown ?? 0) * 100)}<i>%</i><small>${i + 1}위</small></div>
-        <div style="flex:1;min-width:0">
-          <div class="name">${esc(m.name)}</div>
-          <div class="meta">${m.year}년${m.budgetAmount ? " · " + won(m.budgetAmount) : ""}</div>
-          ${m.excerpt ? `<details class="body"><summary>과업지시서 발췌 보기</summary><pre>${esc(m.excerpt)}</pre></details>` : ""}
-        </div>
+/** 결론 한 줄 — %보다 "그래서 볼 만한가"가 먼저 보이게 */
+function resultHead(data) {
+  const max = data.maxScore || 0;
+  const tone = max >= HIGH ? "hit" : max >= LOW ? "edge" : "";
+  const title = max >= HIGH ? "지일이 해 온 사업과 많이 비슷합니다" : max >= LOW ? "일부 비슷합니다" : "비슷한 과거 사업이 거의 없습니다";
+  const next = max >= HIGH
+    ? "검토해 볼 만한 공고입니다. 아래 비슷한 사업을 제안서 참고 자료로 쓸 수 있습니다."
+    : max >= LOW
+    ? "겹치는 부분이 있지만 성격이 다를 수 있습니다. 공고문의 과업 내용을 직접 확인하세요."
+    : "지일 본업과 거리가 있을 가능성이 큽니다.";
+  const basis = data.basis === "제목+과업내용"
+    ? "공고 제목과 첨부 과업지시서로 비교했습니다."
+    : data.notice
+    ? "첨부 과업지시서를 읽지 못해 제목으로만 비교했습니다."
+    : "제목으로만 비교했습니다. 공고번호를 넣으면 첨부 과업지시서까지 비교합니다.";
+  return `<div class="result-head ${tone}">
+    <div class="pct">${Math.round(max * 100)}<i>%</i></div>
+    <div><h3>${title}</h3><p>${next}</p><p class="sub" style="margin-top:4px">${basis}</p></div>
+  </div>`;
+}
+
+/** 공고번호로 찾은 공고 — 목록에 있는지, 빠졌다면 왜인지 */
+function foundNotice(n) {
+  const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
+  const status = n.excludedAt
+    ? `<span class="badge warn">목록에서 빠짐</span>`
+    : `<span class="badge hi">목록에 있음</span>`;
+  const inst = n.demandInstitution || n.institution || "기관 미상";
+  return `<div class="found-notice">
+    <div class="badges">${status}<span class="badge">${esc(n.sourceType)}</span><span class="badge">${esc(n.businessType)}</span></div>
+    <h4>${title}</h4>
+    <div class="meta">${esc(inst)}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · ${esc(n.noticeNo)}</div>
+    ${n.excludedAt ? `<div class="why">빠진 이유: ${esc(n.excludedDetail || n.excludedAt)}</div>` : ""}
+  </div>`;
+}
+
+/** 비슷한 과거 사업 — 앞 3건만 펼치고 나머지는 접는다 */
+function pastList(top) {
+  if (!top.length) return `<div class="empty">비교할 과거 사업이 없습니다.</div>`;
+  const row = (m, i) => `<div class="card"><div class="row">
+      <div class="score">${Math.round((m.shown ?? 0) * 100)}<i>%</i><small>${i + 1}위</small></div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(m.name)}</div>
+        <div class="meta">${m.year}년${m.budgetAmount ? " · 사업비 " + won(m.budgetAmount) : ""}</div>
+        ${m.excerpt ? `<details class="body"><summary>과업 내용 보기</summary><pre>${esc(m.excerpt)}</pre></details>` : ""}
       </div>
-    </div>`;
-  }).join("");
+    </div></div>`;
+  const first = top.slice(0, 3).map(row).join("");
+  const rest = top.slice(3);
+  return `<div class="past-title">비슷한 과거 사업</div>${first}` +
+    (rest.length ? `<details class="more-past"><summary>${rest.length}건 더 보기</summary>${rest.map((m, i) => row(m, i + 3)).join("")}</details>` : "");
 }
 
 // ── 실제 나라장터 공고 ──────────────────────────────────────
 async function loadNotices(refresh) {
   const days = $("days").value;
   $("load").disabled = $("refresh").disabled = true;
-  $("liveMeta").textContent = refresh ? "나라장터에 다시 조회 중… (40초쯤 걸립니다)" : "불러오는 중…";
-  $("liveResults").innerHTML = '<div class="empty">공고 조회 중… 본공고 3종 + 사전규격 3종 + 면허제한정보를 함께 받아옵니다.</div>';
+  $("liveMeta").textContent = refresh
+    ? days === "open"
+      ? "나라장터에 다시 조회 중… (그날 첫 조회는 3~4분, 그 뒤로는 30초 안팎)"
+      : "나라장터에 다시 조회 중… (40초쯤 걸립니다)"
+    : "불러오는 중…";
+  $("liveResults").innerHTML = '<div class="empty">나라장터에서 공고를 받아오는 중입니다… 그날 처음 조회할 때는 몇 분 걸릴 수 있습니다.</div>';
   try {
     const data = await getJson(`/api/notices?days=${days}${refresh ? "&refresh=1" : ""}`);
     if (data.error) {
@@ -753,7 +880,7 @@ async function loadNotices(refresh) {
     const hi = data.items.filter((n) => n.maxScore >= HIGH).length;
     const mid = data.items.filter((n) => n.maxScore >= LOW && n.maxScore < HIGH).length;
     $("liveMeta").innerHTML =
-      `최근 ${data.lookbackDays}일 · 공고 <b>${data.items.length}건</b> · ` +
+      `${esc(data.periodLabel)} · 공고 <b>${data.items.length}건</b> · ` +
       `싱크로율 높음 <b>${hi}</b> · 경계선 <b>${mid}</b> · 낮음 <b>${data.items.length - hi - mid}</b>` +
       ` · ${esc(when)}`;
     renderNotices(data.items);
@@ -769,7 +896,7 @@ async function loadNotices(refresh) {
 }
 
 /** 현재 걸려 있는 필터 상태 */
-const filters = { grade: "all", source: "all", method: "all", part: "all", ai: "all" };
+const filters = { grade: "all", method: "all", part: "all", ai: "all" };
 let lastItems = [];
 
 function renderNotices(items) {
@@ -777,11 +904,18 @@ function renderNotices(items) {
   applyFilters();
 }
 
+/** 목록에서 찾기 — 공고명·기관·공고번호, 공백 무시 */
+function matchesLiveQuery(n) {
+  const q = ($("liveQ").value || "").replace(/\s+/g, "").toLowerCase();
+  if (!q) return true;
+  return [n.title, n.demandInstitution, n.institution, n.noticeNo].some((v) => String(v || "").replace(/\s+/g, "").toLowerCase().includes(q));
+}
+
 function applyFilters() {
   const shown = lastItems.filter(
     (n) =>
+      matchesLiveQuery(n) &&
       (filters.grade === "all" || n.confidence === filters.grade) &&
-      (filters.source === "all" || n.sourceType === filters.source) &&
       (filters.method === "all" || n.bidMethodCategory === filters.method) &&
       (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part) &&
       (filters.ai === "all" || (enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict || "미판단") === filters.ai)
@@ -795,10 +929,6 @@ function applyFilters() {
     chip("grade", "강력추천", `강력추천 ${count((n) => n.confidence === "강력추천")}`, "urgent"),
     chip("grade", "참고용", `참고용 ${count((n) => n.confidence === "참고용")}`),
     `<span class="chip-gap"></span>`,
-    chip("source", "all", "본공고+사전규격"),
-    chip("source", "본공고", `본공고 ${count((n) => n.sourceType === "본공고")}`),
-    chip("source", "사전규격", `사전규격 ${count((n) => n.sourceType === "사전규격")}`),
-    `<span class="chip-gap"></span>`,
     chip("method", "all", "낙찰방법 전체"),
     ...["협상", "규격가격동시", "입찰"].map((m) => chip("method", m, `${m} ${count((n) => n.bidMethodCategory === m)}`)),
     `<span class="chip-gap"></span>`,
@@ -806,19 +936,23 @@ function applyFilters() {
     ...["미지정", ...PART_STATUSES].map((st) =>
       chip("part", st, `${st} ${count((n) => (participation[n.noticeNo]?.status || "미지정") === st)}`)
     ),
-    `<span class="chip-gap"></span>`,
-    chip("ai", "all", "AI 판단 전체"),
-    ...["적절", "검토필요", "부적절"].map((v) =>
-      chip("ai", v, `AI ${v} ${count((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === v)}`)
-    ),
+    ...(enrich.aiEnabled
+      ? [
+          `<span class="chip-gap"></span>`,
+          chip("ai", "all", "AI 판단 전체"),
+          ...["적절", "검토필요", "부적절"].map((v) =>
+            chip("ai", v, `AI ${v} ${count((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === v)}`)
+          ),
+        ]
+      : []),
   ].join("");
 
   if (!lastItems.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 기간에 규칙 매칭된 공고가 없습니다.</div>';
+    $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>';
     return;
   }
   if (!shown.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다.</div>';
+    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>';
     return;
   }
 
@@ -831,7 +965,10 @@ function applyFilters() {
 
   $("liveResults").innerHTML = groups
     .map(({ key, note }) => {
-      const list = shown.filter((n) => n.sourceType === key);
+      // 마감이 급한 순서. 마감을 모르는 공고는 맨 뒤, 마감이 같으면 싱크로율 높은 순.
+      const list = shown
+        .filter((n) => n.sourceType === key)
+        .sort((a, b) => deadlineAt(a.deadline) - deadlineAt(b.deadline) || b.maxScore - a.maxScore);
       if (list.length === 0) return "";
       const strong = list.filter((n) => n.confidence === "강력추천").length;
       return `
@@ -929,11 +1066,20 @@ function factsBlock(n) {
 }
 
 // ── 마감 임박 ──────────────────────────────────────────────
+/**
+ * 마감 시각(ms). 나라장터 마감일시는 한국 시각이라 KST로 못박아 계산한다 (서버 deadline.ts의
+ * parseKstDateTime과 같은 셈). 형식을 모르면 Infinity — 정렬하면 맨 뒤로 간다.
+ */
+function deadlineAt(deadline) {
+  const m = /^(\d{4})[-./]?(\d{2})[-./]?(\d{2})(?:[ T]?(\d{2}):?(\d{2}))?/.exec(String(deadline || "").trim());
+  if (!m) return Infinity;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], (m[4] === undefined ? 23 : +m[4]) - 9, m[5] === undefined ? 59 : +m[5]);
+}
+
 /** 마감까지 남은 날 (한국 달력 기준). 형식을 모르면 null. 서버 deadline.ts의 daysUntilDeadline과 같은 셈. */
 function daysLeft(deadline) {
-  const m = /^(\d{4})[-./]?(\d{2})[-./]?(\d{2})(?:[ T]?(\d{2}):?(\d{2}))?/.exec(String(deadline || "").trim());
-  if (!m) return null;
-  const at = Date.UTC(+m[1], +m[2] - 1, +m[3], (m[4] === undefined ? 23 : +m[4]) - 9, m[5] === undefined ? 59 : +m[5]);
+  const at = deadlineAt(deadline);
+  if (at === Infinity) return null;
   if (at < Date.now()) return -1;
   const kstDay = (t) => Math.floor((t + 9 * 3600000) / 86400000);
   return kstDay(at) - kstDay(Date.now());
@@ -994,7 +1140,7 @@ function renderEnrichMeta() {
     return;
   }
   const parts = [];
-  if (e.total) parts.push(`공고문·공동수급 확인 ${e.done}/${e.total}`);
+  if (e.total) parts.push(`첨부 공고문·과업지시서 확인 ${e.done}/${e.total}`);
   if (e.aiTotal) parts.push(`AI 판단 ${e.aiDone}/${e.aiTotal}`);
   $("enrichMeta").textContent = parts.join(" · ") + " — 끝나는 대로 카드에 채워집니다";
 }
@@ -1029,6 +1175,9 @@ function enrichBadges(n) {
     out.push(`<span class="badge urgentb" title="${esc(doc.sourceFile)}">⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}</span>`);
   }
   if (doc?.region) out.push(regionBadge(doc, e.regionOk));
+  if (doc?.performance?.length) out.push(performanceBadge(doc));
+  if (e.scope?.flags?.length) out.push(scopeBadge(e.scope));
+  if (n.mainWork && !n.mainWork.held) out.push(mainWorkBadge(n.mainWork));
   out.push(jointBadge(n, e));
   return out.join("");
 }
@@ -1047,8 +1196,8 @@ function jointBadge(n, e) {
 }
 
 /**
- * 자격판정 배지. 필터에서 떨어진 공고는 화면에 오지 않으므로 "미충족"은 없다 —
- * 여기 보이는 본공고는 충족했거나, 판정할 제한 정보가 없어 통과한 것이다.
+ * 자격판정 배지. 나라장터 업종제한을 못 채운 공고도 빼지 않고 "자격 미보유 · 공동수급 …"으로 보여준다
+ * (missingQualBadge) — 공동수급이 허용되면 함께 참가할 수 있어서다.
  * 면허제한정보에 없는 공고("업종제한 없음")는 공고문을 읽어 요구 자격을 대신 보여준다.
  */
 const qtip = (title, body) => `<span class="qtip" role="tooltip"><h4>${title}</h4>${body}</span>`;
@@ -1084,7 +1233,7 @@ function productBadge(n, doc) {
       need,
       { ok: "세부품명 보유", fix: "세부품명 등록 추가", block: "세부품명 미보유" },
       `${where}의 세부품명 요건`,
-      `<ul>${reqRows(need)}</ul>${classifiedRows(doc, need)}${source}`
+      `<ul>${reqRows(need, doc.classes)}</ul>${source}${classifiedRows(n, doc, need, true)}`
     );
   }
   const items = doc.classifiedItems || [];
@@ -1093,7 +1242,7 @@ function productBadge(n, doc) {
     const miss = items.filter((i) => !i.held).length;
     return `<span class="badge qual ${allHeld ? "ok" : "fix"}" tabindex="0"><span class="ico" aria-hidden="true">${allHeld ? "✓" : "!"}</span>${allHeld ? `분류 품명 보유 ${items.length}/${items.length}` : `분류 품명 미등록 ${miss}건`}${qtip(
       `${where}에 세부품명 요건 없음 → 공고 분류 품명으로 확인`,
-      `${classifiedRows(doc, [])}${source}`
+      classifiedRows(n, doc, [], false)
     )}</span>`;
   }
   return `<span class="badge">세부품명번호 제한 없음</span>`;
@@ -1118,48 +1267,69 @@ function qualBadge(n, doc) {
     const need = doc.requirements.filter((r) => r.kind === "업종");
     // 제한이 없으면 팝업은 띄우지 않는다 — 지역제한·지명경쟁은 옆 배지에 따로 나온다
     if (!need.length) return `<span class="badge">자격요건 제한 없음</span>`;
+    // 나라장터 업종제한에서 걸린 공고는 이미 "제외된 공고"로 갔다. 여기 미보유는 공고문 글에서 읽은 것이라
+    // 잘못 읽었을 수 있어 목록에 남긴다 — 배지 이름과 팝업에 그 차이를 적는다
+    const note = need.some((r) => !r.held)
+      ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다. 잘못 읽었을 수 있어 목록에서 빼지 않았습니다. 원문을 확인하세요.</p>`
+      : "";
     return reqBadge(
       need,
-      { ok: "자격충족", fix: "자격 등록 추가", block: "자격 미보유" },
+      { ok: "자격충족", fix: "자격 등록 추가", block: "공고문 자격 미보유" },
       `${head} → ${where}에서 확인`,
-      `<ul>${reqRows(need)}</ul>${docFooter(doc)}`
+      `<ul>${reqRows(need, doc.classes)}</ul>${note}${docFooter(doc)}`
     );
   }
-  // 자격조건(그룹) 하나에 한 줄 — 조건이 4개면 4줄. 보유 자격 기준으로 늘어놓으면 같은 조건을 채우는
-  // 대안 자격까지 다 나와서(보유 6개) 정작 "조건 4개를 뭘로 채웠나"가 안 읽힌다.
-  const byGroup = new Map();
-  for (const s of q.satisfiedBy) {
-    const list = byGroup.get(s.groupNo) || [];
-    if (!list.some((x) => (x.code || x.name) === (s.code || s.name))) list.push(s);
-    byGroup.set(s.groupNo, list);
-  }
+  // 나라장터 업종제한은 참가 방법(제한그룹) 여러 개 중 **하나만** 채우면 된다 (licenseLimitApi.ts 주석).
+  // 무엇으로 채웠는지만 보이면 된다 — 여러 방법에 공통인 자격(예: 1469)을 방법마다 되풀이하지 않고 자격당 한 줄.
+  const seen = new Set();
+  const uniq = q.satisfiedBy.filter((s) => {
+    const key = s.code || s.name;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const label = (s) => `${esc(s.name)}${s.code ? `(${esc(s.code)})` : ""}`;
-  const keyOf = (s) => s.code || s.name;
-  // 모든 조건에 들어 있는 자격(예: 1469가 조건 4개 모두에)은 "모든 조건" 한 줄로 한 번만 — 조건마다 반복하면 팝업이 길어진다
-  const lists = [...byGroup.values()];
-  const common = lists.length > 1 ? lists[0].filter((s) => lists.every((l) => l.some((x) => keyOf(x) === keyOf(s)))) : [];
-  const commonKeys = new Set(common.map(keyOf));
-  const rows = lists
-    .map((list, i) => [i, list.filter((s) => !commonKeys.has(keyOf(s)))])
-    .filter(([, rest]) => rest.length)
-    .map(([i, rest]) => `<li>${q.totalGroups > 1 ? `<span class="grp">조건 ${i + 1}</span> ` : ""}${rest.map(label).join(" 또는 ")}</li>`);
-  const items = (common.length ? `<li><span class="grp">모든 조건</span> ${common.map(label).join(" 또는 ")}</li>` : "") + rows.join("");
-  // 충족 팝업은 충족한 자격만. 공고문 쪽은 걸리는 게 있을 때만(미보유 요건·지역제한 등) 덧붙인다
+  const items = uniq.map((s) => `<li>✓ ${label(s)}</li>`).join("");
+  // 충족 팝업은 충족한 자격만. 공고문 쪽은 걸리는 게 있을 때만(미보유 요건 등) 덧붙인다
   const issues = doc ? docIssues(doc) : "";
-  return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족 ${q.totalGroups}/${q.totalGroups}${tip(
-    q.totalGroups > 1 ? `자격조건 ${q.totalGroups}개 모두 충족` : "자격조건 충족",
+  if (q.status === "미충족") return missingQualBadge(n, q, issues);
+  return `<span class="badge qual ok" tabindex="0"><span class="ico" aria-hidden="true">✓</span>자격충족${tip(
+    "업종제한 충족",
     `<ul>${items}</ul>` + (issues ? `<h4 class="sub-h">공고문에서 확인할 것</h4>${issues}` : "")
+  )}</span>`;
+}
+
+/**
+ * 나라장터 업종제한을 다 채우지 못한 공고. 빼지 않고 보여준다 — 공동수급이 허용되면 그 자격을 가진
+ * 업체와 함께 참가할 수 있어서다. 그래서 배지에 공동수급 허용 여부를 같이 적는다.
+ */
+function missingQualBadge(n, q, issues) {
+  // 공동수급 허용 여부는 바로 옆 공동수급 배지에 나온다 — 여기서는 색으로만 반영한다
+  // (불허면 빨강: 부족한 자격을 함께 채울 업체를 구할 수 없다, 허용·미확인이면 노랑)
+  const joint = (enrich.byNo[n.noticeNo] || {}).jointBid;
+  const denied = typeof joint === "string" && /불허/.test(joint);
+  // 참가 방법마다 한 줄. 방법끼리는 "또는", 한 줄 안의 "+"는 둘 다 필요
+  const miss = q.missing.map((g) => `<li class="miss">✗ ${esc(g.text || g.names.join(" 또는 "))}</li>`).join("");
+  return `<span class="badge qual ${denied ? "block" : "fix"}" tabindex="0"><span class="ico" aria-hidden="true">!</span>자격 미보유${qtip(
+    q.missing.length > 1 ? "아래 중 하나를 갖추면 참가할 수 있습니다" : "필요한 자격",
+    `<ul>${miss}</ul>` + (issues ? `<h4 class="sub-h">공고문에서 확인할 것</h4>${issues}` : "")
   )}</span>`;
 }
 
 /** 요건 종류를 짧은 태그로 — 자세한 해결 방법 설명은 팝업이 길어져서 뺐다 */
 const BASIS_TAG = { 등록: "등록 추가", 직접생산: "직접생산 증명 필요", 면허: "면허 필요" };
 
-/** 요건 한 줄씩 — 보유는 ✓, 미보유는 ✗와 해결 방법 태그 */
-function reqRows(need) {
+/** 조달청 분류 정보에서 받아 둔 세부품명 이름 (공고문에 번호만 있고 이름이 없을 때 쓴다) */
+function classifiedName(classes, code) {
+  const levels = (classes && code && classes[code]?.levels) || [];
+  return levels.find((l) => l.digits === 10)?.name || null;
+}
+
+/** 요건 한 줄씩 — 보유는 ✓, 미보유는 ✗와 해결 방법 태그. 이름은 보유 목록 → 공고문 → 조달청 분류 순으로 찾는다 */
+function reqRows(need, classes) {
   return need
     .map((r) => {
-      const nm = r.name || r.docName;
+      const nm = r.name || r.docName || (r.kind === "품명" ? classifiedName(classes, r.code) : null);
       const label = nm ? `${esc(nm)}${r.code ? `(${esc(r.code)})` : ""}` : `${r.kind === "품명" ? "세부품명번호" : "업종코드"} ${esc(r.code)}`;
       if (r.held) return `<li>✓ ${label}</li>`;
       const bases = r.bases || [];
@@ -1169,13 +1339,19 @@ function reqRows(need) {
     .join("");
 }
 
-/** 공고 분류 품명 중 요건 목록에 없는 것 */
-function classifiedRows(doc, need) {
+/**
+ * 공고 분류 품명 중 요건 목록에 없는 것. 공고문(PDF)이 아니라 나라장터 공고 정보(API)에서 온 값이라
+ * 요건 목록과 섞으면 "공고문이 이것도 요구한다"로 읽힌다 — 요건 아래에 따로, 출처를 달아 보여준다.
+ */
+function classifiedRows(n, doc, need, withHeading) {
   const reqCodes = new Set(need.filter((r) => r.code).map((r) => r.code));
   const rows = (doc.classifiedItems || [])
     .filter((i) => !reqCodes.has(i.code))
-    .map((i) => (i.held ? `<li>✓ ${esc(i.name)}(${esc(i.code)}) <span class="grp">분류 품명</span></li>` : `<li class="fixable">✗ ${esc(i.name)}(${esc(i.code)}) <span class="grp">분류 품명 · 등록 추가</span></li>`));
-  return rows.length ? `<ul>${rows.join("")}</ul>` : "";
+    .map((i) => (i.held ? `<li>✓ ${esc(i.name)}(${esc(i.code)})</li>` : `<li class="fixable">✗ ${esc(i.name)}(${esc(i.code)}) <span class="grp">등록 추가</span></li>`));
+  if (!rows.length) return "";
+  const pre = n.sourceType === "사전규격";
+  const head = withHeading ? `<h4 class="sub-h">나라장터 공고 분류 품명 (공고문 요건 아님)</h4>` : "";
+  return `${head}<ul>${rows.join("")}</ul><p>출처: 나라장터 ${pre ? "사전규격" : "입찰공고"} 정보 — 공고 상세 화면의 ${pre ? "품목" : "구매대상물품"}에서 확인할 수 있습니다</p>`;
 }
 
 /** 미보유 업종 요건, 한 줄씩 (세부품명은 productBadge에서 따로) */
@@ -1193,7 +1369,65 @@ function regionBadge(doc, ok) {
     : `<span class="badge warn" title="${esc(doc.sourceFile)}">⚠ ${esc(regionText(doc, ok))}</span>`;
 }
 
+/** 1000000000 → "10억원", 110121000 → "1.1억원", 70000000 → "7,000만원" */
+function wonText(v) {
+  if (v >= 1e8) return `${Math.round(v / 1e7) / 10}억원`;
+  return `${Math.round(v / 1e4).toLocaleString("ko-KR")}만원`;
+}
+function performanceSummary(p) {
+  const parts = [];
+  if (p.years) parts.push(`최근 ${p.years}년`);
+  if (p.minAmountWon) parts.push(`${p.single ? "단일 " : ""}${wonText(p.minAmountWon)} 이상`);
+  else if (p.single) parts.push("단일 건");
+  return parts.join(" · ");
+}
+/**
+ * 실적제한 — "최근 3년 이내 단일 건 10억원 이상 전시장 제작·설치 준공실적이 있는 업체".
+ * 지일 실적 목록이 없어 충족 여부는 따지지 않고 기간·금액만 배지에 쓴다. 실적 종류(전시장·조형물 등)는
+ * 문장마다 달라 팝업에 원문으로 보여준다.
+ */
+function performanceBadge(doc) {
+  const first = performanceSummary(doc.performance[0]);
+  const more = doc.performance.length > 1 ? ` 외 ${doc.performance.length - 1}건` : "";
+  const due = doc.performanceReviewDeadline ? ` · 심사신청 ${esc(doc.performanceReviewDeadline.replace(/^\d{4}[/.-]/, ""))}까지` : "";
+  const body =
+    `<ul>${doc.performance.map((p) => `<li>${esc(p.sentence)}</li>`).join("")}</ul>` +
+    (doc.performanceReviewDeadline
+      ? `<p class="warnline">실적심사신청서를 ${esc(doc.performanceReviewDeadline)}까지 나라장터로 내야 입찰할 수 있습니다.</p>`
+      : "") +
+    `<p>지일의 실적이 위 조건에 맞는지 확인하세요.</p>` +
+    docFooter(doc);
+  return `<span class="badge qual warn" tabindex="0">⚠ 실적제한${first ? " " + esc(first) : ""}${more}${due}${qtip("공고문 실적 요건", body)}</span>`;
+}
+
 /** 팝업 아래 덧붙일 것과 출처. 지역제한·지명경쟁은 카드에 배지로 따로 나오므로 팝업에 되풀이하지 않는다 */
+/**
+ * 과업에 본업(설계·제작·설치) 밖 업무가 섞인 공고 — 과업지시서·제안요청서 본문에서 찾은 문장.
+ * 빼지 않고 알려만 준다. 제작·설치가 중심이면 하청·비용을 견적에 넣고 참가할 수 있다.
+ */
+const SCOPE_LABEL = { 운송: "유물 운송", 대여: "전시품 대여", 운영: "인력 운영", "홍보·도록": "홍보·도록" };
+function scopeBadge(scope) {
+  const kinds = [...new Set(scope.flags.map((f) => f.kind))];
+  const body =
+    kinds
+      .map((k) => `<p><b>${esc(SCOPE_LABEL[k] || k)}</b></p><ul>${scope.flags.filter((f) => f.kind === k).map((f) => `<li>${esc(f.sentence)}</li>`).join("")}</ul>`)
+      .join("") +
+    `<p>제작·설치 외 업무입니다. 직접 하기 어렵다면 하청 업체와 비용을 견적에 넣어야 합니다.</p>` +
+    `<p>출처: ${esc(scope.sourceFile)}</p>`;
+  return `<span class="badge qual warn" tabindex="0">⚠ 과업에 ${esc(kinds.map((k) => SCOPE_LABEL[k] || k).join("·"))} 포함${qtip("제작·설치 외 과업", body)}</span>`;
+}
+
+/**
+ * 공사 공고의 주공종이 지일 면허가 아닐 때 — 놀이터 조성(조경식재·시설물공사업), 실내정원(조경공사업) 등.
+ * 빼지 않는다. 공동수급으로 참가할 수 있어서 담당자가 판단한다.
+ */
+function mainWorkBadge(w) {
+  const body =
+    `<p>이 공사의 주된 공종은 <b>${esc(w.name)}</b>입니다. 지일이 가진 면허가 아닙니다.</p>` +
+    `<p>단독으로는 참가하기 어렵습니다. 공동수급이 허용되면 이 면허를 가진 업체와 함께 참가할 수 있습니다.</p>`;
+  return `<span class="badge qual warn" tabindex="0">⚠ 주공종 ${esc(w.name)}${qtip("공사 주공종", body)}</span>`;
+}
+
 function docFooter(doc) {
   const warns = [
     doc.linkedBidNo ? `본공고 게시됨: ${esc(doc.linkedBidNo)}` : "",
@@ -1311,8 +1545,31 @@ function refreshCards(what, force = false) {
 
 // ── 제외된 공고 · 공고 추적 ─────────────────────────────────────
 let exData = null;
-let exStage = "all";
-
+/** "active" = 마감 안 된 공고 전체 (기본). 마감 지난 공고는 볼 일이 거의 없어 따로 둔다 */
+let exStage = "active";
+/** 내부 단계 이름 → 담당자가 읽는 말 */
+const STAGE_LABEL = {
+  마감: "마감 지남",
+  "본공고 게시": "본공고가 따로 나옴",
+  제외키워드: "제외 키워드",
+  최소예산: "금액 미달",
+  낙찰방법: "수의계약",
+  해외개최: "해외 개최",
+  "키워드·품목": "키워드 없음",
+  참가자격: "참가 자격",
+};
+const stageLabel = (s) => STAGE_LABEL[s] || s;
+/** 조건별 확인 목록에 쓰는 이름 (통과·탈락 모두에 어울리게) */
+const STEP_NAME = {
+  마감: "마감",
+  "본공고 게시": "본공고 여부",
+  제외키워드: "제외 키워드",
+  최소예산: "최소 금액",
+  낙찰방법: "낙찰방법",
+  해외개최: "해외 개최",
+  "키워드·품목": "키워드·품목",
+  참가자격: "참가 자격",
+};
 async function loadExcluded() {
   $("exMeta").textContent = "불러오는 중…";
   $("exResults").innerHTML = "";
@@ -1333,16 +1590,19 @@ async function loadExcluded() {
 
 function renderExcluded() {
   const d = exData;
-  const stages = Object.entries(d.byStage).filter(([, c]) => c > 0);
+  const stages = Object.entries(d.byStage).filter(([s, c]) => c > 0 && s !== "마감");
+  const active = d.items.filter((n) => n.excludedAt !== "마감").length;
+  const closed = d.byStage["마감"] || 0;
   $("exFilters").innerHTML = [
-    `<button type="button" class="chip ${exStage === "all" ? "on" : ""}" data-stage="all">전체 ${d.items.length}</button>`,
-    ...stages.map(([s, c]) => `<button type="button" class="chip ${exStage === s ? "on" : ""}" data-stage="${esc(s)}">${esc(s)} ${c}</button>`),
+    `<button type="button" class="chip ${exStage === "active" ? "on" : ""}" data-stage="active">확인할 공고 ${active}</button>`,
+    ...stages.map(([s, c]) => `<button type="button" class="chip ${exStage === s ? "on" : ""}" data-stage="${esc(s)}">${esc(stageLabel(s))} ${c}</button>`),
+    closed ? `<span class="chip-gap"></span><button type="button" class="chip ${exStage === "마감" ? "on" : ""}" data-stage="마감">마감 지난 공고 ${closed}</button>` : "",
   ].join("");
   const aiFit = d.items.filter((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === "적절").length;
   $("exMeta").innerHTML =
-    `최근 ${d.lookbackDays}일 수집 공고 ${d.total.toLocaleString("ko-KR")}건 중 키워드·품목 후보였다가 빠진 공고 <b>${d.items.length}건</b>` +
-    (aiFit ? ` · AI가 적절하다고 본 공고 <b>${aiFit}건</b> — 필터가 놓친 공고일 수 있습니다` : "");
-  const list = d.items.filter((n) => exStage === "all" || n.excludedAt === exStage);
+    `${esc(d.periodLabel)} 공고 중 목록에서 빠진 후보 <b>${d.items.length}건</b> (마감 안 된 공고 <b>${active}건</b>)` +
+    (aiFit ? ` · AI가 적절하다고 본 공고 <b>${aiFit}건</b> — 잘못 빠졌을 수 있습니다` : "");
+  const list = d.items.filter((n) => (exStage === "active" ? n.excludedAt !== "마감" : n.excludedAt === exStage));
   $("exResults").innerHTML = list.length
     ? list.map((n) => renderDiagnosed(n)).join("")
     : '<div class="empty">이 조건에 해당하는 공고가 없습니다.</div>';
@@ -1350,7 +1610,7 @@ function renderExcluded() {
 
 function renderSteps(steps, excludedAt) {
   return `<ol class="steps">${steps
-    .map((s) => `<li class="${s.ok ? "ok" : "no"} ${s.step === excludedAt ? "first" : ""}"><span class="mark" aria-hidden="true">${s.ok ? "✓" : "✗"}</span><b>${esc(s.step)}</b> ${esc(s.detail)}</li>`)
+    .map((s) => `<li class="${s.ok ? "ok" : "no"} ${s.step === excludedAt ? "first" : ""}"><span class="mark" aria-hidden="true">${s.ok ? "✓" : "✗"}</span><b>${esc(STEP_NAME[s.step] || s.step)}</b> ${esc(s.detail)}</li>`)
     .join("")}</ol>`;
 }
 
@@ -1358,14 +1618,14 @@ function renderDiagnosed(n, openSteps = false) {
   const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
   return `<div class="notice ${n.excludedAt ? "edge" : "strong"}">
     <div class="badges">
-      ${n.excludedAt ? `<span class="badge warn">빠진 단계 · ${esc(n.excludedAt)}</span>` : `<span class="badge hi">수집됨</span>`}
+      ${n.excludedAt ? `<span class="badge warn">빠진 이유 · ${esc(stageLabel(n.excludedAt))}</span>` : `<span class="badge hi">목록에 있음</span>`}
       <span class="badge">${esc(n.sourceType)}</span>
       <span class="badge">${esc(n.businessType)}</span>
     </div>
     <h3>${title}</h3>
     <div class="meta">${esc(n.institution || "기관 미상")}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · <code>${esc(n.noticeNo)}</code></div>
-    ${n.excludedDetail ? `<div class="meta">사유: <b>${esc(n.excludedDetail)}</b></div>` : ""}
-    <details class="body" ${openSteps ? "open" : ""}><summary>단계별 판정 보기</summary>${renderSteps(n.steps, n.excludedAt)}</details>
+    ${n.excludedDetail ? `<div class="meta">자세히: <b>${esc(n.excludedDetail)}</b></div>` : ""}
+    <details class="body" ${openSteps ? "open" : ""}><summary>조건별 확인 결과 보기</summary>${renderSteps(n.steps, n.excludedAt)}</details>
     <div data-ai="${esc(n.noticeNo)}">${aiBlock(n, true)}</div>
   </div>`;
 }
@@ -1381,7 +1641,7 @@ async function trace() {
       return;
     }
     if (!data.items.length) {
-      $("traceResults").innerHTML = `<div class="verdict edge">최근 ${data.lookbackDays}일 동안 수집한 공고 ${data.total.toLocaleString("ko-KR")}건 중에 없습니다.
+      $("traceResults").innerHTML = `<div class="verdict edge">이번 조회(${esc(data.periodLabel)})에서 수집한 공고${data.total.toLocaleString("ko-KR")}건 중에 없습니다.
         조회 기간보다 먼저 올라온 공고라면 '실제 공고' 탭에서 기간을 늘려 다시 불러오세요.
         기간 안인데도 없다면 수집 단계에서 빠진 것이므로 공고번호를 담당자에게 알려주세요.</div>`;
       return;
@@ -1447,7 +1707,21 @@ document.addEventListener("focusin", placeTip);
 
 $("load").onclick = () => loadNotices(false);
 $("refresh").onclick = () => loadNotices(true);
+$("liveQ").oninput = () => applyFilters();
+$("corpusQ").oninput = () => renderCorpus();
+$("corpusYear").onchange = () => renderCorpus();
+$("corpusRows").onclick = (ev) => {
+  const btn = ev.target.closest("[data-proj]");
+  if (btn) toggleProject(btn);
+};
+// 기간을 바꾸면 바로 다시 불러온다 (서버에 같은 기간 결과가 있으면 즉시 나온다)
+$("days").onchange = () => loadNotices(false);
 $("form").onsubmit = (e) => { e.preventDefault(); search(); };
+for (const id of ["recent", "examples"]) {
+  $(id).onclick = (ev) => { const q = ev.target.closest("button")?.dataset.q; if (q) runQuery(q); };
+}
+$("q").oninput = () => { $("qClear").hidden = !$("q").value; };
+$("qClear").onclick = () => { $("q").value = ""; $("qClear").hidden = true; $("q").focus(); };
 document.querySelector(".tabs").onclick = (e) => {
   const btn = e.target.closest("button[data-tab]");
   if (!btn) return;

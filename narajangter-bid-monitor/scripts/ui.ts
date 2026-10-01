@@ -10,6 +10,9 @@ import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js
 import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody } from "../src/api/noticeBody.js";
+import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
+import { mainWorkOf } from "../src/matching/mainWork.js";
+import { taskExcerpt } from "../src/corpus/taskExcerpt.js";
 import { lookupProductClass, type ProductClassInfo } from "../src/api/productClassApi.js";
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
@@ -145,9 +148,44 @@ function json(res: ServerResponse, body: unknown): void {
  */
 interface NoticeCache {
   fetchedAt: Date;
-  lookbackDays: number;
+  /** 화면의 기간 선택값 그대로 ("7", "30", "open" …) — 같은 선택이면 캐시를 쓴다 */
+  period: string;
+  /** 화면에 찍을 기간 이름 ("최근 7일", "마감 전 공고 전체") */
+  periodLabel: string;
   items: unknown[];
   error: string | null;
+}
+
+/**
+ * "마감 전 공고 전체"로 볼 때 본공고를 거슬러 올라가는 기간.
+ * 나라장터 API는 게시일로만 조회되고 마감일로는 조회할 수 없어서, 넉넉히 받아 마감 지난 것을 뺀다.
+ * 2026-09-30 실측(90일치 본공고): 마감 전 7,457건 중 게시 60일 넘은 건 25건(0.3%),
+ * 우리 키워드에 걸린 32건은 모두 게시 30일 이내였다.
+ */
+const OPEN_BID_LOOKBACK_DAYS = 60;
+
+/**
+ * 기간 선택값 → 조회 기간. 사전규격은 입찰 마감이 없어 "마감 전 전체"에서도 최근 7일만 본다.
+ * "마감 전 전체"는 받아둔 공고에 새로 올라온 것만 이어 받는다 — 그날 첫 조회만 3~4분 걸리고,
+ * 그 뒤로는 추가분만 받는다 (api/incrementalFetch.ts).
+ */
+function periodOptions(period: string): {
+  lookbackDays: number;
+  preStandardLookbackDays?: number;
+  incremental?: boolean;
+  label: string;
+} {
+  if (period === "open") {
+    return {
+      lookbackDays: OPEN_BID_LOOKBACK_DAYS,
+      preStandardLookbackDays: 7,
+      incremental: true,
+      label: "마감 전 공고 전체",
+    };
+  }
+  const days = Number(period);
+  const lookbackDays = Number.isInteger(days) && days >= 1 && days <= 90 ? days : 7;
+  return { lookbackDays, label: `최근 ${lookbackDays}일` };
 }
 let noticeCache: NoticeCache | null = null;
 /**
@@ -183,11 +221,28 @@ function demandInstitutionOf(n: NormalizedNotice): string | null {
   return null;
 }
 
-function decorate(m: MatchedNotice): unknown {
+interface SimilarityView {
+  maxScore: number;
+  rawScore: number;
+  basis: string;
+  similar: { id: string; name: string; year: number; score: number }[];
+}
+
+/** 싱크로율. 과업지시서·제안요청서 본문을 읽었으면 그 본문으로, 아니면 제목으로 과거사업과 비교한다. */
+function similarityView(title: string, body?: string): SimilarityView {
+  const s = index.findSimilar(title, 3, body ? { body } : {});
+  return {
+    maxScore: calibrate(s.maxScore, s.basis),
+    rawScore: s.maxScore,
+    basis: s.basis,
+    similar: s.top.map((t) => ({ id: t.id, name: t.name, year: t.year, score: t.score })),
+  };
+}
+
+function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
   const n = m.notice;
-  // 여기가 ④단계를 실제로 붙여보는 자리다. 파이프라인 본체는 아직 건드리지 않았고,
-  // 이 화면에서만 규칙 매칭 결과 위에 유사도를 얹어 눈으로 비교한다.
-  const similarity = index.findSimilar(n.title, 3);
+  // 첨부 본문 기준 값은 뒤에서 채운다(startEnrichment). 이미 읽어둔 공고면 처음부터 그 값을 쓴다.
+  const similarity = enrichment.get(n.noticeNo)?.similarity ?? similarityView(n.title);
   return {
     noticeNo: n.noticeNo,
     title: n.title,
@@ -204,10 +259,8 @@ function decorate(m: MatchedNotice): unknown {
     reason: matchReason(m),
     overseas: m.overseasVenueFlag?.matchedMongoliaKeyword ?? null,
     qualification: m.qualification ?? null,
-    maxScore: calibrate(similarity.maxScore, similarity.basis),
-    rawScore: similarity.maxScore,
-    basis: similarity.basis,
-    similar: similarity.top.map((s) => ({ id: s.id, name: s.name, year: s.year, score: s.score })),
+    mainWork: mainWorkOf(n, appConfig.heldIndustries),
+    ...similarity,
   };
 }
 
@@ -309,6 +362,10 @@ interface Enrichment {
   qualDoc?: QualificationDocResult | null;
   /** 공고문·분류에 나온 세부품명번호의 분류 경로·해설 (조달청 물품목록정보서비스) */
   classes?: Record<string, ProductClassInfo>;
+  /** 첨부 과업지시서·제안요청서 본문 기준 싱크로율. 본문을 못 읽었으면 null (제목 기준 값 그대로) */
+  similarity?: SimilarityView | null;
+  /** 과업 본문에서 찾은 본업 밖 업무(유물 운송·대여·운영·홍보). 본문을 못 읽었으면 null */
+  scope?: { flags: ScopeFlag[]; sourceFile: string } | null;
   ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
@@ -374,8 +431,11 @@ async function runAiJudgment(
 function qualificationSummary(m: MatchedNotice): string | null {
   const q = m.qualification;
   if (!q) return null;
+  if (q.status === "미충족") {
+    return `업종제한 미보유 (공동수급으로 채울 수 있는지 확인 필요) — 아래 참가 방법 중 하나 필요: ${q.missing.map((g) => g.text ?? g.names.join(" 또는 ")).join(" / 또는 ")}`;
+  }
   if (q.status !== "충족") return q.status === "제한없음" ? "면허제한정보에 업종제한 없음" : "면허제한정보 조회 실패";
-  return `제한그룹 ${q.totalGroups}개 모두 충족 — ${uniqueSatisfied(q.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
+  return `업종제한 충족 —${uniqueSatisfied(q.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
 }
 
 /** 공고문 요건·공고 분류에 나온 세부품명번호마다 분류 경로를 조회한다 (캐시가 있어 대부분 즉시 끝난다). */
@@ -401,7 +461,7 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
   const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
   const docTodo = matches.map((m) => m.notice).filter((n) => {
     const e = enrichment.get(n.noticeNo);
-    return !e || e.qualDoc === undefined || e.classes === undefined || (isBid(n) && e.jointBid === undefined);
+    return !e || e.qualDoc === undefined || e.classes === undefined || e.similarity === undefined || e.scope === undefined || (isBid(n) && e.jointBid === undefined);
   });
   const aiEnabled = isAiConfigured();
   const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
@@ -421,6 +481,11 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
         if (isBid(n) && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
         if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
         if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
+        if (e.similarity === undefined || e.scope === undefined) {
+          const body = await fetchNoticeBody(n).catch(() => null);
+          e.similarity = body ? similarityView(n.title, body.text) : null;
+          e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
+        }
         enrichment.set(n.noticeNo, e);
         enrichState.done += 1;
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
@@ -457,20 +522,26 @@ function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
 }
 
 
-async function fetchNotices(lookbackDays: number): Promise<NoticeCache> {
+async function fetchNotices(period: string): Promise<NoticeCache> {
+  const { lookbackDays, preStandardLookbackDays, incremental, label: periodLabel } = periodOptions(period);
   try {
     const env = loadEnv();
     const appConfig = loadAppConfig();
-    const input = await collectReportInput(env, appConfig, { lookbackDays, withDiagnostics: true });
+    const input = await collectReportInput(env, appConfig, {
+      lookbackDays,
+      preStandardLookbackDays,
+      incremental,
+      withDiagnostics: true,
+    });
     lastDiagnostics = input.diagnostics ?? null;
     startEnrichment([...input.bid.matches, ...input.preStandard.matches], appConfig);
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
-    const items = all.map(decorate).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
-    return { fetchedAt: new Date(), lookbackDays, items, error: null };
+    const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
+    return { fetchedAt: new Date(), period, periodLabel, items, error: null };
   } catch (err) {
-    return { fetchedAt: new Date(), lookbackDays, items: [], error: String(err) };
+    return { fetchedAt: new Date(), period, periodLabel, items: [], error: String(err) };
   }
 }
 
@@ -544,30 +615,54 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // 과거 사업 한 건의 과업 요약 (과거 사업 탭에서 사업명을 눌렀을 때)
+  if (url.pathname === "/api/project") {
+    const project = byId.get(url.searchParams.get("id") ?? "");
+    json(res, { excerpt: project && project.body.length > 0 ? taskExcerpt(project.body, 3000) : null });
+    return;
+  }
+
   if (url.pathname === "/api/search") {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (!q) {
       json(res, { maxScore: 0, top: [] });
       return;
     }
-    const result = index.findSimilar(q, 10);
-    json(res, {
-      maxScore: calibrate(result.maxScore, result.basis),
-      rawScore: result.maxScore,
-      basis: result.basis,
-      top: result.top.map((m) => {
-        const project = byId.get(m.id);
-        return {
-          ...m,
-          // 화면에는 담당자가 읽는 싱크로율(%)만 쓴다 — 원점수는 보이지 않는다
-          shown: calibrate(m.score, result.basis),
-          budgetAmount: project?.budgetAmount ?? null,
-          // 발췌는 앞 600자만. 전체 본문을 브라우저로 넘기면 화면이 무거워지고,
-          // 사람이 "이 사업이 맞나" 확인하는 데는 과업개요만 있으면 된다.
-          excerpt: project && project.body.length > 0 ? project.body.slice(0, 600) : null,
-        };
-      }),
-    });
+    void (async () => {
+      // 공고번호(R26BK01723875, 20260912345-00 등)를 넣으면 이번에 불러온 공고에서 찾아 제목과 첨부 과업지시서로
+      // 비교한다 — 담당자는 공고번호를 들고 오는 일이 많고, 제목 한 줄보다 과업 본문이 훨씬 정확하다.
+      let notice: NormalizedNotice | null = null;
+      let noticeMissing: "notLoaded" | "notFound" | null = null;
+      if (/^[A-Za-z]\d{2}[A-Za-z]{2}\d{6,}(-\d+)?$|^\d{11,}(-\d+)?$/.test(q)) {
+        const needle = q.split("-")[0]!.toLowerCase();
+        notice = lastDiagnostics?.notices.find((n) => n.noticeNo.toLowerCase().startsWith(needle)) ?? null;
+        if (!notice) noticeMissing = lastDiagnostics ? "notFound" : "notLoaded";
+      }
+      if (noticeMissing) return json(res, { maxScore: 0, top: [], notice: null, noticeMissing });
+
+      const body = notice ? await fetchNoticeBody(notice).catch(() => null) : null;
+      const result = index.findSimilar(notice ? notice.title : q, 10, body ? { body: body.text } : {});
+      json(res, {
+        maxScore: calibrate(result.maxScore, result.basis),
+        basis: result.basis,
+        notice: notice
+          ? { ...(noticeSummary(notice, diagnoseNotice(notice, lastDiagnostics!.context)) as object), demandInstitution: demandInstitutionOf(notice) }
+          : null,
+        top: result.top.map((m) => {
+          const project = byId.get(m.id);
+          return {
+            name: m.name,
+            year: m.year,
+            // 화면에는 담당자가 읽는 싱크로율(%)만 쓴다 — 원점수는 보이지 않는다
+            shown: calibrate(m.score, result.basis),
+            budgetAmount: project?.budgetAmount ?? null,
+            // 맨 앞을 자르면 표지·목차만 보여서, 목차를 건너뛴 과업 개요·목적·범위 부분을 뽑는다.
+            // 전체 본문을 넘기지 않는다 — 사람이 "이 사업이 맞나" 확인하는 데는 과업 요약이면 된다.
+            excerpt: project && project.body.length > 0 ? taskExcerpt(project.body) : null,
+          };
+        }),
+      });
+    })().catch((err) => json(res, { error: String(err) }));
     return;
   }
 
@@ -616,7 +711,7 @@ const server = createServer((req, res) => {
       return;
     }
     const { items, byStage } = excludedCandidates(lastDiagnostics);
-    json(res, { lookbackDays: noticeCache?.lookbackDays ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
+    json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
     return;
   }
 
@@ -638,7 +733,7 @@ const server = createServer((req, res) => {
       .filter((n) => (byNo ? n.noticeNo.toLowerCase().startsWith(needle) : norm(n.title).includes(needle)))
       .slice(0, 30);
     json(res, {
-      lookbackDays: noticeCache?.lookbackDays ?? null,
+      periodLabel: noticeCache?.periodLabel ?? null,
       total: lastDiagnostics.notices.length,
       items: found.map((n) => noticeSummary(n, diagnoseNotice(n, lastDiagnostics!.context))),
     });
@@ -765,10 +860,10 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/api/notices") {
-    const days = Number(url.searchParams.get("days") ?? 7);
+    const period = url.searchParams.get("days") ?? "7";
     const refresh = url.searchParams.get("refresh") === "1";
 
-    if (!refresh && noticeCache && noticeCache.lookbackDays === days) {
+    if (!refresh && noticeCache && noticeCache.period === period) {
       json(res, { ...noticeCache, cached: true });
       return;
     }
@@ -776,7 +871,7 @@ const server = createServer((req, res) => {
     // 조회가 도는 중에 새로고침을 또 누르면 같은 약속을 돌려준다 —
     // API를 두 번 때리면 느려질 뿐 아니라 일일 호출 한도를 두 배로 쓴다.
     if (!inFlight) {
-      inFlight = fetchNotices(days).then((result) => {
+      inFlight = fetchNotices(period).then((result) => {
         noticeCache = result;
         inFlight = null;
         return result;
@@ -786,7 +881,7 @@ const server = createServer((req, res) => {
       .then((result) => json(res, { ...result, cached: false }))
       .catch((err: unknown) => {
         inFlight = null;
-        json(res, { fetchedAt: new Date(), lookbackDays: days, items: [], error: String(err), cached: false });
+        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], error: String(err), cached: false });
       });
     return;
   }
