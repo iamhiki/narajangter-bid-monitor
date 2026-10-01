@@ -159,6 +159,22 @@ export function joinTextItems(items: PdfTextItem[]): string {
  */
 export const SCANNED_PAGE_HANGUL_THRESHOLD = 20;
 
+/**
+ * 텍스트 레이어에서 숫자가 통째로 빠진 페이지 — 글꼴의 글자 대응표가 깨진 PDF는 한글만 남고 숫자·괄호가
+ * 사라져 "시행령 제 조 제 항", "소재지 가 전남"처럼 나온다 (국립광주과학관 과업지시서 실측). 법령 조항
+ * "제N조"는 공고문마다 거의 반드시 있어서, 번호 없는 "제 조"가 여럿인데 번호 있는 것은 하나도 없으면
+ * 숫자가 빠진 페이지로 본다. 이런 페이지는 OCR로 다시 읽는다.
+ */
+export function findDigitlessPages(pages: PdfPageText[]): number[] {
+  return pages
+    .filter((p) => {
+      const missing = (p.text.match(/제\s+(?:조|항|호)/g) ?? []).length;
+      const numbered = (p.text.match(/제\s*\d+\s*(?:조|항|호)/g) ?? []).length;
+      return missing >= 2 && numbered === 0;
+    })
+    .map((p) => p.page);
+}
+
 /** 텍스트 레이어가 비어 있어 OCR이 필요한 페이지 번호들 */
 export function findScannedPages(pages: PdfPageText[], threshold = SCANNED_PAGE_HANGUL_THRESHOLD): number[] {
   return pages.filter((p) => p.hangulCount < threshold).map((p) => p.page);

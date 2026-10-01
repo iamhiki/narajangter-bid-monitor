@@ -110,13 +110,14 @@ export function nameNearCode(section: string, index: number, length: number): st
     //   "G2B분류번호 교 육훈련장비", "10자리 조합놀이대", "전문회사로 종합디자인분야", "또는 환경디자인분야"
     // 공백으로 자르면 안 된다 — HWP 추출은 "교 육훈련장비"처럼 단어 중간에 공백을 넣는다.
     // "및"은 띄어 쓴 경우만 연결어로 본다 — "전시부스설치및디자인서비스"처럼 이름 안에도 들어간다
-    const words = d[1]!.split(/번호|분류|등록|의한|따른|자리|또는|\s및\s|(?:로서|으로|로)\s/);
+    // "등록규정에의하여조형물" — HWP/PDF 추출로 띄어쓰기가 빠지면 "의하여" 뒤만 이름이다
+    const words = d[1]!.split(/번호|분류|등록|의한|의하여|의해|따른|까지|자리|또는|\s및\s|(?:로서|으로|로)\s/);
     return clean(words[words.length - 1]);
   }
   // 라벨 없이 이름 바로 뒤 괄호에 번호: "세부품명 영상정보디스플레이 장치(4511189301), 교육용로봇(6010621401)"
   const e = /([가-힣·ㆍ][가-힣·ㆍ\s]{1,30})[\(（]\s*$/.exec(before);
   if (e) {
-    const words = e[1]!.split(/품명|번호|분류|등록|의한|따른|자리|또는|증명서|\s및\s|(?:로서|으로|로)\s/);
+    const words = e[1]!.split(/품명|번호|분류|등록|의한|의하여|의해|따른|까지|자리|또는|증명서|\s및\s|(?:로서|으로|로)\s/);
     return clean(words[words.length - 1]);
   }
   return null;
@@ -131,6 +132,8 @@ export interface QualificationDocResult {
   region: string | null;
   /** 지명경쟁·조합추천처럼 명단에 있는 업체만 참가 가능한 공고 */
   designated: boolean;
+  /** 참가할 수 있는 지명 업체 수 ("추천받은 아래 5개 업체만") — 공고문에 없으면 null */
+  designatedCount: number | null;
   /** 지명 명단에 지일이 있는지 (designated일 때만 의미) */
   jiilDesignated: boolean;
   /** 입찰참가자격 등록 마감 (API bidQlfctRgstDt). 미보유 품목을 추가 등록할 수 있는 기한 */
@@ -145,6 +148,18 @@ export interface QualificationDocResult {
   performance: PerformanceRequirement[];
   /** 실적제한 입찰의 실적심사신청서 제출 마감 (공고문 표기 그대로, 예: "2026/10/06 18:00") */
   performanceReviewDeadline: string | null;
+  /**
+   * 참가자격의 기업 규모 요건. "소기업 또는 소상공인" → 소기업, "중·소기업 또는 소상공인" → 중소기업.
+   * conditional: "추정가격 1억원 미만인 경우에는 …"처럼 조건이 붙은 요건 (이 공고에 해당하는지 공고문 확인 필요)
+   */
+  sizeLimit: SizeLimit | null;
+}
+
+export interface SizeLimit {
+  level: "소기업" | "중소기업";
+  /** 같은 항목에 함께 허용된 유형 ("…소상공인, 벤처기업 또는 창업기업") */
+  alsoAllowed: string[];
+  conditional: boolean;
 }
 
 /**
@@ -192,7 +207,8 @@ export function findQualificationSection(text: string): string | null {
     const head = flat.slice(m.index, m.index + 40);
     const after = head.slice(m[0].length);
     // "참가자격 가.", "참가 자격 (아래…)", "참가자격 ○" 처럼 제목 뒤에 항목이 바로 오면 본문일 가능성이 높다.
-    if (/^\s*[:：]?\s*(\(|가\s*\.|○|①|1\)|◦|-)/.test(after)) score += 3;
+    // "입찰참가자격 2-1. 아래의 자격을" — 절 번호 형식 (국립중앙박물관 공고 OCR 실측)
+    if (/^\s*[:：]?\s*(\(|가\s*\.|○|①|1\)|◦|-|\d+\s*-\s*\d+\s*\.)/.test(after)) score += 3;
     // "입찰참가자격 제한 처분" — 청렴서약·부정당업자 문구, "참가자격은 박탈된다" — 중복응모 벌칙
     if (/^\s*(은|을|이)?\s*(제한|없|미등록|박탈|갖추지)/.test(after)) score -= 5;
     if (!best || score > best.score) best = { at: m.index, score };
@@ -252,6 +268,48 @@ const normalize = (s: string): string => s.replace(/[\s·ㆍ.,()（）]/g, "");
 const PERFORMANCE_END = /실\s*적[^.]{0,120}?(?:있는|보유한|보유하고\s*있는)\s*(?:업체|자)(?!\s*로)/g;
 /** 문장 앞 경계: 항목 기호, 앞 항목의 끝("…소지한 자 ○", "…업체 ", "다.") */
 const CLAUSE_BOUNDARY = /(?:(?<![\d,])\d{1,2}\)\s|[가-하]\s?\.(?!\d)\s|[○◦▪※ㅇ•□-]\s|(?:업체|[한는된]\s?자)\s|다\s?\.)/g;
+/** 지명경쟁·조합추천 — 명단에 있는 업체만 참가할 수 있는 공고 */
+// 입찰참가신청서 양식의 "일반․제한․지명 경쟁 입찰에 참가하고자"는 입찰 종류를 나열한 서식 문구라 뺀다
+// (국립박물관 공고 2건이 이 문구로 지명경쟁 배지를 잘못 받았다 — 2026-10-01 첨부 462개 검증)
+const DESIGNATED_PATTERN = /(?<!제한\s*[․·ㆍ‧,]\s*)지명\s*경쟁\s*입찰|조합\s*추천|추천\s*받은|아래의?\s*\d+\s*개\s*업체/;
+/**
+ * 문장 끝: "…합니다." "…소재한 자." (마침표까지 넣는다) 또는 다음 항목 기호 "2) ", " 나. ", "○ " (기호 앞까지).
+ * 항목 글자에서 "다"·"자"는 뺀다 — "…소재한 자. 2)"의 "자."를 항목 기호로 보면 문장이 "소재한"에서 끊긴다.
+ */
+const CLAUSE_END = /[다자]\s?\.(?!\d)|(?<![\d,])\d{1,2}\)\s|\s[가나라마바사아차카타파하]\s?\.(?!\d)\s|[○◦▪※ㅇ•□]\s/;
+const QUOTE_REACH = 150;
+/** 문장 끝을 못 찾으면 찾은 부분 뒤로 이만큼만 붙인다 — PDF 추출이 섞이면 뒤에 상관없는 글이 길게 붙는다 */
+const QUOTE_TAIL_FALLBACK = 40;
+
+/**
+ * 공고문에서 찾은 부분이 든 문장을 원문 그대로 잘라 낸다 — 화면 팝업에 판단 근거로 보여 사람이 확인하게 한다.
+ * 앞은 가장 가까운 항목 기호·문장 끝 뒤부터, 뒤는 "…다." 또는 다음 항목 기호까지. 그 안에서 못 찾으면
+ * 40자에서 자르고 "…"를 붙인다 (글을 지어내지 않는다 — 원문을 자르기만 한다).
+ */
+export function quoteAround(whole: string, start: number, end: number): string {
+  const winStart = Math.max(0, start - QUOTE_REACH);
+  const boundary = [...whole.slice(winStart, start).matchAll(CLAUSE_BOUNDARY)].pop();
+  const from = boundary ? winStart + boundary.index! + boundary[0].length : winStart;
+  const tail = whole.slice(end, end + QUOTE_REACH);
+  const stop = CLAUSE_END.exec(tail);
+  const to = stop ? end + stop.index + (/^[다자]/.test(stop[0]) ? stop[0].length : 0) : Math.min(whole.length, end + QUOTE_TAIL_FALLBACK);
+  const head = from > 0 && !boundary ? "…" : "";
+  const foot = !stop && to < whole.length ? "…" : "";
+  return `${head}${whole.slice(from, to).trim()}${foot}`;
+}
+
+/**
+ * 지명 업체 수. "…추천받은 아래 5개 업체만 입찰할 수 있습니다"처럼 참가 범위를 말하는 문장에서 읽는다 —
+ * 첫 등장은 공고 제목 줄("물품 제조 지명경쟁(조합추천) 입찰 공고")인 경우가 많아 문장마다 본다 (시흥아트센터·순창 공고 실측)
+ */
+function designatedCountIn(sentences: string[]): number | null {
+  for (const q of sentences) {
+    const m = /(\d{1,2})\s*개\s*업\s*체/.exec(q);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
 /** 평가 배점표·제출 서식의 "실적" 문장 — 참가 자격이 아니라 점수 항목이다 */
 const SCORING = /배\s*점|\d\s*점(?![가-힣])|평\s*가|서\s*식|실\s*적\s*건\s*수/;
 
@@ -300,6 +358,44 @@ export function findPerformanceRequirements(fullText: string): PerformanceRequir
     if (!dup) out.push(req);
   }
   return out;
+}
+
+// "•"는 OCR이 가운뎃점을 읽은 모양 ("중소기업 • 소상공인")
+const SIZE_SEP = String.raw`[·ㆍ․‧.ˑ•∙]`;
+/** 중소기업 쪽 앞말: "중·", "중.", "중기업·" — 없으면 소기업만 */
+const SIZE_MID = String.raw`(중\s*${SIZE_SEP}?\s*|중\s*기\s*업\s*(?:${SIZE_SEP}|,)\s*)?`;
+const SIZE_OTHERS = [
+  { name: "벤처기업", pattern: /벤\s*처\s*기\s*업/ },
+  { name: "창업기업", pattern: /창\s*업\s*기\s*업/ },
+];
+const SIZE_PATTERNS = [
+  // "소기업 또는 소상공인", "중·소기업자 및 「소상공인", "중소기업·소상공인으로서", "소기업, 「소상공인기본법」"
+  new RegExp(String.raw`${SIZE_MID}소\s*기\s*업\s*자?\s*(?:또는|및|,|${SIZE_SEP}|\()\s*[^.]{0,40}?소\s*상\s*공\s*인`),
+  // "중․소기업자로서", "중·소기업(소상공인)자이면서"
+  new RegExp(String.raw`${SIZE_MID}소\s*기\s*업\s*(?:\(\s*소\s*상\s*공\s*인\s*\)\s*)?자\s*(?:로\s*서|이\s*면\s*서)`),
+];
+/** 문장 앞쪽의 조건 — "추정가격이 1억원 미만인 물품 또는 용역을 조달하려는 경우에는" */
+const SIZE_CONDITION = /미\s*만\s*인/;
+
+/**
+ * 참가자격의 기업 규모 요건. 참가자격 부분에서만 찾는다 — 제출서류 목록의 "중소기업확인서 1부"나
+ * 법령 이름 「중소기업제품 구매촉진…」은 요건이 아니다. 확인서 이름은 소기업 공고도 "중소기업·소상공인 확인서"라
+ * 규모 판단에 쓰지 않는다 (2026-10-01 첨부 462개 검증: 서울과기대는 "소기업자 또는 소상공인" + "중소기업·소상공인 확인서").
+ */
+export function findSizeLimit(section: string): SizeLimit | null {
+  const s = section.replace(/\s+/g, " ");
+  // 패턴 순서가 아니라 글에서 먼저 나온 표현으로 판정한다 — "중소기업자로서 … 중기업, 소기업 또는 소상공인 확인서"
+  const m = SIZE_PATTERNS.map((re) => re.exec(s))
+    .filter((x): x is RegExpExecArray => x !== null)
+    .sort((a, b) => a.index - b.index)[0];
+  if (!m) return null;
+  // "소기업자, 소상공인, 벤처기업 또는 창업기업으로서" — 같은 항목에 함께 허용된 유형
+  const clause = s.slice(m.index, m.index + m[0].length + 120);
+  return {
+    level: m[1] ? "중소기업" : "소기업",
+    alsoAllowed: SIZE_OTHERS.filter((o) => o.pattern.test(clause)).map((o) => o.name),
+    conditional: SIZE_CONDITION.test(s.slice(Math.max(0, m.index - 80), m.index)),
+  };
 }
 
 /** "실적심사신청서를 … 2026/10/06 18:00 까지" */
@@ -362,8 +458,18 @@ export function analyzeQualificationText(
   for (const m of section.matchAll(/(?:세부\s*품명\s*번호|물품\s*분류\s*번호|분류번호)(?:\s*10\s*자리)?[^0-9]{0,20}(\d{10})\b/g)) add("품명", m);
   // 라벨과 번호 사이가 PDF 추출로 흩어진 경우: "세부품명 10 [ : , 번호 자리 10 (6010989901)" — 앞 60자 안에
   // "품명"·"분류번호"가 있는 10자리 숫자는 세부품명번호로 본다 (참가자격 부분 안에서만 찾으니 다른 숫자와 섞이지 않는다)
+  // 라벨 없이 다시 나오는 번호도 잡는다 — "조형물(세부품명 번호 6012100201)를 … 등록하고, … 직접생산확인서(조형물(6012100201))를
+  // 소지한 업체"처럼 두 번째는 번호만 쓴다. 놓치면 직접생산 요건이 빠진다 (서울과학기술대 상징 조형물 공고 실측)
   for (const m of section.matchAll(/(?<!\d)(\d{10})(?!\d)/g)) {
-    if (/품\s*명|분\s*류\s*번\s*호/.test(section.slice(Math.max(0, m.index! - 60), m.index!))) add("품명", m);
+    const known = requirements.some((r) => r.kind === "품명" && r.code === m[1]);
+    // 뒤쪽도 본다: "'안내전광판(5512190301)' 제조물품으로 등록한 자" — 앞에 라벨이 없다 (코레일유통 공고 실측)
+    const after = section.slice(m.index! + m[0].length, m.index! + m[0].length + 20);
+    if (
+      known ||
+      /품\s*명|분\s*류\s*번\s*호|직\s*접\s*생\s*산/.test(section.slice(Math.max(0, m.index! - 60), m.index!)) ||
+      /^[)）'’"\]\s]*(?:을|를)?\s*(?:제\s*조|공\s*급)?\s*물\s*품\s*으\s*로/.test(after)
+    )
+      add("품명", m);
   }
   // 코드 없이 이름만 적은 보유 자격 (예: "전문건설업(…금속구조물·창호·온실공사업…)")
   const flat = normalize(section);
@@ -383,7 +489,8 @@ export function analyzeQualificationText(
 
   const whole = fullText.replace(/\s+/g, " ");
   const region = regionsIn(REGION_PATTERN.exec(whole)?.[0]);
-  const designated = /지명\s*경쟁\s*입찰|조합\s*추천|추천\s*받은|아래의?\s*\d+\s*개\s*업체/.test(whole);
+  const designatedHits = [...whole.matchAll(new RegExp(DESIGNATED_PATTERN.source, "g"))];
+  const designated = designatedHits.length > 0;
   const jiilDesignated = designated && /지일/.test(whole);
 
   return {
@@ -391,10 +498,12 @@ export function analyzeQualificationText(
     requirements,
     region,
     designated,
+    designatedCount: designatedCountIn(designatedHits.map((m) => quoteAround(whole, m.index, m.index + m[0].length))),
     jiilDesignated,
     // 실적 요건은 참가자격 뒤쪽 항목(8번째 등)에 있어 발췌 1500자를 넘기도 해서 전체에서 찾는다
     performance: findPerformanceRequirements(fullText),
     performanceReviewDeadline: findPerformanceReviewDeadline(fullText),
+    sizeLimit: findSizeLimit(section),
   };
 }
 
@@ -459,9 +568,11 @@ export async function readQualificationFromNotice(
       requirements: [],
       region: null,
       designated: false,
+      designatedCount: null,
       jiilDesignated: false,
       performance: [],
       performanceReviewDeadline: null,
+      sizeLimit: null,
       ...common,
       sectionFound: false,
     };

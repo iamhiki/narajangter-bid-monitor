@@ -323,7 +323,7 @@ body {
 .badge.pstat.muted { background: var(--line); color: var(--muted); border-color: var(--line); }
 .qtip li.miss { color: var(--urgent); }
 .qtip li.fixable { color: var(--warn); }
-.qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; }
+.qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; white-space: nowrap; }
 .qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
 .qtip h4.sub-h { margin-top: 12px; }
 
@@ -413,7 +413,7 @@ body {
 .qual:focus-visible { box-shadow: 0 0 0 2px var(--brand); }
 .qtip {
   display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 20;
-  width: max-content; max-width: min(340px, calc(100vw - 48px)); white-space: normal;
+  width: max-content; max-width: min(400px, calc(100vw - 48px)); white-space: normal;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius);
   padding: 12px 14px; box-shadow: 0 2px 6px rgba(0, 0, 0, .08);
   font-size: 12.5px; font-weight: 400; letter-spacing: 0; line-height: 1.5; cursor: default;
@@ -427,6 +427,11 @@ body {
 .qtip li { padding: 6px 0; border-top: 1px solid var(--line-soft); color: var(--ink-strong); }
 .qtip li:first-child { border-top: 0; padding-top: 0; }
 .qtip p { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); }
+/* 한글은 어절 단위로만 줄을 바꾸고, 마지막 줄에 한두 어절만 남지 않게 한다 */
+.qtip { word-break: keep-all; overflow-wrap: anywhere; }
+/* 직접 쓴 설명은 의미 단위에서 <br>로 끊는다. 원문에서 온 긴 문장(실적 요건 등)은 줄 길이를 고르게 */
+.qtip p, .qtip li { text-wrap: balance; }
+.qtip li .def { display: block; font-size: 12px; color: var(--muted); }
 
 
 
@@ -513,6 +518,42 @@ tr.nobody td { color: var(--faint); }
   background: var(--urgent-tint); color: var(--urgent); border: 1px solid var(--urgent);
 }
 .group-note { margin: 8px 0 12px; font-size: 12.5px; color: var(--muted); }
+.group { scroll-margin-top: 16px; }
+
+/* ── 오른쪽 바로가기 (본공고 / 사전규격 / 회사 방향과 다른 공고) ── */
+.jump {
+  position: fixed; z-index: 20; top: 140px;
+  left: calc(50% + 590px + 16px);   /* 본문(1180px) 오른쪽 바깥 */
+  display: flex; flex-direction: column; gap: 2px; min-width: 150px;
+  padding: 10px 0; border-left: 1px solid var(--line-strong);
+  /* 맨 위에서는 필요 없으니 숨겨 두고, 아래로 내려가면 나타난다 */
+  opacity: 0; visibility: hidden; transition: opacity .15s, visibility .15s;
+}
+.jump.shown { opacity: 1; visibility: visible; }
+.jump[hidden] { display: none; }
+.jump a[data-jump="top"] { font-size: 12px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.jump a {
+  display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+  padding: 5px 14px; margin-left: -1px; border-left: 2px solid transparent;
+  color: var(--muted); text-decoration: none; font-size: 13px; line-height: 1.4;
+}
+.jump a:hover { color: var(--ink-strong); }
+.jump a.on { color: var(--brand); border-left-color: var(--brand); font-weight: 600; }
+.jump .n { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 400; }
+/* 본문 오른쪽에 자리가 없으면 오른쪽 아래에 작은 상자로 띄운다.
+   카드를 덜 가리게 글자·여백을 줄이고, 목록 끝 카드가 상자 밑에 깔리지 않게 아래 여백을 둔다. */
+@media (max-width: 1520px) {
+  .jump {
+    left: auto; right: 12px; top: auto; bottom: 12px; min-width: 0; gap: 0;
+    background: var(--panel); border: 1px solid var(--line-strong); padding: 3px 0;
+    box-shadow: 0 4px 14px rgba(0,0,0,.12);
+  }
+  .jump a { margin-left: 0; padding: 3px 10px; font-size: 12px; gap: 8px; }
+  .jump a[data-jump="top"] { font-size: 11.5px; padding-bottom: 5px; margin-bottom: 2px; }
+  .jump .n { font-size: 11px; }
+  #tab-live { padding-bottom: 140px; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 
 /* ── 추천등급 ─────────────────────────────────────────────── */
 .grade {
@@ -630,6 +671,7 @@ footer b { color: var(--muted); }
     <p class="sub" id="liveMeta" style="margin:0 0 18px">화면을 열면 아직 마감되지 않은 공고를 자동으로 불러옵니다.</p>
     <p class="sub enrich-meta" id="enrichMeta" role="status"></p>
     <div id="liveResults"></div>
+    <nav class="jump" id="jumpNav" aria-label="목록 바로가기" hidden></nav>
   </section>
 
   <section id="tab-excluded" hidden>
@@ -860,12 +902,9 @@ function resultHead(data) {
 /** 공고번호로 찾은 공고 — 목록에 있는지, 빠졌다면 왜인지 */
 function foundNotice(n) {
   const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
-  const status = n.excludedAt
-    ? `<span class="badge warn">목록에서 빠짐</span>`
-    : `<span class="badge hi">목록에 있음</span>`;
   const inst = n.demandInstitution || n.institution || "기관 미상";
   return `<div class="found-notice">
-    <div class="badges">${status}<span class="badge">${esc(n.sourceType)}</span><span class="badge">${esc(n.businessType)}</span></div>
+    <div class="badges">${excludedBadge(n)}${sourceTypeBadge(n)}${businessTypeBadge(n)}</div>
     <h4>${title}</h4>
     <div class="meta">${esc(inst)}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · ${esc(n.noticeNo)}</div>
     ${n.excludedAt ? `<div class="why">빠진 이유: ${esc(n.excludedDetail || n.excludedAt)}</div>` : ""}
@@ -945,14 +984,16 @@ function matchesLiveQuery(n) {
  * 회사 방향과 다른 공고 — 첨부 과업지시서를 읽어 보니
  *  · 과업에 인력 운영(운영요원·도슨트), 유물 운송, 전시품 대여가 들어 있거나 (특별전·행사형)
  *  · 제목 키워드 없이 분류로만 들어왔는데 전시·제작 내용이 없는 공고.
+ *  · 사업 목적이 휴게·독서 공간 조성인 공고 (2026-10-01 담당자 판단 — 독서왕김득신문학관 '늘 책봄 공간').
  * 자격이 되더라도 본공고 목록에 섞여 있으면 판단에 도움이 안 된다(2026-10-01 요청) — 맨 아래 접힌 칸으로 뺀다.
  * '홍보·도록'만 있는 공고는 도록 인쇄 정도라 그대로 둔다.
  */
-const OFF_KINDS = { 운영: "인력 운영", 운송: "유물 운송", 대여: "전시품 대여" };
+const OFF_KINDS = { 운영: "인력 운영", 운송: "유물 운송", 대여: "전시품 대여", 휴게공간: "휴게·독서 공간 조성" };
 function offDirection(n) {
   const e = enrich.byNo[n.noticeNo];
   if (n.classOnly && e?.core?.status === "없음") return "과업지시서에 전시·제작 내용 없음";
   const kinds = [...new Set((e?.scope?.flags || []).map((f) => f.kind))].filter((k) => OFF_KINDS[k]);
+  if (kinds.includes("휴게공간")) return "휴게·독서 공간 조성";
   return kinds.length ? "과업에 " + kinds.map((k) => OFF_KINDS[k]).join("·") + " 포함" : null;
 }
 let offOpen = false;
@@ -967,7 +1008,7 @@ function applyFilters() {
   const offGroup = offShown.length
     ? '<details class="group off-group" id="offGroup"' + (offOpen ? " open" : "") + ">" +
       '<summary><h2>회사 방향과 다른 공고 <span class="group-n">' + offShown.length + "건</span></h2></summary>" +
-      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없는 공고입니다. 참가 자격이 되더라도 지일이 하는 일과 성격이 달라 따로 모았습니다.</p>' +
+      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없거나, 휴게·독서 공간 조성이 목적인 공고입니다. 참가 자격이 되더라도 지일이 하는 일과 성격이 달라 따로 모았습니다.</p>' +
       offShown.map(renderNotice).join("") +
       "</details>"
     : "";
@@ -1008,10 +1049,12 @@ function applyFilters() {
 
   if (!items.length) {
     $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>' + offGroup;
+    renderJumpNav();
     return;
   }
   if (!shown.length) {
     $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>' + offGroup;
+    renderJumpNav();
     return;
   }
 
@@ -1031,7 +1074,7 @@ function applyFilters() {
       if (list.length === 0) return "";
       const strong = list.filter((n) => n.confidence === "강력추천").length;
       return `
-        <div class="group">
+        <div class="group" id="${key === "본공고" ? "grpMain" : "grpPre"}">
           <div class="group-head">
             <h2>${esc(key)} <span class="group-n">${list.length}건</span></h2>
             ${strong ? `<span class="group-strong">강력추천 ${strong}건</span>` : ""}
@@ -1041,7 +1084,57 @@ function applyFilters() {
         </div>`;
     })
     .join("") + offGroup;
+  renderJumpNav();
 }
+
+/**
+ * 오른쪽 바로가기 — 목록이 길어 아래 칸까지 스크롤이 멀다(2026-10-01 요청).
+ * 지금 목록에 있는 칸만 건수와 함께 보여 주고, 접힌 '회사 방향과 다른 공고'는 누르면 펼치면서 간다.
+ */
+const JUMPS = [
+  { id: "grpMain", label: "본공고" },
+  { id: "grpPre", label: "사전규격" },
+  { id: "offGroup", label: "회사 방향과 다른 공고" },
+];
+function renderJumpNav() {
+  const nav = $("jumpNav");
+  const links = JUMPS.map(({ id, label }) => {
+    const el = document.getElementById(id);
+    if (!el) return "";
+    const n = el.querySelector(".group-n")?.textContent || "";
+    return `<a href="#${id}" data-jump="${id}"><span>${esc(label)}</span><span class="n">${esc(n)}</span></a>`;
+  }).filter(Boolean);
+  // 칸이 하나뿐이면 칸 이동은 의미가 없지만, 목록이 길 수 있으니 '맨 위로'는 남긴다
+  nav.innerHTML = '<a href="#" data-jump="top"><span>↑ 맨 위로</span></a>' + (links.length >= 2 ? links.join("") : "");
+  nav.hidden = links.length === 0;
+  markJump();
+}
+/** 첫 화면보다 아래로 내려갔을 때만 보이고, 지금 보고 있는 칸을 진하게 */
+function markJump() {
+  const nav = $("jumpNav");
+  if (nav.hidden) return;
+  nav.classList.toggle("shown", window.scrollY > window.innerHeight * 0.6);
+  let cur = "";
+  for (const { id } of JUMPS) {
+    const el = document.getElementById(id);
+    if (el && el.getBoundingClientRect().top <= window.innerHeight * 0.35) cur = id;
+  }
+  nav.querySelectorAll("a").forEach((a) => a.classList.toggle("on", a.dataset.jump === cur));
+}
+window.addEventListener("scroll", markJump, { passive: true });
+$("jumpNav").addEventListener("click", (ev) => {
+  const a = ev.target.closest("a[data-jump]");
+  if (!a) return;
+  ev.preventDefault();
+  if (a.dataset.jump === "top") return window.scrollTo({ top: 0 });
+  const el = document.getElementById(a.dataset.jump);
+  if (!el) return;
+  if (el.tagName === "DETAILS" && !el.open) {
+    el.open = true;
+    offOpen = true;
+  }
+  el.scrollIntoView({ block: "start" });
+});
 
 function chip(group, value, label, tone = "") {
   const on = filters[group] === value;
@@ -1116,10 +1209,10 @@ function renderNotice(n) {
       <div class="card-tags">
         <div class="badges">
           ${due}
-          <span class="grade ${n.confidence === "강력추천" ? "urgent" : ""}">${esc(n.confidence)}</span>
-          <span class="badge">${esc(n.businessType)}</span>
-          ${n.bidMethodCategory ? `<span class="badge" title="${esc(n.bidMethod || "")}">${esc(n.bidMethodCategory)}</span>` : ""}
-          ${n.overseas ? `<span class="badge warn">해외의심 ${esc(n.overseas)}</span>` : ""}
+          ${gradeBadge(n)}
+          ${businessTypeBadge(n)}
+          ${n.bidMethodCategory ? bidMethodBadge(n) : ""}
+          ${n.overseas ? overseasBadge(n) : ""}
         </div>
         <div class="badges" data-enrich="${esc(n.noticeNo)}">${enrichBadges(n)}</div>
       </div>
@@ -1176,7 +1269,10 @@ function dueBadge(n) {
   const d = daysLeft(n.deadline);
   if (d === null || d < 0 || d > 3) return "";
   // 임박했다는 사실만 — 정확한 일시는 제목 아래 "입찰 마감" 칸에 있다
-  return d === 0 ? `<span class="due-tag today">오늘 마감</span>` : `<span class="due-tag">마감 D-${d}</span>`;
+  const body = `<p>입찰 마감: <b>${esc(String(n.deadline).slice(0, 16))}</b></p>`;
+  return d === 0
+    ? `<span class="due-tag today qual" tabindex="0">오늘 마감${qtip("마감 임박", body)}</span>`
+    : `<span class="due-tag qual" tabindex="0">마감 D-${d}${qtip("마감 임박", body)}</span>`;
 }
 
 // ── AI 적합성 판단 ─────────────────────────────────────────
@@ -1253,18 +1349,20 @@ function enrichBadges(n) {
   const e = enrich.byNo[n.noticeNo] || {};
   const p = participation[n.noticeNo];
   const out = [];
-  if (p?.status) out.push(`<span class="badge pstat ${PART_TONE[p.status]}">${esc(p.status)}${p.owner ? " · " + esc(p.owner) : ""}</span>`);
+  if (p?.status) out.push(partStatusBadge(p));
   const qdoc = e.qualDoc ? { ...e.qualDoc, classes: e.classes || {}, regionOk: e.regionOk } : e.qualDoc;
   out.push(qualBadge(n, qdoc));
   out.push(productBadge(n, qdoc));
   const doc = e.qualDoc;
   if (doc?.designated) {
-    out.push(`<span class="badge urgentb" title="${esc(doc.sourceFile)}">⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}</span>`);
+    out.push(designatedBadge(doc));
   }
   if (doc?.region) out.push(regionBadge(doc, e.regionOk));
+  if (doc?.sizeLimit?.level === "소기업") out.push(sizeBadge(doc));
   if (doc?.performance?.length) out.push(performanceBadge(doc));
   if (n.classOnly) out.push(coreBadge(e.core));
   if (e.scope?.flags?.length) out.push(scopeBadge(e.scope));
+  if (e.scope?.flags?.some((f) => f.kind === "휴게공간")) out.push(restSpaceBadge(e.scope));
   if (n.mainWork && !n.mainWork.held) out.push(mainWorkBadge(n.mainWork));
   out.push(jointBadge(n, e));
   return out.join("");
@@ -1277,12 +1375,12 @@ function enrichBadges(n) {
 function jointBadge(n, e) {
   if (n.sourceType !== "본공고") return "";
   if (e.jointBid === undefined) return enrich.running ? `<span class="badge faint">공동수급 확인 중…</span>` : "";
-  if (e.jointBid === null) return `<span class="badge faint" title="g2b 상세 조회 실패 — 원문 공고에서 확인하세요">공동수급 확인 안 됨</span>`;
+  if (e.jointBid === null) return tipBadge("faint", "공동수급 확인 안 됨", "공동수급", `<p>나라장터 상세 정보를 불러오지 못했습니다. 공고 원문에서 공동수급 허용 여부를 확인하세요.</p>`);
   const short = e.jointBid.replace(/^\([^)]*\)\s*/, "");
   const tone = /불허/.test(short) ? "warn" : "";
   // "공동수급불허"는 앞에 "공동수급"이 이미 있다 — "공동수급 · 공동수급불허"로 겹치지 않게 "공동수급 불허"로
   const label = /^공동수급\s*/.test(short) ? `공동수급 ${short.replace(/^공동수급\s*/, "")}` : `공동수급 · ${short}`;
-  return `<span class="badge ${tone}" title="${esc(e.jointBid)}">${esc(label)}</span>`;
+  return tipBadge(tone, esc(label), "공동수급", jointTipBody(e.jointBid, short));
 }
 
 /**
@@ -1291,6 +1389,113 @@ function jointBadge(n, e) {
  * 면허제한정보에 없는 공고("업종제한 없음")는 공고문을 읽어 요구 자격을 대신 보여준다.
  */
 const qtip = (title, body) => `<span class="qtip" role="tooltip"><h4>${title}</h4>${body}</span>`;
+/** 커서를 올리면 설명 박스가 뜨는 배지. inner·body는 이미 이스케이프한 HTML */
+const tipBadge = (cls, inner, title, body) => `<span class="badge qual ${cls}" tabindex="0">${inner}${qtip(title, body)}</span>`;
+
+/** 공고문이 거는 기업 규모 — "소기업·소상공인", 함께 허용된 벤처기업 등 */
+function sizeText(size) {
+  return [size.level === "소기업" ? "소기업·소상공인" : "중소기업·소상공인", ...size.alsoAllowed].join("·");
+}
+function sizeLine(doc) {
+  const size = doc?.sizeLimit;
+  if (!size) return "";
+  return `<p>기업 규모: <b>${esc(sizeText(size))}</b>만 참가${size.conditional ? " (조건부 — 공고문 확인)" : ""}</p>`;
+}
+/**
+ * 소기업 한정 공고 — 중기업이면 참가할 수 없어 따로 배지로 띄운다. "중소기업·소상공인" 한정은 흔해서
+ * (첨부 165건 중 140여 건) 배지 없이 자격 팝업에 한 줄만 둔다.
+ */
+function sizeBadge(doc) {
+  const size = doc.sizeLimit;
+  const body =
+    `<p><b>${esc(sizeText(size))}</b>만 참가할 수 있습니다.</p>` +
+    (size.conditional ? `<p class="warnline">조건이 붙은 요건입니다(예: 추정가격 1억원 미만).<br>이 공고에 해당하는지 공고문을 확인하세요.</p>` : "") +
+    docFooter(doc);
+  return tipBadge("warn", `⚠ ${esc(sizeText(size))}만`, "기업 규모 제한", body);
+}
+
+/**
+ * 추천등급. 강력추천 = 공고의 품목(물품분류번호)·업종이 지일 보유 코드와 맞고, 제목·품명에 우리 키워드도 있을 때
+ * (matchEngine.ts). 그 밖은 참고용. 무엇이 맞았는지 matchedBy로 보여 준다.
+ */
+function gradeBadge(n) {
+  const strong = n.confidence === "강력추천";
+  const cls = `grade ${strong ? "urgent" : ""}`;
+  const by = n.matchedBy;
+  if (!by) return `<span class="${cls}">${esc(n.confidence)}</span>`;
+  const names = (xs) => xs.map((x) => `${esc(x.name)}(${esc(x.code)})`).join(", ");
+  const rows = [
+    by.products.length ? `<li>✓ 지일 보유 품목: ${names(by.products)}</li>` : "",
+    by.industries.length ? `<li>✓ 지일 보유 업종: ${names(by.industries)}</li>` : "",
+    by.keywords.length ? `<li>✓ 제목·품명의 키워드: ${by.keywords.map(esc).join(", ")}</li>` : "",
+    by.classes.length ? `<li>✓ 나라장터 조달분류: ${names(by.classes)}</li>` : "",
+    n.overseas ? `<li>✓ 몽골 개최 전시회: ${esc(n.overseas)}</li>` : "",
+  ].join("");
+  // 팝업 폭에서 한 줄씩 끝나게 짧게 끊는다
+  const rule = strong
+    ? `<p>보유 품목·업종과 제목 키워드가 모두 맞았습니다.</p>`
+    : `<p>강력추천: 보유 품목·업종과 제목 키워드가 모두 맞을 때</p><p>이 공고는 위 항목만 맞았습니다.</p>`;
+  return `<span class="${cls} qual" tabindex="0">${esc(n.confidence)}${qtip(`${esc(n.confidence)}인 이유`, `<ul>${rows}</ul>${rule}`)}</span>`;
+}
+
+/** 낙찰 방식 분류(협상·수의·규격가격동시·입찰). 나라장터 원문 값과 뜻을 함께 */
+const BID_METHOD_NOTE = {
+  협상: "제안서를 평가해 협상 순위를 정하고,<br>순위대로 협상해 계약 상대를 정합니다.",
+  수의: "경쟁입찰 없이 특정 업체와 계약합니다.",
+  규격가격동시: "규격 입찰서와 가격 입찰서를 함께 받아,<br>규격에 맞는 업체 가운데 가격으로 정합니다.",
+};
+function bidMethodBadge(n) {
+  const note = BID_METHOD_NOTE[n.bidMethodCategory];
+  const body = (n.bidMethod ? `<p>나라장터 표기: <b>${esc(n.bidMethod)}</b></p>` : "") + (note ? `<p>${note}</p>` : "");
+  return tipBadge("", esc(n.bidMethodCategory), "낙찰 방식", body);
+}
+
+/** 해외(몽골) 개최 전시회 공고 — 몽골이 아닌 해외 개최는 목록에 오지 않는다 (matchEngine.ts) */
+function overseasBadge(n) {
+  return tipBadge(
+    "warn",
+    `해외의심 ${esc(n.overseas)}`,
+    "해외 개최 전시회",
+    `<p>제목에 전시회·박람회·엑스포와 한국관·단체관이 함께 있고,<br>몽골 관련 단어 <b>${esc(n.overseas)}</b>이(가) 들어 있습니다.</p>` +
+      `<p>해외 개최 공고는 목록에서 빼지만 몽골은 남겨 둡니다.<br>개최지를 원문에서 확인하세요.</p>`
+  );
+}
+
+/** 참가여부 — 담당과 마지막으로 바뀐 때 */
+function partStatusBadge(p) {
+  const at = p.updatedAt ? new Date(p.updatedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
+  const body = `<p>담당: <b>${p.owner ? esc(p.owner) : "없음"}</b></p>` + (at ? `<p>마지막 변경: ${esc(at)}</p>` : "") + `<p>카드 아래 참가여부 버튼으로 바꿀 수 있습니다.</p>`;
+  return `<span class="badge pstat qual ${PART_TONE[p.status]}" tabindex="0">${esc(p.status)}${p.owner ? " · " + esc(p.owner) : ""}${qtip("참가여부", body)}</span>`;
+}
+
+/** 지명경쟁·조합추천 — 지명된 업체 수와 공고문에 지일이 있는지 */
+function designatedBadge(doc) {
+  const body =
+    `<p>${doc.designatedCount ? `지명된 <b>${doc.designatedCount}개 업체</b>` : "지명된 업체"}만 참가할 수 있습니다.</p>` +
+    (doc.jiilDesignated
+      ? `<p>공고문에 지일이 있습니다. 명단에 들었는지 확인하세요.</p>`
+      : `<p class="warnline">공고문에 지일이 없습니다.</p>`) +
+    docFooter(doc);
+  return tipBadge("urgentb", `⚠ 지명경쟁${doc.jiilDesignated ? " (지일 포함)" : " — 명단에 지일 없음"}`, "지명경쟁", body);
+}
+
+/**
+ * 공동수급 팝업. 나라장터 항목 이름이 "공동수급협정서 제출 및 구성방식"이라 괄호 안은 협정서 제출 방식,
+ * 뒤는 구성 방식이다. 구성 방식 뜻은 공동계약 운용요령의 정의.
+ */
+// 이름은 한 줄, 뜻은 그 아래 한 줄에 들어가게 짧게 쓴다 — 팝업 폭(340px)에서 문장이 어중간하게 꺾이지 않도록
+const JOINT_NOTE = {
+  공동이행: "출자 비율대로 함께 이행하고 연대 책임을 집니다.",
+  분담이행: "일을 나눠 맡고, 맡은 부분만 책임집니다.",
+  불허: "다른 업체와 함께 참가할 수 없습니다.",
+};
+function jointTipBody(raw, short) {
+  const notes = Object.entries(JOINT_NOTE)
+    .filter(([k]) => short.includes(k))
+    .map(([k, v]) => `<li><b>${k}</b><span class="def">${v}</span></li>`)
+    .join("");
+  return `<p>나라장터 표기: <b>${esc(raw)}</b></p>` + (notes ? `<ul>${notes}</ul>` : "");
+}
 
 /**
  * 공고문 요건 목록으로 배지 하나. 미보유가 전부 "나라장터 등록만 추가하면 되는" 것이면
@@ -1335,7 +1540,8 @@ function productBadge(n, doc) {
       classifiedRows(n, doc, [], false)
     )}</span>`;
   }
-  return `<span class="badge">세부품명번호 제한 없음</span>`;
+  return tipBadge("", "세부품명번호 제한 없음", "세부품명",
+    `<p>${where} 참가자격에 세부품명번호 요건이 없고,<br>나라장터 공고에 분류된 세부품명도 없습니다.</p>${doc.sourceFile ? `<p>출처: ${esc(doc.sourceFile)}</p>` : ""}`);
 }
 
 /** 업종 자격 — 실내건축공사업(4990)·소프트웨어사업자(1469)처럼 업종 등록 요건. 세부품명은 productBadge가 따로 */
@@ -1355,18 +1561,19 @@ function qualBadge(n, doc) {
       )}</span>`;
     }
     const need = doc.requirements.filter((r) => r.kind === "업종");
-    // 제한이 없으면 팝업은 띄우지 않는다 — 지역제한·지명경쟁은 옆 배지에 따로 나온다
-    if (!need.length) return `<span class="badge">자격요건 제한 없음</span>`;
+    // 업종 면허 요건이 없는 공고. 세부품명·실적·지역·지명·소기업 한정은 옆 배지에 따로 나온다
+    if (!need.length) return tipBadge("", "업종 제한 없음", `${head} → ${where}에서 확인`,
+      `<p>${where} 참가자격에 업종 면허 요건이 없습니다.</p>${sizeLine(doc)}${docFooter(doc)}`);
     // 나라장터 업종제한에서 걸린 공고는 이미 "제외된 공고"로 갔다. 여기 미보유는 공고문 글에서 읽은 것이라
     // 잘못 읽었을 수 있어 목록에 남긴다 — 배지 이름과 팝업에 그 차이를 적는다
     const note = need.some((r) => !r.held)
-      ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다. 잘못 읽었을 수 있어 목록에서 빼지 않았습니다. 원문을 확인하세요.</p>`
+      ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다.<br>잘못 읽었을 수 있어 목록에서 빼지 않았습니다. 원문을 확인하세요.</p>`
       : "";
     return reqBadge(
       need,
       { ok: "자격충족", fix: "자격 등록 추가", block: "공고문 자격 미보유" },
       `${head} → ${where}에서 확인`,
-      `<ul>${reqRows(need, doc.classes)}</ul>${note}${docFooter(doc)}`
+      `<ul>${reqRows(need, doc.classes)}</ul>${note}${sizeLine(doc)}${docFooter(doc)}`
     );
   }
   // 나라장터 업종제한은 참가 방법(제한그룹) 여러 개 중 **하나만** 채우면 된다 (licenseLimitApi.ts 주석).
@@ -1441,7 +1648,7 @@ function classifiedRows(n, doc, need, withHeading) {
   if (!rows.length) return "";
   const pre = n.sourceType === "사전규격";
   const head = withHeading ? `<h4 class="sub-h">나라장터 공고 분류 품명 (공고문 요건 아님)</h4>` : "";
-  return `${head}<ul>${rows.join("")}</ul><p>출처: 나라장터 ${pre ? "사전규격" : "입찰공고"} 정보 — 공고 상세 화면의 ${pre ? "품목" : "구매대상물품"}에서 확인할 수 있습니다</p>`;
+  return `${head}<ul>${rows.join("")}</ul><p>출처: 나라장터 ${pre ? "사전규격" : "입찰공고"} 정보<br>공고 상세 화면의 ${pre ? "품목" : "구매대상물품"}에서 확인할 수 있습니다</p>`;
 }
 
 /** 미보유 업종 요건, 한 줄씩 (세부품명은 productBadge에서 따로) */
@@ -1454,9 +1661,14 @@ function regionText(doc, ok) {
   return ok === true ? `지역제한 ${doc.region} · 본점 충족` : `지역제한 ${doc.region}`;
 }
 function regionBadge(doc, ok) {
+  const hq = enrich.headquartersRegion;
+  const body =
+    `<p>본점 소재지가 <b>${esc(doc.region)}</b>인 업체만 참가할 수 있습니다.</p>` +
+    (hq ? `<p>지일 본점 소재지: <b>${esc(hq)}</b> — ${ok === true ? "조건을 충족합니다" : ok === false ? "조건 밖입니다" : "충족 여부를 판단하지 못했습니다"}</p>` : "") +
+    docFooter(doc);
   return ok === true
-    ? `<span class="badge okb" title="${esc(doc.sourceFile)}">✓ ${esc(regionText(doc, ok))}</span>`
-    : `<span class="badge warn" title="${esc(doc.sourceFile)}">⚠ ${esc(regionText(doc, ok))}</span>`;
+    ? tipBadge("okb", `✓ ${esc(regionText(doc, ok))}`, "지역제한", body)
+    : tipBadge("warn", `⚠ ${esc(regionText(doc, ok))}`, "지역제한", body);
 }
 
 /** 1000000000 → "10억원", 110121000 → "1.1억원", 70000000 → "7,000만원" */
@@ -1483,7 +1695,7 @@ function performanceBadge(doc) {
   const body =
     `<ul>${doc.performance.map((p) => `<li>${esc(p.sentence)}</li>`).join("")}</ul>` +
     (doc.performanceReviewDeadline
-      ? `<p class="warnline">실적심사신청서를 ${esc(doc.performanceReviewDeadline)}까지 나라장터로 내야 입찰할 수 있습니다.</p>`
+      ? `<p class="warnline">실적심사신청서를 ${esc(doc.performanceReviewDeadline)}까지 나라장터로 내야<br>입찰할 수 있습니다.</p>`
       : "") +
     `<p>지일의 실적이 위 조건에 맞는지 확인하세요.</p>` +
     docFooter(doc);
@@ -1515,13 +1727,24 @@ function coreBadge(core) {
 }
 
 const SCOPE_LABEL = { 운송: "유물 운송", 대여: "전시품 대여", 운영: "인력 운영", "홍보·도록": "홍보·도록" };
+/** 사업 목적이 휴게·독서 공간 조성 — 과업 일부가 아니라 사업 성격이라 배지를 따로 둔다 */
+function restSpaceBadge(scope) {
+  const f = scope.flags.find((x) => x.kind === "휴게공간");
+  const body =
+    `<p>사업 목적이 방문객 휴식·독서 공간 조성입니다.<br>전시 사업이 아니어서 따로 모았습니다.</p>` +
+    `<ul><li>${esc(f.sentence)}</li></ul>` +
+    `<p>출처: ${esc(scope.sourceFile)}</p>`;
+  return tipBadge("warn", "⚠ 휴게·독서 공간 조성", "사업 성격", body);
+}
+
 function scopeBadge(scope) {
-  const kinds = [...new Set(scope.flags.map((f) => f.kind))];
+  const kinds = [...new Set(scope.flags.map((f) => f.kind))].filter((k) => k !== "휴게공간");
+  if (!kinds.length) return "";
   const body =
     kinds
       .map((k) => `<p><b>${esc(SCOPE_LABEL[k] || k)}</b></p><ul>${scope.flags.filter((f) => f.kind === k).map((f) => `<li>${esc(f.sentence)}</li>`).join("")}</ul>`)
       .join("") +
-    `<p>제작·설치 외 업무입니다. 직접 하기 어렵다면 하청 업체와 비용을 견적에 넣어야 합니다.</p>` +
+    `<p>제작·설치 외 업무입니다.<br>직접 하기 어렵다면 하청 업체와 비용을 견적에 넣어야 합니다.</p>` +
     `<p>출처: ${esc(scope.sourceFile)}</p>`;
   return `<span class="badge qual warn" tabindex="0">⚠ 과업에 ${esc(kinds.map((k) => SCOPE_LABEL[k] || k).join("·"))} 포함${qtip("제작·설치 외 과업", body)}</span>`;
 }
@@ -1533,7 +1756,7 @@ function scopeBadge(scope) {
 function mainWorkBadge(w) {
   const body =
     `<p>이 공사의 주된 공종은 <b>${esc(w.name)}</b>입니다. 지일이 가진 면허가 아닙니다.</p>` +
-    `<p>단독으로는 참가하기 어렵습니다. 공동수급이 허용되면 이 면허를 가진 업체와 함께 참가할 수 있습니다.</p>`;
+    `<p>단독으로는 참가하기 어렵습니다.<br>공동수급이 허용되면 이 면허를 가진 업체와 함께 참가할 수 있습니다.</p>`;
   return `<span class="badge qual warn" tabindex="0">⚠ 주공종 ${esc(w.name)}${qtip("공사 주공종", body)}</span>`;
 }
 
@@ -1668,6 +1891,30 @@ const STAGE_LABEL = {
   참가자격: "참가 자격",
 };
 const stageLabel = (s) => STAGE_LABEL[s] || s;
+/** 빠진 이유 배지 팝업 — 그 조건이 무엇인지 (판정 규칙은 diagnose.ts) */
+const STAGE_NOTE = {
+  마감: "입찰 마감이 지난 공고입니다.",
+  "본공고 게시": "사전규격 공고인데 본공고가 이미 나왔습니다.<br>본공고에서 확인하세요.",
+  제외키워드: "제목에 지일 업무와 무관한 공고를 거르는 단어가 들어 있습니다.",
+  최소예산: "추정가격이 설정한 최소 금액보다 작습니다.",
+  낙찰방법: "수집하지 않는 낙찰방법입니다(현재 설정: 수의계약 제외).",
+  해외개최: "몽골이 아닌 해외 전시회의 한국관·단체관 공고입니다.",
+  "키워드·품목": "제목·품명에 등록 키워드가 없고, 공고 품목도 지일 등록 품목이 아닙니다.",
+};
+function excludedBadge(n) {
+  if (!n.excludedAt) return tipBadge("hi", "목록에 있음", "목록에 있음", `<p>모든 조건을 통과해 공고 목록에 올라 있습니다.</p>`);
+  const body = `<p>${STAGE_NOTE[n.excludedAt] || ""}</p>` + (n.excludedDetail ? `<p>판정: ${esc(n.excludedDetail)}</p>` : "");
+  return tipBadge("warn", `빠진 이유 · ${esc(stageLabel(n.excludedAt))}`, "목록에서 빠진 이유", body);
+}
+/** 공고 구분 — 본공고 / 사전규격 */
+function sourceTypeBadge(n) {
+  const note =
+    n.sourceType === "사전규격"
+      ? "본공고 전에 규격을 미리 공개해 의견을 받는 단계입니다.<br>입찰은 본공고가 나온 뒤에 합니다."
+      : "입찰에 참가할 수 있는 공고입니다.";
+  return tipBadge("", esc(n.sourceType), "공고 구분", `<p>${note}</p>`);
+}
+const businessTypeBadge = (n) => tipBadge("", esc(n.businessType), "업무 구분", `<p>나라장터 공고의 업무 구분(물품·용역·공사)입니다.</p>`);
 /** 조건별 확인 목록에 쓰는 이름 (통과·탈락 모두에 어울리게) */
 const STEP_NAME = {
   마감: "마감",
@@ -1727,9 +1974,9 @@ function renderDiagnosed(n, openSteps = false) {
   const title = n.detailUrl ? `<a href="${esc(n.detailUrl)}" target="_blank" rel="noopener">${esc(n.title)}</a>` : esc(n.title);
   return `<div class="notice ${n.excludedAt ? "edge" : "strong"}">
     <div class="badges">
-      ${n.excludedAt ? `<span class="badge warn">빠진 이유 · ${esc(stageLabel(n.excludedAt))}</span>` : `<span class="badge hi">목록에 있음</span>`}
-      <span class="badge">${esc(n.sourceType)}</span>
-      <span class="badge">${esc(n.businessType)}</span>
+      ${excludedBadge(n)}
+      ${sourceTypeBadge(n)}
+      ${businessTypeBadge(n)}
     </div>
     <h3>${title}</h3>
     <div class="meta">${esc(n.institution || "기관 미상")}${n.budgetAmount ? " · " + won(n.budgetAmount) : ""}${n.deadline ? " · 마감 " + esc(n.deadline) : ""} · <code>${esc(n.noticeNo)}</code></div>

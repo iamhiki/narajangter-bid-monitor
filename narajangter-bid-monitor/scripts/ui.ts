@@ -320,6 +320,13 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     bidMethodCategory: classifyBidMethod(n.bidMethod),
     confidence: m.confidence,
     reason: matchReason(m),
+    // 등급 배지 팝업용 — 무엇이 맞아서 목록에 올랐는지 (강력추천 = 품목·업종 코드와 제목 키워드가 둘 다 맞음)
+    matchedBy: {
+      products: m.matchedProductCodes.map((c) => ({ code: c.code, name: c.name })),
+      industries: m.matchedIndustryCodes.map((c) => ({ code: c.code, name: c.name })),
+      keywords: m.matchedKeywords,
+      classes: (m.matchedServiceClasses ?? []).map((c) => ({ code: c.code, name: c.name })),
+    },
     overseas: m.overseasVenueFlag?.matchedMongoliaKeyword ?? null,
     qualification: m.qualification ?? null,
     mainWork: mainWorkOf(n, appConfig.heldIndustries),

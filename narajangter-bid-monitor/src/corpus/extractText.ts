@@ -3,7 +3,7 @@ import { extname } from "node:path";
 import { extractHwpText } from "./hwpText.js";
 import { extractHwpxText, stripImageNoise } from "./hwpxText.js";
 import { isOcrAvailable, ocrPdf, type OcrOptions } from "./ocr.js";
-import { extractPdfPages, findScannedPages } from "./pdfText.js";
+import { extractPdfPages, findDigitlessPages, findScannedPages } from "./pdfText.js";
 import type { ExtractResult } from "./types.js";
 
 /** PDF를 만났을 때 OCR을 어디까지 쓸 것인가. */
@@ -71,7 +71,8 @@ async function extractPdfDocument(filePath: string, options: ExtractOptions): Pr
   const layer = await extractPdfPages(filePath, { maxPages: options.maxPages ?? 0 });
   if (layer.pageCount === 0) return { text: "", reason: layer.reason };
 
-  const scanned = findScannedPages(layer.pages);
+  // 스캔 페이지 + 글꼴이 깨져 숫자가 빠진 페이지 — 둘 다 텍스트 레이어를 믿을 수 없어 OCR로 읽는다
+  const scanned = [...new Set([...findScannedPages(layer.pages), ...findDigitlessPages(layer.pages)])].sort((a, b) => a - b);
 
   if (mode === "off" || scanned.length === 0 || !isOcrAvailable()) {
     const note =

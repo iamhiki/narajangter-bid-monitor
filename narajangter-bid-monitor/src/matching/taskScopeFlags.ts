@@ -9,7 +9,7 @@
  * 견적에 넣어야 한다는 신호로 화면에 띄운다. 공고를 목록에서 빼지 않는다.
  */
 
-export type ScopeFlagKind = "운송" | "대여" | "운영" | "홍보·도록";
+export type ScopeFlagKind = "운송" | "대여" | "운영" | "홍보·도록" | "휴게공간";
 
 export interface ScopeFlag {
   kind: ScopeFlagKind;
@@ -73,6 +73,29 @@ function sentenceAround(flat: string, index: number, length: number): string {
   return flat.slice(start, stop).replace(/^[\s•○◦▪■□◆◇※-\-]+/, "").trim();
 }
 
+const PURPOSE = /사\s*업\s*목\s*적|추\s*진\s*목\s*적|과\s*업\s*목\s*적|용\s*역\s*목\s*적/;
+const PURPOSE_SPAN = 300;
+const REST_WORDS = /휴\s*식|휴\s*게|독\s*서|쉼\s*터|쉼\s*(?:공간|의\s*공간)|라운지|북\s*카페/;
+const EXHIBIT_WORDS = /전\s*시|체\s*험|콘\s*텐\s*츠|실\s*감|미\s*디\s*어|조형물|놀이/;
+
+/**
+ * 사업 목적이 휴게·독서 공간 조성인 공고 — 전시가 아니라 방문객 쉼터·라운지를 꾸미는 일이다.
+ * 사업 목적 부분(앞 300자)에 휴식·휴게·독서·쉼터·라운지가 있고 전시·체험·콘텐츠·조형물·놀이가 **없을 때만** 본다.
+ *
+ * 2026-10-01 실측: 독서왕김득신문학관 '늘 책봄 공간' 조성("방문객의 학습, 독서, 휴식 등을 위한 공간 제공")은
+ * 제목 키워드 '문학관'으로 들어왔지만 담당자가 지일 업무가 아니라고 판단했다. 첨부 476개 중 이 규칙에 걸린 것은
+ * 그 1건이고, 휴식·휴게가 목적에 들어간 지일 과거 실적 7건(성성호수공원 조형물, 삼탄역 테마공원, 토이로봇관 등)은
+ * 모두 조형물·놀이·전시·콘텐츠가 함께 있어 걸리지 않았다.
+ */
+function detectRestSpace(flat: string): ScopeFlag | null {
+  const m = PURPOSE.exec(flat);
+  if (!m) return null;
+  const purpose = flat.slice(m.index, m.index + PURPOSE_SPAN);
+  const rest = REST_WORDS.exec(purpose);
+  if (!rest || EXHIBIT_WORDS.test(purpose)) return null;
+  return { kind: "휴게공간", sentence: sentenceAround(flat, m.index + rest.index, rest[0].length) };
+}
+
 export function detectScopeFlags(text: string, perKind = 3): ScopeFlag[] {
   const flat = text.replace(/\s+/g, " ");
   const out: ScopeFlag[] = [];
@@ -90,5 +113,7 @@ export function detectScopeFlags(text: string, perKind = 3): ScopeFlag[] {
       out.push({ kind, sentence });
     }
   }
+  const rest = detectRestSpace(flat);
+  if (rest) out.push(rest);
   return out;
 }
