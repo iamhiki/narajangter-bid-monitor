@@ -21,6 +21,7 @@ import {
   type NotifiedState,
 } from "./state/notifiedStore.js";
 import { isPostedWithin } from "./state/recency.js";
+import { alreadySent, loadSentReports, markSent, reportPeriodKey } from "./state/sentReports.js";
 import { toErrorMessage } from "./errors.js";
 import { logger } from "./logger.js";
 import { redactSecrets } from "./redact.js";
@@ -43,6 +44,17 @@ async function run(): Promise<number> {
     const now = new Date();
     if (env.runMode === "hourly") state = loadNotifiedState(env.notifiedStatePath);
 
+    // 매일·주간 보고는 cron-job.org와 GitHub 예약 실행 두 곳이 깨운다. 먼저 보낸 쪽이 있으면 조회도 하지 않고 끝낸다.
+    const scheduled = env.runMode === "hourly" ? undefined : env.runMode;
+    const sent = scheduled ? loadSentReports(env.sentReportsPath) : undefined;
+    if (scheduled && sent && !env.dryRun && !env.forceSend && alreadySent(sent, scheduled, now)) {
+      logger.info("이번 기간 보고는 이미 보냈습니다 — 건너뜁니다 (다시 받으려면 FORCE_SEND=true)", {
+        보고: scheduled,
+        기간: reportPeriodKey(scheduled, now),
+      });
+      return 0;
+    }
+
     // ①수집~③필터링은 텔레그램 수동 조회(scripts/telegramBot.ts)와 공유한다 (src/pipeline.ts).
     const reportInput = await collectReportInput(env, appConfig, {
       now,
@@ -52,8 +64,13 @@ async function run(): Promise<number> {
     });
 
     if (env.runMode === "hourly") return await runHourly(env, reportInput, now, state!);
-    if (env.runMode === "daily") return await runDaily(env, reportInput, now);
-    return await runWeekly(env, appConfig.recipients, reportInput, now);
+    const exitCode =
+      env.runMode === "daily"
+        ? await runDaily(env, reportInput, now)
+        : await runWeekly(env, appConfig.recipients, reportInput, now);
+    // 여기까지 왔으면 보고는 나갔다 (발송 실패는 위에서 예외로 빠진다). 일부 조회 실패(2)여도 보낸 것으로 친다.
+    if (scheduled && sent && !env.dryRun) markSent(env.sentReportsPath, sent, scheduled, now);
+    return exitCode;
   } catch (err) {
     return await handleFailure(err, env, state);
   }
