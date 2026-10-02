@@ -161,26 +161,55 @@ export function normalizeWhitespace(text: string): string {
 }
 
 /**
+ * 한글·워드 문서의 글머리표는 Wingdings·Symbol 같은 기호 글꼴로 찍혀 있어, 글자만 뽑으면
+ * 사용자 정의 영역 문자(U+F06D 등)로 남는다. 화면 글꼴에는 이 글자가 없어 "䷀" 같은 모양으로 보인다
+ * (2026-10-02 국립생물자원관 어린이체험실 과업지시서 실측: 사업명 앞에 U+F06D).
+ * 본문 판정(taskScopeFlags·taskExcerpt)은 이 문자를 항목 경계로 쓰므로 원본은 그대로 두고,
+ * 사람에게 보여 줄 때만 바꾼다: U+F0A0(기호 글꼴의 공백) → 공백, 나머지 기호 글꼴 문자 → ▪, 그 밖은 지운다.
+ */
+export function readableSymbols(text: string): string {
+  return text
+    .replace(//g, " ")
+    .replace(/[-]/g, "▪")
+    .replace(/[-]/g, "");
+}
+
+/**
  * 과업지시서 첫머리의 "사 업 명 / 과 업 명" 항목에서 정식 사업명을 뽑는다.
  *
  * 한글 문서는 항목명을 글자 사이 공백으로 늘려 쓰는 관행이 있어("사 업 명") 공백을
  * 허용해야 하고, 값이 콜론 뒤 같은 줄에 오기도 하고 다음 줄에 오기도 한다. 둘 다 받는다.
+ * 첫 "사업명" 항목에서 이름을 못 얻으면(값 칸이 비어 옆 항목을 집은 경우 등) 다음 "사업명" 항목을 본다.
  */
 export function extractOfficialName(body: string): string | null {
-  const label = /(?:^|\n)\s*(?:[가-힣]\.|\d+\.)?\s*[사과]\s*업\s*(?:명|의\s*명칭)\s*(?::|：)?\s*(.*)/;
-  const match = label.exec(body);
-  if (!match) return null;
+  // "사 업 명 칭 : …"을 "명"에서 끊으면 이름이 "칭 : …"이 된다 (IBK디지털체험관 실측) — "명칭"을 먼저 본다
+  const label = /(?:^|\n)\s*(?:[가-힣]\.|\d+\.)?\s*[사과]\s*업\s*(?:명\s*칭|명|의\s*명칭)\s*(?::|：)?\s*(.*)/g;
+  for (const match of body.matchAll(label)) {
+    const name = officialNameAt(body, match);
+    if (name) return name;
+  }
+  return null;
+}
 
+function officialNameAt(body: string, match: RegExpMatchArray): string | null {
   let value = (match[1] ?? "").trim();
   // 같은 줄이 비어 있으면 (예: "1. 과 업 명" 다음 줄에 값) 다음 비어 있지 않은 줄을 본다.
   if (value.length === 0) {
-    const rest = body.slice(match.index + match[0].length);
+    const rest = body.slice(match.index! + match[0].length);
     const nextLine = rest.split("\n").find((line) => line.trim().length > 0);
     value = (nextLine ?? "").trim();
   }
 
   value = value
+    // 사업명 앞의 기호 글꼴 글머리표·공백 (readableSymbols 주석) — 이름에는 기호가 필요 없어 모두 공백으로
+    .replace(/[-]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
     .replace(/^[:：\-–—]\s*/, "")
+    // 글머리표: "ㅇ 국립무형유산원 …", "◦단양IC …", "○ …" (과거 실적 실측)
+    .replace(/^(?:[ㅇoO]\s+|[○◦●•▪■□◎❍※·]\s*)/, "")
+    // 따옴표: "‘대구 역사의 길 ’조성 …" — 이름에 따옴표는 필요 없다
+    .replace(/\s*[‘’“”]\s*/g, (q) => (/\s/.test(q) ? " " : ""))
     .replace(/[「」『』【】《》]/g, "")
     .replace(/\s*\(.*?\)\s*$/, "")
     .trim();
@@ -191,6 +220,10 @@ export function extractOfficialName(body: string): string | null {
   // ("1. 과 업 명" 바로 아래가 "2. 과업 기간"). 사업명 자리에 "과업 기간"이 들어가면
   // 그 사업은 엉뚱한 이름으로 코퍼스에 남으므로 차라리 폴더명을 쓰는 게 낫다.
   if (LABEL_LIKE.test(value)) return null;
+  // 번호 붙은 다른 항목("2. 용어의 정리", "2. 계약금액：")이나 짧은 항목 이름("총 사업금액", "수행기간")을
+  // 집은 경우 (과거 실적 실측 — 사업명 칸이 비어 있던 문서)
+  if (/^\d+\.\s/.test(value) || /[:：]$/.test(value)) return null;
+  if (value.replace(/\s/g, "").length <= 10 && LABEL_TAIL.test(value)) return null;
   // 사업명 자리에 문장이 들어온 경우를 막는다. 과업지시서에는
   // `… 사업명은 "○○ 용역" 이라 한다.` 같은 정의 문장이 흔한데, 그대로 집으면
   // 코퍼스에 `"은 본리미리내어린이공원 … 용역 이라 한다."`가 사업명으로 남는다(실측).
@@ -209,6 +242,9 @@ const PROJECT_WORDS = /설계|제작|설치|조성|구축|리모델링|개선|�
 
 /** 조사로 시작하거나 서술어로 끝나면 사업명이 아니라 문장을 집은 것이다. */
 const SENTENCE_LIKE = /^(?:은|는|이|가|을|를|의|에|로|와|과)\s|(?:이라|라고)?\s*한다\.?$|다\.$/;
+
+/** 짧은 항목 이름의 끝말 — "총 사업금액", "입찰 기초액", "수행기간", "용어의 정리" */
+const LABEL_TAIL = /(?:기\s*간|액|사\s*업\s*비|예\s*산|장\s*소|위\s*치|목\s*적|개\s*요|범\s*위|정\s*리|정\s*의)\s*$/;
 
 /** 과업지시서 항목 라벨 형태 — 사업명이 아니라 옆 항목을 집었다는 신호. */
 const LABEL_LIKE =

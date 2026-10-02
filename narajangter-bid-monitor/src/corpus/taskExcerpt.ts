@@ -1,3 +1,4 @@
+import { readableSymbols } from "./extractText.js";
 /**
  * 과업지시서·제안요청서 본문에서 사람이 읽을 "과업 요약" 부분을 뽑는다.
  *
@@ -83,7 +84,8 @@ export function taskExcerpt(body: string, maxLength = 1800): string {
   const start = firstBodyHeading(text);
   const from = start >= 0 ? start : 0;
   const slice = tidy(text.slice(from, from + maxLength * 2));
-  if (slice.length <= maxLength) return slice;
+  // 화면에 보여 주는 글이라 기호 글꼴 글머리표를 ▪로 (판정에 쓰는 본문은 그대로)
+  if (slice.length <= maxLength) return readableSymbols(slice);
   const cut = slice.lastIndexOf("\n", maxLength);
-  return (cut > maxLength * 0.6 ? slice.slice(0, cut) : slice.slice(0, maxLength)) + "\n…";
+  return readableSymbols((cut > maxLength * 0.6 ? slice.slice(0, cut) : slice.slice(0, maxLength)) + "\n…");
 }

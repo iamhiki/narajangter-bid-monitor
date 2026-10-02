@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractBudgetAmount, extractOfficialName, normalizeWhitespace } from "../src/corpus/extractText.js";
+import { extractBudgetAmount, extractOfficialName, normalizeWhitespace, readableSymbols } from "../src/corpus/extractText.js";
 import { xmlToText, stripImageNoise } from "../src/corpus/hwpxText.js";
 import { joinTextItems } from "../src/corpus/pdfText.js";
 import { cleanFolderName } from "../src/corpus/scanArchive.js";
@@ -113,5 +113,41 @@ describe("stripImageNoise", () => {
 describe("normalizeWhitespace", () => {
   it("줄바꿈은 살리고 가로 공백만 줄인다", () => {
     expect(normalizeWhitespace("가 업  명\n\n\n\n다음")).toBe("가 업 명\n\n다음");
+  });
+});
+
+describe("extractOfficialName — 과거 실적 이름이 깨졌던 경우 (2026-10-02)", () => {
+  const bullet = String.fromCodePoint(0xf06d); // Wingdings 글머리표가 글자로 남은 것
+  const symbolSpace = String.fromCodePoint(0xf0a0);
+
+  it("기호 글꼴 글머리표·공백을 이름에서 뺀다", () => {
+    expect(extractOfficialName(`1. 과 업 명\n${bullet} 국립생물자원관 어린이체험실 전시 설계 및 제작․설치\n2. 과업기간`)).toBe(
+      "국립생물자원관 어린이체험실 전시 설계 및 제작․설치"
+    );
+    expect(extractOfficialName(`사업명 : 전투기념관 영상컨텐츠 제작${symbolSpace}설치`)).toBe("전투기념관 영상컨텐츠 제작 설치");
+  });
+
+  it("앞의 글머리표와 따옴표를 뗀다", () => {
+    expect(extractOfficialName("가. 사업명 : ㅇ 국립무형유산원 제1상설전시실 개선")).toBe("국립무형유산원 제1상설전시실 개선");
+    expect(extractOfficialName("사업명 : ◦단양IC 관문정비를 위한 경관시설물 조성 사업")).toBe("단양IC 관문정비를 위한 경관시설물 조성 사업");
+    expect(extractOfficialName("사업명 : ‘대구 역사의 길 ’조성 관련 상징조형물 제작")).toBe("대구 역사의 길 조성 관련 상징조형물 제작");
+  });
+
+  it("옆 항목 이름을 집지 않는다 — 다음 '사업명' 항목을 보거나 포기한다", () => {
+    expect(extractOfficialName("1. 사업명\n총 사업금액\n…\n사업명 : 노원 수학문화관 전시물 제작")).toBe("노원 수학문화관 전시물 제작");
+    expect(extractOfficialName("1. 사업명\n2. 용어의 정리\n")).toBeNull();
+    expect(extractOfficialName("1. 사업명\n2. 계약금액：\n")).toBeNull();
+    expect(extractOfficialName("사업명\n수행기간\n")).toBeNull();
+    expect(extractOfficialName("사업명\n입찰 기초액\n")).toBeNull();
+  });
+
+  it("'사 업 명 칭'을 '명'에서 끊지 않는다", () => {
+    expect(extractOfficialName("1. 사 업 명 칭 : IBK디지털체험관 전시 설계")).toBe("IBK디지털체험관 전시 설계");
+  });
+});
+
+describe("readableSymbols", () => {
+  it("기호 글꼴 문자를 화면용으로 바꾼다 (공백 → 공백, 글머리표 → ▪)", () => {
+    expect(readableSymbols(`${String.fromCodePoint(0xf06d)} 과업명${String.fromCodePoint(0xf0a0)}끝`)).toBe("▪ 과업명 끝");
   });
 });
