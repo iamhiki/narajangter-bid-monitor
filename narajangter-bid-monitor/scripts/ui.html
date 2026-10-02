@@ -688,6 +688,13 @@ footer b { color: var(--muted); }
       <button type="button" id="load">불러오기</button>
       <button type="button" id="refresh" class="ghost" title="방금 올라온 공고까지 나라장터에서 다시 받아옵니다">최신으로 다시 조회</button>
       <input id="liveQ" type="search" placeholder="목록에서 찾기 — 공고명·기관·공고번호" autocomplete="off" aria-label="목록에서 찾기">
+      <select id="liveSort" aria-label="본공고·사전규격 정렬" title="본공고·사전규격 목록을 어떤 순서로 볼지">
+        <option value="deadline">마감 임박 순</option>
+        <option value="score">싱크로율 높은 순</option>
+        <option value="grade">강력추천 먼저</option>
+        <option value="amount">금액 큰 순</option>
+        <option value="posted">최근 게시 순</option>
+      </select>
     </div>
     <div class="filters" id="filters"></div>
     <p class="sub" id="liveMeta" style="margin:0 0 18px">화면을 열면 아직 마감되지 않은 공고를 자동으로 불러옵니다.</p>
@@ -1212,10 +1219,8 @@ function applyFilters() {
 
   $("liveResults").innerHTML = groups
     .map(({ key, note }) => {
-      // 마감이 급한 순서. 마감을 모르는 공고는 맨 뒤, 마감이 같으면 싱크로율 높은 순.
-      const list = shown
-        .filter((n) => n.sourceType === key)
-        .sort((a, b) => deadlineAt(a.deadline) - deadlineAt(b.deadline) || b.maxScore - a.maxScore);
+      // 담당자가 고른 정렬 (LIVE_SORTS) — 기본은 마감 임박 순
+      const list = shown.filter((n) => n.sourceType === key).sort(LIVE_SORTS[$("liveSort").value] || LIVE_SORTS.deadline);
       if (list.length === 0) return "";
       const strong = list.filter((n) => n.confidence === "강력추천").length;
       return `
@@ -1278,6 +1283,31 @@ $("jumpNav").addEventListener("click", (ev) => {
   if (el.tagName === "DETAILS" && !el.open) el.open = true; // toggle 이벤트가 펼침 상태를 기억한다
   el.scrollIntoView({ block: "start" });
 });
+
+/**
+ * 본공고·사전규격 목록 정렬 — 담당자가 고른다(2026-10-02 요청). 기본은 마감 임박 순.
+ * 값을 모르는 공고(마감·금액·게시일 없음)는 맨 뒤, 같으면 마감 → 싱크로율 순으로 잇는다.
+ * 고른 기준은 이 브라우저에 기억한다(다음에 열어도 유지).
+ */
+const byDeadline = (a, b) => deadlineAt(a.deadline) - deadlineAt(b.deadline);
+const byScore = (a, b) => b.maxScore - a.maxScore;
+const postedTime = (n) => (n.postedAt ? -deadlineAt(n.postedAt) : Infinity);
+const LIVE_SORTS = {
+  deadline: (a, b) => byDeadline(a, b) || byScore(a, b),
+  score: (a, b) => byScore(a, b) || byDeadline(a, b),
+  grade: (a, b) => (b.confidence === "강력추천") - (a.confidence === "강력추천") || byDeadline(a, b) || byScore(a, b),
+  amount: (a, b) => (b.budgetAmount ?? -1) - (a.budgetAmount ?? -1) || byDeadline(a, b),
+  posted: (a, b) => postedTime(a) - postedTime(b) || byDeadline(a, b),
+};
+const LIVE_SORT_KEY = "live-sort";
+try {
+  const saved = localStorage.getItem(LIVE_SORT_KEY);
+  if (saved && LIVE_SORTS[saved]) $("liveSort").value = saved;
+} catch { /* 기억 못 해도 기본 정렬로 보인다 */ }
+$("liveSort").onchange = () => {
+  try { localStorage.setItem(LIVE_SORT_KEY, $("liveSort").value); } catch { /* 저장 못 해도 정렬은 된다 */ }
+  applyFilters();
+};
 
 function chip(group, value, label, tone = "") {
   const on = filters[group] === value;

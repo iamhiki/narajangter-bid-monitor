@@ -318,6 +318,7 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     sourceType: n.sourceType,
     deadline: n.deadline,
     budgetAmount: n.budgetAmount,
+    postedAt: n.postedAt,
     detailUrl: n.detailUrl,
     bidMethod: n.bidMethod,
     bidMethodCategory: classifyBidMethod(n.bidMethod),
