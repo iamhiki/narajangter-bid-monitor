@@ -215,13 +215,16 @@ function renderSourceSection(title: string, note: string, matches: MatchedNotice
   return blocks;
 }
 
-function renderSummaryBlock(input: ReportInput, tally: ReportTally): string {
+function renderSummaryBlock(input: ReportInput, tally: ReportTally, weekly = false): string {
   const period = `${formatDateForSubject(input.window.begin)} ~ ${formatDateForSubject(input.window.end)}`;
   const lines = [
-    `📋 <b>나라장터 입찰 모니터링 보고서</b>`,
+    weekly ? `📋 <b>나라장터 주간 공고 보고</b>` : `📋 <b>나라장터 입찰 모니터링 보고서</b>`,
     escapeTelegramHtml(`${formatDateForSubject(input.generatedAt)} 기준 · 조회기간 ${period}`),
-    "",
   ];
+  if (weekly) {
+    lines.push(escapeTelegramHtml("입찰(적격심사·최저가 등)은 매일 아침 마감 임박 보고로 따로 보냅니다."));
+  }
+  lines.push("");
 
   if (tally.total === 0) {
     lines.push("이번 조회 기간에 조건에 맞는 공고가 <b>없습니다.</b>");
@@ -280,13 +283,13 @@ function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTot
   return lines.join("\n");
 }
 
-export type TelegramMessageKind = "report" | "new";
+export type TelegramMessageKind = "report" | "new" | "weekly";
 
 /**
  * 리포트를 텔레그램 HTML 메시지 배열로 만든다 (4096자 상한 때문에 여러 건이 될 수 있다).
  *
  * kind "new"는 매시간 확인에서 새로 나온 공고만 보낼 때 쓴다 — 머리말과 끝맺음만 다르고
- * 공고 목록 모양은 같다.
+ * 공고 목록 모양은 같다. kind "weekly"는 주간 보고 머리말이다 (입찰은 매일 보고가 맡아 빠진 목록).
  */
 export function buildTelegramMessages(
   input: ReportInput,
@@ -294,7 +297,9 @@ export function buildTelegramMessages(
 ): string[] {
   const kind = options.kind ?? "report";
   const tally = tallyReport(input);
-  const blocks: string[] = [kind === "new" ? renderNewNoticesBlock(input, tally, options.windowTotal) : renderSummaryBlock(input, tally)];
+  const blocks: string[] = [
+    kind === "new" ? renderNewNoticesBlock(input, tally, options.windowTotal) : renderSummaryBlock(input, tally, kind === "weekly"),
+  ];
 
   // 본공고와 사전규격은 할 일이 다르다 — 본공고는 지금 입찰, 사전규격은 아직 규격 공개 단계(의견 등록만).
   // 섞어 두면 사전규격을 입찰로 착각하므로 구역을 나누고, 구역 안에서 강력추천 → 참고용 순으로 둔다.
@@ -308,7 +313,7 @@ export function buildTelegramMessages(
   );
 
   blocks.push(
-    kind === "new"
+    kind !== "report"
       ? "<i>※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>"
       : tally.total > 0
         ? "<i>첨부된 HTML 파일에서 전체 내용을 확인하실 수 있습니다.\n※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>"
