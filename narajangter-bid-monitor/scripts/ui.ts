@@ -21,6 +21,7 @@ import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
 import { uniqueSatisfied } from "../src/matching/qualificationFilter.js";
+import { parseKstDateTime } from "../src/matching/deadline.js";
 import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
 import type { CollectionDiagnostics } from "../src/pipeline.js";
 import type { NormalizedNotice } from "../src/api/types.js";
@@ -162,6 +163,8 @@ interface NoticeCache {
   /** 화면에 찍을 기간 이름 ("최근 7일", "마감 전 공고 전체") */
   periodLabel: string;
   items: unknown[];
+  /** 마감 지난 본공고 중 조건에 맞는 것 — 화면 맨 아래 "마감된 공고" 칸 (최근 마감 순) */
+  closedItems: unknown[];
   error: string | null;
 }
 
@@ -530,8 +533,14 @@ async function classesFor(doc: QualificationDocResult | null): Promise<Record<st
   return out;
 }
 
-function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
+/**
+ * docOnly: 첨부만 읽고 AI 판단은 하지 않는 공고 — 마감된 공고. 왜 놓쳤는지 첨부로 확인하려는 용도라
+ * 첨부는 필요하지만, 이미 끝난 입찰에 AI 판단 비용을 쓸 이유는 없다 (화면에서 요청하면 받을 수 있다).
+ * 진행 중인 공고를 먼저 읽고 마감된 공고는 그 뒤에 읽는다.
+ */
+function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = []): void {
   if (enrichState.running) return;
+  const matches = [...aiMatches, ...docOnly];
   // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
   // 공동수급은 g2b 상세 API가 본공고에만 있다.
   const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
@@ -549,7 +558,7 @@ function startEnrichment(matches: MatchedNotice[], appConfig: AppConfig): void {
     );
   });
   const aiEnabled = isAiConfigured();
-  const aiTodo = aiEnabled ? matches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
+  const aiTodo = aiEnabled ? aiMatches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
   if (!aiEnabled) {
     for (const m of matches) enrichment.set(m.notice.noticeNo, { ...enrichment.get(m.notice.noticeNo), ai: { error: "AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다" } });
   }
@@ -622,16 +631,21 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       preStandardLookbackDays,
       incremental,
       withDiagnostics: true,
+      withClosed: true,
     });
     lastDiagnostics = input.diagnostics ?? null;
-    startEnrichment([...input.bid.matches, ...input.preStandard.matches], appConfig);
+    startEnrichment([...input.bid.matches, ...input.preStandard.matches], appConfig, input.closed ?? []);
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
-    return { fetchedAt: new Date(), period, periodLabel, items, error: null };
+    // 마감된 공고는 첨부를 받지 않는다(startEnrichment 대상 아님) — 지난 공고를 찾아보는 용도라 참고 정보만
+    const closedItems = (input.closed ?? [])
+      .sort((a, b) => (parseKstDateTime(b.notice.deadline)?.getTime() ?? 0) - (parseKstDateTime(a.notice.deadline)?.getTime() ?? 0))
+      .map((m) => decorate(m, appConfig));
+    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, error: null };
   } catch (err) {
-    return { fetchedAt: new Date(), period, periodLabel, items: [], error: String(err) };
+    return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], error: String(err) };
   }
 }
 
@@ -975,7 +989,7 @@ const server = createServer((req, res) => {
       .then((result) => json(res, { ...result, cached: false }))
       .catch((err: unknown) => {
         inFlight.delete(period);
-        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], error: String(err), cached: false });
+        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], closedItems: [], error: String(err), cached: false });
       });
     return;
   }

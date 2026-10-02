@@ -2,7 +2,7 @@ import type { Env } from "../config/env.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { fetchAllLicenseLimitGroups, type LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import { logger } from "../logger.js";
-import { evaluateQualifications, missingLabels } from "./qualificationFilter.js";
+import { evaluateQualifications, missingLabels, qualificationLayout } from "./qualificationFilter.js";
 import type { MatchedNotice } from "./types.js";
 
 /**
@@ -47,6 +47,7 @@ export async function applyQualificationFilter(
       totalGroups: result.totalGroups,
       satisfiedBy: result.satisfiedBy,
       missing: missingLabels(result.missingGroups),
+      layout: qualificationLayout(groups, appConfig.heldProducts, appConfig.heldIndustries),
     };
     if (!result.passes) missingCount += 1;
   }

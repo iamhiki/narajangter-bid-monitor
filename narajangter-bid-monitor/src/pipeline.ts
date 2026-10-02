@@ -66,6 +66,11 @@ export async function collectReportInput(
      * 정기 실행에서는 필요 없고 메모리만 잡아먹으므로 기본 꺼짐.
      */
     withDiagnostics?: boolean;
+    /**
+     * 마감 지난 본공고도 같은 조건으로 걸러 closed로 따로 돌려줄지 (웹 UI의 "마감된 공고" 칸).
+     * 지난 공고를 다시 찾아보거나 참고하는 용도라 첨부는 받지 않는다. 정기 보고에는 쓰지 않는다.
+     */
+    withClosed?: boolean;
   } = {}
 ): Promise<CollectedInput> {
   const notify = async (message: string): Promise<void> => {
@@ -194,6 +199,21 @@ export async function collectReportInput(
     preStandard: { matches: preStandardMatches, failures: preStandardResults.filter((r) => r.failed) },
   };
 
+  if (options.withClosed) {
+    const openNos = new Set(openBidNotices.map((n) => n.noticeNo));
+    const expired = bidResults.flatMap((r) => r.notices).filter((n) => !openNos.has(n.noticeNo));
+    const closed = await applyQualificationFilter(
+      env,
+      appConfig,
+      evaluateNotices(expired, appConfig, mongoliaKeywords),
+      window,
+      licenseGroupsPromise
+    );
+    attachSimilarity(closed, new Map());
+    result.closed = closed;
+    logger.info("마감된 본공고 매칭", { 대상: expired.length, 매칭: closed.length });
+  }
+
   if (options.withDiagnostics) {
     // 면허제한정보 조회는 내부에서 오류를 삼키고 빈 Map을 주므로 여기서 거부되지 않는다.
     const licenseGroups = await licenseGroupsPromise;
@@ -211,7 +231,7 @@ export interface CollectionDiagnostics {
   context: DiagnoseContext;
 }
 
-export type CollectedInput = ReportInput & { diagnostics?: CollectionDiagnostics };
+export type CollectedInput = ReportInput & { diagnostics?: CollectionDiagnostics; closed?: MatchedNotice[] };
 
 /**
  * 매칭된 공고에 싱크로율을 붙인다 (제자리 수정).

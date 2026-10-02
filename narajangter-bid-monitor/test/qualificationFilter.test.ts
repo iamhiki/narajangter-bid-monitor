@@ -3,6 +3,7 @@ import {
   evaluateQualifications,
   extractCode,
   missingLabels,
+  qualificationLayout,
   uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
@@ -170,5 +171,89 @@ describe("fail-open", () => {
     const r = evaluateQualifications([], held.products, held.industries);
     expect(r.passes).toBe(true);
     expect(r.totalGroups).toBe(0);
+  });
+});
+
+describe("qualificationLayout (화면 팝업 묶음)", () => {
+  const lay = (groups: { groupNo: string; allowedNames: string[]; rows?: string[][] }[]) =>
+    qualificationLayout(groups, held.products, held.industries);
+
+  it("모든 방법에 공통인 업종은 '모두 필요', 방법마다 다른 업종은 '이 중 하나'로 묶는다 (울산과학관형)", () => {
+    const g = (no: string, design: string) => ({
+      groupNo: no,
+      allowedNames: [],
+      rows: [["실내건축공사업/0006"], ["정보통신공사업/0036"], [design]],
+    });
+    const r = lay([g("1", "산업디자인(환경)/4442"), g("2", "산업디자인(종합)/4444"), g("3", "산업디자인(환경)/4442")]);
+    expect(r.methods).toBeNull();
+    expect(r.blocks).toEqual([
+      {
+        kind: "all",
+        met: true,
+        options: [
+          { label: "실내건축공사업(0006)", held: true },
+          { label: "정보통신공사업(0036)", held: true },
+        ],
+      },
+      {
+        kind: "any",
+        met: false,
+        options: [
+          { label: "산업디자인(환경)(4442)", held: false },
+          { label: "산업디자인(종합)(4444)", held: false },
+        ],
+      },
+    ]);
+  });
+
+  it("허용업종이 있는 공통 순번은 따로 '이 중 하나'", () => {
+    const r = lay([{ groupNo: "1", allowedNames: [], rows: [["건축공사업/0002", "실내건축공사업/0006"]] }]);
+    expect(r.blocks).toEqual([
+      { kind: "any", met: true, options: [{ label: "건축공사업(0002)", held: false }, { label: "실내건축공사업(0006)", held: true }] },
+    ]);
+  });
+
+  it("방법마다 다른 부분이 두 순번 이상이면 방법별로 그대로 준다", () => {
+    const r = lay([
+      { groupNo: "1", allowedNames: [], rows: [["토목공사업/0001"]] },
+      { groupNo: "2", allowedNames: [], rows: [["상하수도설비공사업/4996"], ["지반조성포장공사업/4989"]] },
+    ]);
+    expect(r.blocks).toEqual([]);
+    expect(r.methods?.map((m) => m.map((row) => row.map((o) => o.label)))).toEqual([
+      [["토목공사업(0001)"]],
+      [["상하수도설비공사업(4996)"], ["지반조성포장공사업(4989)"]],
+    ]);
+  });
+});
+
+describe("qualificationLayout — 조합으로 펼쳐 실린 그룹", () => {
+  it("'A + (B 또는 C) + (D 또는 E)'를 조합마다 그룹으로 실은 공고는 자리별 '이 중 하나'로 다시 접는다 (R26BK01662507형)", () => {
+    const groups = [
+      ["1468", "4444"],
+      ["1469", "4444"],
+      ["1468", "4442"],
+      ["1469", "4442"],
+    ].map(([sw, design], i) => ({
+      groupNo: String(i + 1),
+      allowedNames: [],
+      rows: [["실내건축공사업/0006"], [`소프트웨어/${sw}`], [`산업디자인/${design}`]],
+    }));
+    const r = qualificationLayout(groups, held.products, held.industries);
+    expect(r.methods).toBeNull();
+    expect(r.blocks.map((b) => [b.kind, b.options.map((o) => o.label)])).toEqual([
+      ["all", ["실내건축공사업(0006)"]],
+      ["any", ["소프트웨어(1468)", "소프트웨어(1469)"]],
+      ["any", ["산업디자인(4444)", "산업디자인(4442)"]],
+    ]);
+  });
+
+  it("조합이 빠져 있으면 접지 않는다 — 없는 조합을 허용하는 것처럼 보이면 안 된다", () => {
+    const groups = [
+      ["1468", "4444"],
+      ["1469", "4444"],
+      ["1468", "4442"],
+    ].map(([sw, design], i) => ({ groupNo: String(i + 1), allowedNames: [], rows: [[`소프트웨어/${sw}`], [`산업디자인/${design}`]] }));
+    const r = qualificationLayout(groups, held.products, held.industries);
+    expect(r.methods).toHaveLength(3);
   });
 });

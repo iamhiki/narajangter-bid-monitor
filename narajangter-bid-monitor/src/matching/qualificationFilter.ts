@@ -149,6 +149,102 @@ export function missingLabels(missingGroups: LicenseLimitGroup[]): { groupNo: st
     .map((g) => ({ groupNo: g.groupNo, names: g.rows.flat(), text: g.rows.map((r) => r.join(" 또는 ")).join(" + ") }));
 }
 
+/** 자격 하나 — 화면 표기(업종명(코드))와 보유 여부 */
+export interface LayoutOption {
+  label: string;
+  held: boolean;
+}
+/** 화면 팝업용 묶음. all: 모두 필요(각 줄 하나씩), any: 이 중 하나만 있으면 된다 */
+export interface LayoutBlock {
+  kind: "all" | "any";
+  options: LayoutOption[];
+  /** 이 묶음을 채웠는지 */
+  met: boolean;
+}
+/**
+ * 화면 팝업용 자격 구조. 나라장터는 참가 방법(그룹)마다 필요한 업종을 통째로 되풀이해 싣는다 —
+ * 예: 울산과학관 R26BK…은 그룹 4개가 모두 "1469 + 4990 + 산업디자인 한 분야"다. 그대로 보여 주면
+ * 같은 업종이 네 번 나오거나(예전) 구조 없이 한 줄씩 늘어놓게 된다. 그래서
+ *  · 모든 그룹에 공통인 순번 → "모두 필요" (허용업종이 여럿인 순번은 따로 "이 중 하나")
+ *  · 그룹마다 다른 순번이 하나씩뿐이면 → 그것들을 모아 "이 중 하나"
+ * 로 묶는다. 그룹마다 다른 부분이 두 순번 이상이면 깔끔하게 묶을 수 없어 methods로 방법별 그대로 준다.
+ */
+export interface QualificationLayout {
+  blocks: LayoutBlock[];
+  /** 묶을 수 없는 경우: 참가 방법마다 [순번별 선택지] — 방법끼리 "또는", 순번끼리 "+" */
+  methods: LayoutOption[][][] | null;
+}
+
+export function qualificationLayout(
+  groups: LicenseLimitGroup[],
+  heldProducts: CodeEntry[],
+  heldIndustries: CodeEntry[]
+): QualificationLayout {
+  const held = [...heldProducts, ...heldIndustries];
+  const heldCodes = new Set(held.map((c) => c.code.trim()));
+  const heldNames = new Set(held.map((c) => c.name.trim()));
+  const option = (raw: string): LayoutOption => {
+    const code = extractCode(raw);
+    return { label: qualificationLabel(raw), held: code ? heldCodes.has(code) : heldNames.has(raw.trim()) };
+  };
+  const rowKey = (r: string[]) => r.map(qualificationLabel).sort().join("|");
+  // 순번 안 허용업종 중복 제거, 같은 순번이 두 번 들어간 그룹도 한 번만
+  const norm = groups.map((g) => {
+    const rows = (g.rows && g.rows.length > 0 ? g.rows : [g.allowedNames]).map((r) => [...new Set(r)]);
+    return [...new Map(rows.map((r) => [rowKey(r), r])).values()];
+  });
+  const uniqGroups = [...new Map(norm.map((rows) => [rows.map(rowKey).sort().join("/"), rows])).values()];
+  if (uniqGroups.length === 0) return { blocks: [], methods: null };
+
+  const anyBlock = (opts: LayoutOption[]): LayoutBlock => ({ kind: "any", options: opts, met: opts.some((o) => o.held) });
+  const commonKeys = uniqGroups.slice(1).reduce(
+    (keys, rows) => new Set([...keys].filter((k) => rows.some((r) => rowKey(r) === k))),
+    new Set(uniqGroups[0]!.map(rowKey))
+  );
+  const commonRows = uniqGroups[0]!.filter((r) => commonKeys.has(rowKey(r)));
+  const rests = uniqGroups.map((rows) => rows.filter((r) => !commonKeys.has(rowKey(r))));
+
+  const blocks: LayoutBlock[] = [];
+  const singles = commonRows.filter((r) => r.length === 1).map((r) => option(r[0]!));
+  if (singles.length) blocks.push({ kind: "all", options: singles, met: singles.every((o) => o.held) });
+  for (const r of commonRows.filter((r) => r.length > 1)) blocks.push(anyBlock(r.map(option)));
+
+  // 공통 부분만으로 채워지는 그룹이 있으면 나머지 그룹은 그보다 요건이 많을 뿐이라 볼 필요가 없다
+  if (rests.some((r) => r.length === 0)) return { blocks, methods: null };
+  const slots = productSlots(rests);
+  if (slots) {
+    for (const slot of slots) {
+      const seen = new Set<string>();
+      blocks.push(anyBlock(slot.flat().map(option).filter((o) => !seen.has(o.label) && (seen.add(o.label), true))));
+    }
+    return { blocks, methods: null };
+  }
+  return { blocks, methods: rests.map((rows) => rows.map((r) => r.map(option))) };
+}
+
+/**
+ * 그룹마다 다른 부분이 "자리별 선택지의 모든 조합"이면 자리별로 나눠 준다. 나라장터는
+ * "4990 + (1468 또는 1469) + (4442 또는 4444)"를 조합마다 그룹 하나씩, 4개 그룹으로 싣는다
+ * (R26BK01662507 실측). 함께 나오는 일이 없는 순번끼리 한 자리로 모은 뒤, 그룹이 정확히
+ * 자리마다 하나씩 고른 모든 조합인지 확인한다. 아니면 null — 방법별로 그대로 보여 줘야 한다.
+ */
+function productSlots(rests: string[][][]): string[][][] | null {
+  const key = (r: string[]) => r.map(qualificationLabel).sort().join("|");
+  const rowsByKey = new Map<string, string[]>();
+  const groupKeys = rests.map((rows) => new Set(rows.map((r) => (rowsByKey.set(key(r), r), key(r)))));
+  const together = (a: string, b: string) => groupKeys.some((g) => g.has(a) && g.has(b));
+  const slots: string[][] = [];
+  for (const k of rowsByKey.keys()) {
+    const slot = slots.find((s) => s.every((m) => !together(m, k)));
+    if (slot) slot.push(k);
+    else slots.push([k]);
+  }
+  const everyGroupOnePerSlot = groupKeys.every((g) => g.size === slots.length && slots.every((s) => s.filter((k) => g.has(k)).length === 1));
+  const combos = slots.reduce((n, s) => n * s.length, 1);
+  if (!everyGroupOnePerSlot || combos !== rests.length) return null;
+  return slots.map((s) => s.map((k) => rowsByKey.get(k)!));
+}
+
 /**
  * 공고의 자격조건(제한그룹) 목록과 보유 자격을 대조한다.
  * 그룹이 없으면(=자격조건 정보가 없거나 조회 실패) 항상 통과시킨다 (fail-open).

@@ -1,7 +1,7 @@
 import type { SimilarityBasis } from "../similarity/index.js";
 import type { NormalizedNotice } from "../api/types.js";
 import type { CodeEntry } from "../config/loadJsonConfig.js";
-import type { SatisfiedQualification } from "./qualificationFilter.js";
+import type { QualificationLayout, SatisfiedQualification } from "./qualificationFilter.js";
 
 export type Confidence = "강력추천" | "참고용";
 
@@ -61,6 +61,8 @@ export interface QualificationInfo {
    * text: "토목공사업(0001) 또는 토목건축공사업(0003)", 순번이 여럿이면 "A + B"(둘 다 필요)
    */
   missing: { groupNo: string; names: string[]; text?: string }[];
+  /** 화면 팝업용 — "모두 필요 / 이 중 하나" 묶음 (qualificationFilter.qualificationLayout). 예전 캐시에는 없다 */
+  layout?: QualificationLayout;
 }
 
 export interface SimilarityInfo {
