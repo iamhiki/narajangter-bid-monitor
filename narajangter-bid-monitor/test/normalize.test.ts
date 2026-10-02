@@ -22,13 +22,26 @@ describe("normalizeRawItem", () => {
     expect(notice.productClsfcNo).toBe("5512190301");
   });
 
-  it("후보 필드가 없으면 Nm 접미사 휴리스틱으로 제목을 찾는다", () => {
+  it("제목 후보가 비면 다른 '…Nm' 필드(기관명 등)를 가져오지 않고 확인 필요로 둔다", () => {
+    // 예전에는 접미사 추측으로 아무 …Nm 필드나 제목으로 썼다 — 제목이 빈 공고면 기관명이 제목이 된다 (2026-10-02 점검)
     const raw = {
-      someWeirdTitleNm: "새로운 필드명으로 바뀐 공고 제목",
+      ntceInsttNm: "조달청 부산지방조달청",
       bidNtceNo: "20260002",
     };
     const notice = normalizeRawItem(raw, "용역", "본공고", BID_NOTICE_FIELD_CANDIDATES);
-    expect(notice.title).toBe("새로운 필드명으로 바뀐 공고 제목");
+    expect(notice.title).toBe("(제목 확인 필요 - 원본 데이터 참조)");
+  });
+
+  it("낙찰방법이 비면 다른 '…MthdNm' 필드(예가 방법 등)를 가져오지 않는다", () => {
+    const raw = { bidNtceNo: "20260003", bidNtceNm: "전시물 제작", sucsfbidMthdNm: "", rsrvtnPrceReMkngMthdNm: "복수예가" };
+    expect(normalizeRawItem(raw, "용역", "본공고", BID_NOTICE_FIELD_CANDIDATES).bidMethod).toBeNull();
+  });
+
+  it("사전규격의 prdctClsfcNoNm은 사업명이라 세부품명 이름으로 쓰지 않는다", () => {
+    const raw = { bfSpecRgstNo: "R26BD00000001", prdctClsfcNoNm: "2027년 구리시청 직원 단체보험 가입" };
+    const n = normalizeRawItem(raw, "용역", "사전규격", PRE_STANDARD_FIELD_CANDIDATES);
+    expect(n.title).toBe("2027년 구리시청 직원 단체보험 가입");
+    expect(n.productClsfcName).toBeNull();
   });
 
   it("공고번호를 전혀 찾을 수 없으면 안정적인 대체 ID를 생성한다", () => {
@@ -67,5 +80,21 @@ describe("normalizeRawItem", () => {
     expect(normalizeRawItem(zeroPrice, "물품", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBe(200_000_000);
     const allZero = { bidNtceNm: "t", presmptPrce: "0", asignBdgtAmt: "0" };
     expect(normalizeRawItem(allZero, "물품", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBeNull();
+  });
+});
+
+describe("사전규격 링크", () => {
+  it("첨부 다운로드 주소가 아니라 나라장터 사전규격 상세 화면으로 건다", () => {
+    const n = normalizeRawItem(
+      {
+        bfSpecRgstNo: "R26BD00277942",
+        prdctClsfcNoNm: "2026 국립디자인박물관 콘텐츠 수집 및 아카이브 구축 사업",
+        specDocFileUrl1: "https://www.g2b.go.kr/pn/pnz/pnza/UntyAtchFile/downloadFile.do?bfSpecRegNo=R26BD00277942&fileType=BFDTL&fileSeq=1",
+      },
+      "용역",
+      "사전규격",
+      PRE_STANDARD_FIELD_CANDIDATES
+    );
+    expect(n.detailUrl).toBe("https://www.g2b.go.kr/link/PRVA004_02/single/?bfSpecRegNo=R26BD00277942&prcmBsneSeCd=03");
   });
 });

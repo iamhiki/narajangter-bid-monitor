@@ -1,3 +1,4 @@
+import { findSubmissionDeadline, type SubmissionDeadline } from "./submissionDeadline.js";
 import type { CodeEntry } from "../config/loadJsonConfig.js";
 import type { NormalizedNotice } from "../api/types.js";
 import { downloadDocuments, listAttachments, type NoticeAttachment } from "../api/attachments.js";
@@ -43,6 +44,13 @@ export interface DocRequirement {
    * 같은 코드가 여러 요건으로 나오면(등록 + 직접생산) 전부 담는다.
    */
   bases: RequirementBasis[];
+  /**
+   * 공고문에서 "A[업종코드 3244] 또는 B[업종코드:3230]"처럼 "또는"으로 이어진 요건끼리 같은 번호.
+   * 묶음 안에서 하나만 있으면 된다 (2026-10-02 고흥분청문화박물관 공고 — 3244를 보유했는데 3230 미보유로 떴다).
+   */
+  orGroup?: number;
+  /** 미보유지만 같은 "또는" 묶음의 다른 자격을 보유해 이 요건은 채운 상태 — 미보유로 세지 않는다 */
+  covered?: boolean;
 }
 
 export type RequirementBasis = "등록" | "직접생산" | "면허";
@@ -148,6 +156,11 @@ export interface QualificationDocResult {
   performance: PerformanceRequirement[];
   /** 실적제한 입찰의 실적심사신청서 제출 마감 (공고문 표기 그대로, 예: "2026/10/06 18:00") */
   performanceReviewDeadline: string | null;
+  /**
+   * 공고문의 제안서(입찰서류) 제출 마감 — 나라장터 입찰마감이 비어 개찰 일시로 대신한 공고에서 화면이 쓴다
+   * (submissionDeadline.ts). 못 읽으면 null
+   */
+  submissionDeadline: SubmissionDeadline | null;
   /**
    * 참가자격의 기업 규모 요건. "소기업 또는 소상공인" → 소기업, "중·소기업 또는 소상공인" → 중소기업.
    * conditional: "추정가격 1억원 미만인 경우에는 …"처럼 조건이 붙은 요건 (이 공고에 해당하는지 공고문 확인 필요)
@@ -416,6 +429,35 @@ function mentionsLicense(flat: string, name: string): boolean {
   return false;
 }
 
+/** 두 요건 사이에 이 말이 있으면 "둘 중 하나" */
+const OR_WORD = /또\s*는|혹\s*은|중\s*(?:하나|1\s*개)/;
+/** 두 요건 사이에 항목·문장이 바뀌면 각각 따로 필요한 요건이다 — "1) … 등록한 업체 2) …" */
+const CLAUSE_BREAK = /(?:^|\s)(?:\d{1,2}\)|[가-하]\.)\s|다\s?\.|(?:등록|보유)\s*한\s*(?:업체|자)/;
+/** "또는"으로 이어 볼 최대 거리 — 업종명 하나와 코드 표기가 들어갈 만큼 */
+const OR_SPAN = 80;
+
+/**
+ * 공고문 순서대로 이웃한 같은 종류 요건 사이에 "또는"이 있으면 한 묶음(orGroup)으로 잇는다.
+ * 묶음 안에 보유 자격이 하나라도 있으면 나머지 미보유 요건은 covered — 화면·AI에 미보유로 세지 않는다.
+ */
+function linkAlternatives(section: string, requirements: DocRequirement[], posOf: Map<DocRequirement, number>): void {
+  const ordered = requirements.filter((r) => posOf.has(r)).sort((a, b) => posOf.get(a)! - posOf.get(b)!);
+  let group = 0;
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1]!;
+    const cur = ordered[i]!;
+    if (prev.kind !== cur.kind) continue;
+    const between = section.slice(posOf.get(prev)! + (prev.code?.length ?? 0), posOf.get(cur)!);
+    if (between.length > OR_SPAN || !OR_WORD.test(between) || CLAUSE_BREAK.test(between)) continue;
+    prev.orGroup ??= ++group;
+    cur.orGroup = prev.orGroup;
+  }
+  for (const r of requirements) {
+    if (r.held || r.orGroup === undefined) continue;
+    if (requirements.some((o) => o.orGroup === r.orGroup && o.held)) r.covered = true;
+  }
+}
+
 /**
  * @param section 참가자격 부분 (코드는 여기서만 찾는다 — 다른 곳의 숫자는 공고번호·전화번호 등이라 오탐이 난다)
  * @param fullText 공고문 전체 (지역제한·지명경쟁은 "입찰방식" 항목에 따로 적히는 경우가 많아 전체에서 본다)
@@ -430,6 +472,8 @@ export function analyzeQualificationText(
   const productName = new Map(heldProducts.map((c) => [c.code, c.name]));
   const requirements: DocRequirement[] = [];
   const seen = new Set<string>();
+  /** 요건이 공고문에 처음 나온 위치 — "또는" 묶음을 찾는 데 쓴다 */
+  const posOf = new Map<DocRequirement, number>();
   const add = (kind: DocRequirement["kind"], m: RegExpMatchArray) => {
     const code = m[1]!;
     const at = m.index! + m[0].lastIndexOf(code);
@@ -445,7 +489,9 @@ export function analyzeQualificationText(
     seen.add(code);
     const name = (kind === "업종" ? industryName : productName).get(code) ?? null;
     const related = kind === "품명" && name === null ? relatedHeldProducts(code, heldProducts) : null;
-    requirements.push({ kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind)] });
+    const req: DocRequirement = { kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind)] };
+    requirements.push(req);
+    posOf.set(req, at);
   };
 
   // "업종코드 4444", "[업종코드 4444]", "(업종코드: 4990)" — 코드 뒤에 "또는 4442"처럼 이어지는 것도 잡는다.
@@ -471,6 +517,7 @@ export function analyzeQualificationText(
     )
       add("품명", m);
   }
+  linkAlternatives(section, requirements, posOf);
   // 코드 없이 이름만 적은 보유 자격 (예: "전문건설업(…금속구조물·창호·온실공사업…)")
   const flat = normalize(section);
   for (const c of heldIndustries) {
@@ -503,6 +550,7 @@ export function analyzeQualificationText(
     // 실적 요건은 참가자격 뒤쪽 항목(8번째 등)에 있어 발췌 1500자를 넘기도 해서 전체에서 찾는다
     performance: findPerformanceRequirements(fullText),
     performanceReviewDeadline: findPerformanceReviewDeadline(fullText),
+    submissionDeadline: findSubmissionDeadline(fullText),
     sizeLimit: findSizeLimit(section),
   };
 }
@@ -512,7 +560,12 @@ export function pickNoticeDocAttachments(notice: NormalizedNotice): NoticeAttach
   if (notice.sourceType === "사전규격") return preStandardAttachments(notice);
   const all = listAttachments(notice);
   const extRank = (name: string) => (/\.hwpx$/i.test(name) ? 0 : /\.pdf$/i.test(name) ? 1 : /\.hwp$/i.test(name) ? 2 : 3);
-  return all.filter((a) => isNoticeDocName(a.name)).sort((a, b) => extRank(a.name) - extRank(b.name));
+  const named = all.filter((a) => isNoticeDocName(a.name)).sort((a, b) => extRank(a.name) - extRank(b.name));
+  if (named.length) return named;
+  // 이름에 "공고"가 없는 공고문 — 나라장터는 첫 첨부가 공고문인 경우가 많다
+  // (송파책박물관 기획특별전: 첫 첨부 "송파책박물관 기획특별전 … 제작·설치 용역.pdf", 둘째 "제안요청서.hwpx")
+  const first = all[0];
+  return first && !/제안요청|과업|시방|규격|요청서|서식|양식|도면|내역/.test(first.name) ? [first] : [];
 }
 
 /** 파일명으로 본 입찰공고문 여부 */
@@ -572,6 +625,7 @@ export async function readQualificationFromNotice(
       jiilDesignated: false,
       performance: [],
       performanceReviewDeadline: null,
+      submissionDeadline: null,
       sizeLimit: null,
       ...common,
       sectionFound: false,

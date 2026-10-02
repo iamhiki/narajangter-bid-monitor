@@ -372,3 +372,28 @@ describe("실적 요건", () => {
     expect(parseWon("도급금액 이상")).toBeNull();
   });
 });
+
+describe("'또는'으로 이은 요건 (2026-10-02 고흥분청문화박물관 실감콘텐츠)", () => {
+  const goheung = (held: CodeEntry[]) =>
+    analyzeQualificationText(
+      "1) 국가종합전자조달시스템 입찰 참가 자격 등록 규정에 의하여 반드시 나라장터(G2B시스템)에 입찰마감일 전일까지 " +
+        "「영화 및 비디오물의 진흥에 관한 법률」 제57조에 의한 비디오물제작업[업종코드 3244] 또는 방송영상독립제작사[업종코드:3230]로 등록한 업체 " +
+        "2) 정보통신공사업(0036)을 등록한 업체",
+      "",
+      [],
+      held
+    ).requirements;
+
+  it("한쪽을 보유하면 다른 쪽은 미보유가 아니라 '다른 자격으로 충족'", () => {
+    const r = goheung([{ code: "3244", name: "비디오물제작업" }, { code: "0036", name: "정보통신공사업" }]);
+    const by = (code: string) => r.find((x) => x.code === code)!;
+    expect(by("3244").orGroup).toBe(by("3230").orGroup);
+    expect(by("3230")).toMatchObject({ held: false, covered: true });
+    expect(by("0036").orGroup).toBeUndefined(); // 다른 항목(2))은 묶지 않는다
+  });
+
+  it("둘 다 없으면 둘 다 미보유", () => {
+    const r = goheung([{ code: "0036", name: "정보통신공사업" }]);
+    expect(r.filter((x) => x.orGroup !== undefined).every((x) => !x.held && !x.covered)).toBe(true);
+  });
+});

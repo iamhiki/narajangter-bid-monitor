@@ -71,6 +71,8 @@ export async function collectReportInput(
      * 지난 공고를 다시 찾아보거나 참고하는 용도라 첨부는 받지 않는다. 정기 보고에는 쓰지 않는다.
      */
     withClosed?: boolean;
+    /** 제목의 제외 키워드를 건너뛸 공고번호 — 웹 UI에서 담당자가 "목록에 올리기"한 공고 */
+    forceInclude?: ReadonlySet<string>;
   } = {}
 ): Promise<CollectedInput> {
   const notify = async (message: string): Promise<void> => {
@@ -119,17 +121,23 @@ export async function collectReportInput(
   await notify(`공고 ${fetchedCount.toLocaleString("ko-KR")}건 수집 완료 · 조건 매칭 중…`);
 
   const mongoliaKeywords = loadMongoliaKeywords();
+  // 담당자가 "목록에 올리기"한 공고 — 제목의 제외 키워드만 건너뛰고 나머지 조건(키워드·품목·금액·낙찰방법)은 그대로 본다
+  const forced = options.forceInclude ?? new Set<string>();
+  const noExclude = { ...appConfig, excludeKeywords: [], softExcludeKeywords: [] };
+  const withForced = (matches: MatchedNotice[], notices: NormalizedNotice[]): MatchedNotice[] => {
+    if (forced.size === 0) return matches;
+    const have = new Set(matches.map((m) => m.notice.noticeNo));
+    const extra = evaluateNotices(notices.filter((n) => forced.has(n.noticeNo) && !have.has(n.noticeNo)), noExclude, mongoliaKeywords);
+    return [...matches, ...extra];
+  };
   const { open: openBidNotices, expiredCount } = excludeExpiredNotices(
     bidResults.flatMap((r) => r.notices),
     now
   );
   logger.info("마감 지난 본공고 제외", { 제외: expiredCount });
-  const bidMatchesBeforeQualificationFilter = evaluateNotices(openBidNotices, appConfig, mongoliaKeywords);
-  const preStandardMatches = evaluateNotices(
-    preStandardResults.flatMap((r) => r.notices),
-    appConfig,
-    mongoliaKeywords
-  );
+  const bidMatchesBeforeQualificationFilter = withForced(evaluateNotices(openBidNotices, appConfig, mongoliaKeywords), openBidNotices);
+  const preStandardNotices = preStandardResults.flatMap((r) => r.notices);
+  const preStandardMatches = withForced(evaluateNotices(preStandardNotices, appConfig, mongoliaKeywords), preStandardNotices);
 
   // 사전규격은 대응하는 면허제한 조회 API가 없어 자격조건 필터 대상이 아니다 (본공고만 적용).
   logger.info("자격조건 필터 적용 시작", { 대상: bidMatchesBeforeQualificationFilter.length });

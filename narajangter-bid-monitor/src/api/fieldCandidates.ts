@@ -91,7 +91,9 @@ export const PRE_STANDARD_FIELD_CANDIDATES: FieldCandidates = {
   // 본공고와 같은 이유로 `dtilPrdctClsfcNo`를 먼저 본다 (위 주석 참고).
   industryText: ["bidprcPsblIndstrytyNm", "indstrytyNm", "pubPrcrmntClsfcNm"],
   productClsfcNo: ["dtilPrdctClsfcNo", "prdctClsfcNo"],
-  productClsfcName: ["dtilPrdctClsfcNoNm", "prdctClsfcNoNm"],
+  // 사전규격 API의 prdctClsfcNoNm은 이름과 달리 **사업명**이다(위 title 첫 후보, 2026-10-02 실측 2,247건 전부).
+  // 세부품명 이름 후보에 두면 사업명이 세부품명으로 들어가 "세부품명(사업명)" 같은 표시가 나왔다.
+  productClsfcName: ["dtilPrdctClsfcNoNm"],
   // 사전규격 3종(물품/용역/공사) 전부에서 낙찰방법 관련 필드 자체가 없음을 실측 확인함
   // (2026-09-16, 본공고와 달리 아직 낙찰방법이 확정되지 않는 단계라 당연한 결과 — 버그 아님).
   // 그래도 후보는 남겨둔다(향후 API 개정으로 필드가 추가될 가능성 대비).

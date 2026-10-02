@@ -118,12 +118,22 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
   const candidate =
     hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia || matchedServiceClasses.length > 0;
+  // 어디서 걸렸는지를 말로 구분한다 — "품목 조형물, 키워드 조형물"처럼 쓰면 같은 말이 두 번 나와
+  // 무엇이 다른지 알 수 없었다 (2026-10-02 요청). 품목 = 발주기관이 나라장터에 등록한 물품 분류,
+  // 키워드 = 공고 제목에 든 말.
+  const quoted = (xs: string[]) => xs.map((x) => `'${x}'`).join(", ");
+  const bare = (s: string) => s.replace(/\s+/g, "");
+  const inTitle = matchedKeywords.filter((k) => bare(notice.title).includes(bare(k)));
+  const inNameOnly = matchedKeywords.filter((k) => !inTitle.includes(k));
   const hits = [
-    ...matchedProductCodes.map((c) => `품목 ${c.name}`),
-    ...matchedServiceClasses.map((c) => `분류 ${c.name}`),
-    ...matchedKeywords.map((k) => `키워드 ${k}`),
-    ...(overseas.isMongolia ? ["몽골 해외개최"] : []),
-  ];
+    matchedProductCodes.length ? `[나라장터 물품분류] ${quoted(matchedProductCodes.map((c) => c.name))} — 우리 등록 품목` : null,
+    matchedServiceClasses.length ? `[나라장터 용역분류] ${quoted(matchedServiceClasses.map((c) => c.name))} — 우리 등록 분야` : null,
+    // 키워드는 제목 + 세부품명 이름에서 찾는다(keywordMatcher) — 제목에 없고 품명 이름에만 있으면 그렇게 적는다
+    // (신평초 보행환경안심길 "…디자인 구조물": 제목엔 '조형물'이 없고 세부품명이 '조형물'이었다)
+    inTitle.length ? `[공고 제목] ${quoted(inTitle)} — 우리 키워드` : null,
+    inNameOnly.length ? `[세부품명 이름] ${quoted(inNameOnly)} — 우리 키워드` : null,
+    overseas.isMongolia ? "몽골 해외개최" : null,
+  ].filter((x): x is string => x !== null);
   const industryNote =
     matchedIndustryCodes.length > 0
       ? ` (업종 ${matchedIndustryCodes.map((c) => c.name).join(", ")}은 맞지만 업종만으로는 수집하지 않음)`
@@ -136,7 +146,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
       : `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님`;
   steps.push(
     candidate
-      ? { step: "키워드·품목", ok: true, detail: hits.join(", ") }
+      ? { step: "키워드·품목", ok: true, detail: hits.join(" · ") }
       : {
           step: "키워드·품목",
           ok: false,

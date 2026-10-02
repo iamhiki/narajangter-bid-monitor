@@ -13,7 +13,8 @@ import { fetchNoticeBody } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
 import { CORE_CONTENT_TERMS, keywordEvidence } from "../src/similarity/keywordEvidence.js";
 import { announceName } from "../src/net/mdns.js";
-import { findCoreWords } from "../src/matching/coreWork.js";
+import { findCoreWords, findMakeEvidence, MAKE_EVIDENCE_MIN } from "../src/matching/coreWork.js";
+import { findSubmissionDeadline, type SubmissionDeadline } from "../src/matching/submissionDeadline.js";
 import { mainWorkOf } from "../src/matching/mainWork.js";
 import { taskExcerpt } from "../src/corpus/taskExcerpt.js";
 import { lookupProductClass, type ProductClassInfo } from "../src/api/productClassApi.js";
@@ -165,6 +166,8 @@ interface NoticeCache {
   items: unknown[];
   /** 마감 지난 본공고 중 조건에 맞는 것 — 화면 맨 아래 "마감된 공고" 칸 (최근 마감 순) */
   closedItems: unknown[];
+  /** 제목의 제외 키워드로만 빠진 후보 — 첨부를 읽어 본업 근거가 나온 것만 화면에 보인다 (rescue) */
+  titleExcludedItems: unknown[];
   error: string | null;
 }
 
@@ -226,6 +229,16 @@ function matchReason(m: MatchedNotice): string {
  * 조달청 대행 공고는 전부 "조달청"으로 나온다. 담당자가 알고 싶은 건 수요기관이다.
  * 입찰공고 dminsttNm, 사전규격 rlDminsttNm(실수요기관).
  */
+/**
+ * 본공고인데 입찰마감(bidClseDt)이 비어 개찰일시(opengDt)를 마감으로 쓴 공고 (fieldCandidates deadline 후보 순서).
+ * 협상에의한계약 공고에 많다 — 2026-10-02 본공고 6.8만 건 중 5,143건. 실제 제출 마감은 개찰보다 앞일 수 있어
+ * 화면에 "입찰 마감"이 아니라 "개찰"로 밝힌다.
+ */
+function deadlineIsOpening(n: NormalizedNotice): boolean {
+  const raw = (n.raw ?? {}) as Record<string, unknown>;
+  return n.sourceType === "본공고" && !!n.deadline && !String(raw.bidClseDt ?? raw.bidClseDate ?? "").trim();
+}
+
 function demandInstitutionOf(n: NormalizedNotice): string | null {
   const raw = (n.raw ?? {}) as Record<string, unknown>;
   for (const key of ["dminsttNm", "rlDminsttNm", "dmndInsttNm"]) {
@@ -317,6 +330,7 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     businessType: n.businessType,
     sourceType: n.sourceType,
     deadline: n.deadline,
+    deadlineIsOpening: deadlineIsOpening(n),
     budgetAmount: n.budgetAmount,
     postedAt: n.postedAt,
     detailUrl: n.detailUrl,
@@ -335,6 +349,8 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     qualification: m.qualification ?? null,
     mainWork: mainWorkOf(n, appConfig.heldIndustries),
     classOnly: isClassOnly(m),
+    /** 담당자가 "목록에 올리기"한 공고면 누가·언제·왜 빠졌었는지 */
+    promoted: promoted[n.noticeNo] ?? null,
     ...similarity,
   };
 }
@@ -348,6 +364,7 @@ function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
     businessType: n.businessType,
     sourceType: n.sourceType,
     deadline: n.deadline,
+    deadlineIsOpening: deadlineIsOpening(n),
     budgetAmount: n.budgetAmount,
     detailUrl: n.detailUrl,
     bidMethod: n.bidMethod,
@@ -375,6 +392,25 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
   }
   excludedCache = { source: diag, items, byStage };
   return excludedCache;
+}
+
+/**
+ * 제목의 제외 키워드 **하나 때문에만** 빠진 후보 — 다른 단계(마감·금액·낙찰방법·키워드·자격)는 모두 통과한 공고.
+ * 제목만 보고 뺀 것이라 첨부 과업에 본업이 있을 수 있어 다시 읽는다 (2026-10-02 요청).
+ */
+function titleExcludedCandidates(diag: CollectionDiagnostics): { notice: NormalizedNotice; keyword: string }[] {
+  // "제외된 공고" 탭과 같은 계산을 재사용한다 (공고 수만 건 진단을 한 번만)
+  const byNo = new Map(diag.notices.map((n) => [n.noticeNo, n]));
+  const out: { notice: NormalizedNotice; keyword: string }[] = [];
+  for (const item of excludedCandidates(diag).items as { noticeNo: string; excludedAt: string; excludedDetail: string | null; steps: { step: string; ok: boolean }[] }[]) {
+    if (item.excludedAt !== "제외키워드") continue;
+    if (item.steps.some((s) => s.step !== "제외키워드" && !s.ok)) continue;
+    const notice = byNo.get(item.noticeNo);
+    if (!notice) continue;
+    const detail = item.excludedDetail ?? "";
+    out.push({ notice, keyword: /'([^']+)'/.exec(detail)?.[1] ?? detail });
+  }
+  return out;
 }
 
 // ── 참가여부 (담당자끼리 공유) ─────────────────────────────────
@@ -417,6 +453,41 @@ function saveParticipation(): void {
   writeFileSync(PARTICIPATION_PATH, JSON.stringify(participation, null, 2), "utf8");
 }
 
+// ── 담당자가 목록에 올린 공고 (팀 공유) ─────────────────────────
+/**
+ * "첨부로 다시 볼 공고"에서 담당자가 우리 일이라고 판단해 본 목록에 올린 공고 (2026-10-02 요청).
+ * 제목의 제외 키워드만 건너뛰고(pipeline forceInclude) 나머지 조건은 그대로 본다.
+ * 참가여부처럼 cache/promoted.json에 두어 팀원 모두 같은 목록을 보고, 다시 조회해도 유지된다.
+ */
+interface Promotion {
+  by: string;
+  at: string;
+  title: string;
+  /** 목록에서 빠졌던 이유 (제목의 제외 키워드) */
+  keyword: string;
+}
+const PROMOTED_PATH = resolve("cache/promoted.json");
+let promoted: Record<string, Promotion> = (() => {
+  try {
+    return JSON.parse(readFileSync(PROMOTED_PATH, "utf8")) as Record<string, Promotion>;
+  } catch {
+    return {};
+  }
+})();
+function savePromoted(): void {
+  mkdirSync(dirname(PROMOTED_PATH), { recursive: true });
+  writeFileSync(PROMOTED_PATH, JSON.stringify(promoted, null, 2), "utf8");
+}
+/** 참가여부 대화에 경위를 한 줄 남긴다 — 나중에 "이 공고는 왜 목록에 있지?"를 따라갈 수 있게 */
+function logToParticipation(noticeNo: string, title: string, by: string, text: string): void {
+  const now = new Date().toISOString();
+  const p: Participation = participation[noticeNo] ?? { noticeNo, title: title.slice(0, 300), status: null, owner: "", updatedAt: now, comments: [] };
+  p.comments.push({ by, text, at: now, system: true });
+  p.updatedAt = now;
+  participation[noticeNo] = p;
+  saveParticipation();
+}
+
 // ── 부가 정보 (공고문 참가자격 · 공동수급) ──────────────────────
 /**
  * 공고 목록을 먼저 보여주고 뒤에서 채운다. 공고문 다운로드·추출과 g2b 공동수급 조회는 건당
@@ -446,6 +517,16 @@ interface Enrichment {
    * 못읽음: 첨부를 읽지 못함(목록에 두고 직접 확인하라고 알림)
    */
   core?: { status: "확인" | "없음" | "못읽음"; words: string[]; sourceFile: string | null };
+  /**
+   * 제목의 제외 키워드로 빠진 공고를 첨부로 다시 본 결과. 있음: 본업 대상 + 제작·설치 문장이 MAKE_EVIDENCE_MIN번 이상,
+   * 없음: 읽었는데 부족, 못읽음: 첨부를 못 읽음. samples는 근거 문장 (화면에서 걸린 말을 강조)
+   */
+  /**
+   * 과업지시서·제안요청서에서 읽은 제안서 제출 일정 — 공고문(qualDoc.submissionDeadline)에 없을 때 화면이 쓴다
+   * (2026-10-02 요청: 공고문에 없으면 과업지시서·제안요청서에서). 본문을 못 읽었거나 없으면 null
+   */
+  specSubmission?: SubmissionDeadline | null;
+  rescue?: { status: "있음" | "없음" | "못읽음"; count: number; samples: { sentence: string; match: string }[]; sourceFile: string | null };
   ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
@@ -538,8 +619,9 @@ async function classesFor(doc: QualificationDocResult | null): Promise<Record<st
  * docOnly: 첨부만 읽고 AI 판단은 하지 않는 공고 — 마감된 공고. 왜 놓쳤는지 첨부로 확인하려는 용도라
  * 첨부는 필요하지만, 이미 끝난 입찰에 AI 판단 비용을 쓸 이유는 없다 (화면에서 요청하면 받을 수 있다).
  * 진행 중인 공고를 먼저 읽고 마감된 공고는 그 뒤에 읽는다.
+ * rescue: 제목의 제외 키워드로 빠진 후보 — 맨 마지막에 첨부만 읽어 본업 근거(findMakeEvidence)를 찾는다.
  */
-function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = []): void {
+function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = [], rescue: NormalizedNotice[] = []): void {
   if (enrichState.running) return;
   const matches = [...aiMatches, ...docOnly];
   // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
@@ -563,8 +645,9 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
   if (!aiEnabled) {
     for (const m of matches) enrichment.set(m.notice.noticeNo, { ...enrichment.get(m.notice.noticeNo), ai: { error: "AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다" } });
   }
-  if (docTodo.length === 0 && aiTodo.length === 0) return;
-  enrichState = { running: true, done: 0, total: docTodo.length, aiDone: 0, aiTotal: aiTodo.length, aiEnabled };
+  const rescueTodo = rescue.filter((n) => enrichment.get(n.noticeNo)?.rescue === undefined);
+  if (docTodo.length === 0 && aiTodo.length === 0 && rescueTodo.length === 0) return;
+  enrichState = { running: true, done: 0, total: docTodo.length + rescueTodo.length, aiDone: 0, aiTotal: aiTodo.length, aiEnabled };
   const held = heldOf(appConfig);
 
   void (async () => {
@@ -581,6 +664,7 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
           const body = await fetchNoticeBody(n).catch(() => null);
           e.similarity = body ? similarityView(n.title, body.text) : null;
           e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
+          e.specSubmission = body ? findSubmissionDeadline(body.text) : null;
           if (needCore) {
             const words = body ? findCoreWords(body.text, appConfig.keywords) : [];
             e.core = { status: !body ? "못읽음" : words.length ? "확인" : "없음", words: words.slice(0, 4), sourceFile: body?.sourceFile ?? null };
@@ -589,6 +673,16 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
         enrichment.set(n.noticeNo, e);
         enrichState.done += 1;
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
+      }
+
+      // 1-1) 제목으로 빠진 후보 — 첨부만 읽어 본업 근거를 찾는다 (AI 판단은 하지 않는다)
+      for (const n of rescueTodo) {
+        const body = await fetchNoticeBody(n).catch(() => null);
+        const ev = body ? findMakeEvidence(body.text) : { count: 0, samples: [] };
+        const status = !body ? "못읽음" : ev.count >= MAKE_EVIDENCE_MIN ? "있음" : "없음";
+        enrichment.set(n.noticeNo, { ...enrichment.get(n.noticeNo), rescue: { status, ...ev, sourceFile: body?.sourceFile ?? null } });
+        enrichState.done += 1;
+        await new Promise((r) => setTimeout(r, 300));
       }
 
       // 2) AI 판단 — 세 건씩 동시에. 한 건에 10~30초라 순차로 하면 목록 하나에 몇 분이 걸린다.
@@ -633,20 +727,41 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       incremental,
       withDiagnostics: true,
       withClosed: true,
+      forceInclude: new Set(Object.keys(promoted)),
     });
     lastDiagnostics = input.diagnostics ?? null;
-    startEnrichment([...input.bid.matches, ...input.preStandard.matches], appConfig, input.closed ?? []);
+    // 이미 목록에 올린 공고는 "첨부로 다시 볼 공고"에서 뺀다 (본 목록에 있다)
+    const titleExcluded = (lastDiagnostics ? titleExcludedCandidates(lastDiagnostics) : []).filter((x) => !promoted[x.notice.noticeNo]);
+    startEnrichment(
+      [...input.bid.matches, ...input.preStandard.matches],
+      appConfig,
+      input.closed ?? [],
+      titleExcluded.map((x) => x.notice)
+    );
     const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
-    // 마감된 공고는 첨부를 받지 않는다(startEnrichment 대상 아님) — 지난 공고를 찾아보는 용도라 참고 정보만
+    // 마감된 공고는 첨부만 읽고 AI 판단은 하지 않는다 (startEnrichment docOnly)
     const closedItems = (input.closed ?? [])
       .sort((a, b) => (parseKstDateTime(b.notice.deadline)?.getTime() ?? 0) - (parseKstDateTime(a.notice.deadline)?.getTime() ?? 0))
       .map((m) => decorate(m, appConfig));
-    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, error: null };
+    const titleExcludedItems = titleExcluded.map(({ notice, keyword }) => ({
+      noticeNo: notice.noticeNo,
+      title: notice.title,
+      institution: notice.institution,
+      demandInstitution: demandInstitutionOf(notice),
+      sourceType: notice.sourceType,
+      businessType: notice.businessType,
+      deadline: notice.deadline,
+      deadlineIsOpening: deadlineIsOpening(notice),
+      budgetAmount: notice.budgetAmount,
+      detailUrl: notice.detailUrl,
+      excludeKeyword: keyword,
+    }));
+    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, error: null };
   } catch (err) {
-    return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], error: String(err) };
+    return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], titleExcludedItems: [], error: String(err) };
   }
 }
 
@@ -965,6 +1080,40 @@ const server = createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/promote" && req.method === "POST") {
+    if (!(req.headers["content-type"] ?? "").includes("application/json")) {
+      res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "application/json만 받습니다." }));
+      return;
+    }
+    readBody(req)
+      .then((raw) => {
+        const b = JSON.parse(raw) as { noticeNo?: string; title?: string; keyword?: string; by?: string; on?: boolean };
+        const noticeNo = String(b.noticeNo ?? "").trim();
+        const by = String(b.by ?? "").trim().slice(0, 40);
+        if (!noticeNo) throw new Error("공고번호가 없습니다");
+        if (!by) throw new Error("이름을 먼저 입력하세요");
+        if (b.on) {
+          const keyword = String(b.keyword ?? "").slice(0, 60);
+          const title = String(b.title ?? "").slice(0, 300);
+          promoted[noticeNo] = { by, at: new Date().toISOString(), title, keyword };
+          logToParticipation(noticeNo, title, by, `목록에 올림 (제목의 '${keyword}' 때문에 빠졌던 공고 — 첨부에 제작 내용 있음)`);
+        } else if (promoted[noticeNo]) {
+          logToParticipation(noticeNo, promoted[noticeNo]!.title, by, "목록에서 다시 뺌");
+          delete promoted[noticeNo];
+        }
+        savePromoted();
+        // 다음 조회에서 목록을 다시 만든다 (받아 둔 공고를 다시 쓰므로 나라장터에 새로 묻지 않는 한 빠르다)
+        noticeCache = null;
+        json(res, { ok: true, promoted });
+      })
+      .catch((err: unknown) => {
+        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: String(err instanceof Error ? err.message : err) }));
+      });
+    return;
+  }
+
   if (url.pathname === "/api/notices") {
     const period = url.searchParams.get("days") ?? "7";
     const refresh = url.searchParams.get("refresh") === "1";
@@ -990,7 +1139,7 @@ const server = createServer((req, res) => {
       .then((result) => json(res, { ...result, cached: false }))
       .catch((err: unknown) => {
         inFlight.delete(period);
-        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], closedItems: [], error: String(err), cached: false });
+        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], closedItems: [], titleExcludedItems: [], error: String(err), cached: false });
       });
     return;
   }

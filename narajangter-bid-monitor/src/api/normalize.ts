@@ -29,6 +29,20 @@ export function estimatedPrice(raw: RawItem, fields: FieldCandidates): number | 
   return withVat === null ? null : Math.round(withVat / 1.1);
 }
 
+/** 나라장터 업무구분 코드 — 사전규격 상세 화면 주소에 쓴다 */
+const PRCM_BSNE_SE_CD: Record<string, string> = { 물품: "01", 공사: "02", 용역: "03" };
+
+/**
+ * 사전규격 상세 화면 주소. 사전규격 API에는 상세 화면 주소가 없고 첨부(규격서) 다운로드 주소
+ * (specDocFileUrl1 = …/UntyAtchFile/downloadFile.do)만 있어서, 그걸 링크로 쓰면 누를 때 파일이 받아졌다
+ * (2026-10-02 국립디자인박물관 콘텐츠 수집 사전규격). 본공고의 PNPE027_01처럼 나라장터 화면 링크를 만든다.
+ * 형식은 다른 나라장터 수집 프로젝트(minsung6333/nara-monitor)에서 쓰는 것과 같다.
+ */
+export function preStandardDetailUrl(noticeNo: string, businessType: string): string {
+  const code = PRCM_BSNE_SE_CD[businessType] ?? "03";
+  return `https://www.g2b.go.kr/link/PRVA004_02/single/?bfSpecRegNo=${encodeURIComponent(noticeNo)}&prcmBsneSeCd=${code}`;
+}
+
 export function normalizeRawItem(
   raw: RawItem,
   businessType: BusinessType,
@@ -37,7 +51,9 @@ export function normalizeRawItem(
 ): NormalizedNotice {
   const context = `${sourceType}/${businessType}`;
 
-  const title = pickString(raw, fields.title, "Nm");
+  // 접미사 추측("…Nm" 아무 필드)은 쓰지 않는다 — 제목이 비면 기관명(ntceInsttNm) 같은 엉뚱한 값이 제목이 된다.
+  // 2026-10-02 본공고 6.8만·사전규격 2.2천 건 점검에서 추측이 쓰인 적은 없었다. 비면 아래에서 "제목 확인 필요"로 표시한다.
+  const title = pickString(raw, fields.title);
   if (!title) {
     warnMissingFieldOnce(context, "title", Object.keys(raw));
   }
@@ -58,12 +74,13 @@ export function normalizeRawItem(
     postedAt: pickString(raw, fields.postedAt),
     deadline: pickString(raw, fields.deadline),
     budgetAmount: estimatedPrice(raw, fields),
-    detailUrl: pickString(raw, fields.detailUrl),
+    detailUrl: sourceType === "사전규격" && noticeNoRaw ? preStandardDetailUrl(noticeNoRaw, businessType) : pickString(raw, fields.detailUrl),
     industryText: pickString(raw, fields.industryText),
     productClsfcNo: pickString(raw, fields.productClsfcNo),
     productClsfcName: pickString(raw, fields.productClsfcName),
-    // 후보 필드명이 실측 검증 전이라 "MthdNm" 접미사 휴리스틱도 함께 시도한다 (fieldResolver.ts 참고).
-    bidMethod: pickString(raw, fields.bidMethod, "MthdNm"),
+    // 접미사 추측("…MthdNm")은 쓰지 않는다 — 낙찰방법이 비면 예가방법(rsrvtnPrceReMkngMthdNm)·평가방법
+    // (tpEvalApplMthdNm) 같은 다른 "방법" 필드가 들어가 낙찰방법 필터가 엉뚱하게 판정한다. 비면 null(필터 통과).
+    bidMethod: pickString(raw, fields.bidMethod),
     raw,
   };
 }

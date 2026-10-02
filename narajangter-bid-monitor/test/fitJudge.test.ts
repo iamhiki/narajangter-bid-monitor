@@ -59,6 +59,7 @@ describe("buildNoticeMessage", () => {
         sectionFound: true,
         performance: [{ sentence: "최근 3년 이내 단일 건으로 10억원 이상 준공실적이 있는 업체", years: 3, single: true, minAmountWon: 1e9 }],
         performanceReviewDeadline: "2026/10/06 18:00",
+        submissionDeadline: null,
         sizeLimit: null,
       },
       jointBid: "(없음)공동수급불허",
