@@ -4,7 +4,8 @@ dist/
 output/
 *.log
 .DS_Store
-cache/
+# 실행 기록(알림 보낸 공고 등). 앞의 /는 src/cache/ 코드 폴더까지 무시하지 않게 하려는 것
+/cache/
 
 # 과거 공고 코퍼스 (scripts/buildCorpus.ts 산출물).
 # 과업지시서 본문이 통째로 들어 있고 발주기관 담당자 성명·연락처가 섞여 있어
