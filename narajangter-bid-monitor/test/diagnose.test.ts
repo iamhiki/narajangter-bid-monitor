@@ -71,11 +71,31 @@ describe("diagnoseNotice", () => {
     expect(d.candidate).toBe(false);
   });
 
-  it("참가자격 미보유를 잡아낸다", () => {
-    expect(diagnoseNotice(makeNotice({ noticeNo: "N-NO" }), ctx).excludedAt).toBe("참가자격");
+  it("참가자격 미보유는 빼지 않고 표시만 한다 (공동수급으로 참가할 수 있어서)", () => {
+    const no = diagnoseNotice(makeNotice({ noticeNo: "N-NO" }), ctx);
+    expect(no.excludedAt).toBeNull();
+    expect(no.steps.at(-1)?.detail).toContain("자격 미보유");
+    expect(no.steps.at(-1)?.detail).toContain("건축공사업(0002)");
     const ok = diagnoseNotice(makeNotice({ noticeNo: "N-OK" }), ctx);
     expect(ok.excludedAt).toBeNull();
     expect(ok.steps.at(-1)?.detail).toContain("실내건축공사업(0006)");
+  });
+
+  it("품목과 제목 키워드를 출처별로 나눠 적는다 — 같은 말이 두 번 나와도 어디서 걸렸는지 보이게", () => {
+    const d = diagnoseNotice(makeNotice({ title: "과학관 조합놀이대 설치", businessType: "물품", productClsfcNo: "4924159701", productClsfcName: "조합놀이대" }), ctx);
+    expect(d.steps.find((s) => s.step === "키워드·품목")?.detail).toBe(
+      "[나라장터 물품분류] '조합놀이대' — 우리 등록 품목 · [공고 제목] '과학관' — 우리 키워드"
+    );
+  });
+
+  it("제목엔 없고 세부품명 이름에만 있는 키워드는 [세부품명 이름]으로 적는다 (신평초 '…디자인 구조물')", () => {
+    const d = diagnoseNotice(
+      makeNotice({ title: "보행환경안심길 조성공사-디자인 구조물", businessType: "물품", productClsfcNo: "4924159701", productClsfcName: "조합놀이대 과학관" }),
+      ctx
+    );
+    expect(d.steps.find((s) => s.step === "키워드·품목")?.detail).toBe(
+      "[나라장터 물품분류] '조합놀이대' — 우리 등록 품목 · [세부품명 이름] '과학관' — 우리 키워드"
+    );
   });
 
   it("마감 지난 본공고는 마감에서 빠지지만, 사전규격은 거르지 않는다", () => {

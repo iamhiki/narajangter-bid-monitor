@@ -1,17 +1,32 @@
 import type { Env } from "../config/env.js";
 import { LICENSE_LIMIT_FIELD_CANDIDATES } from "./fieldCandidates.js";
 import { pickString, warnMissingFieldOnce, type RawItem } from "./fieldResolver.js";
-import { fetchAllPages } from "./httpClient.js";
+import { fetchAllPagesInWindow, type ApiCallOptions } from "./httpClient.js";
+import { fetchAllPagesIncremental } from "./incrementalFetch.js";
 import { DEFAULT_BID_NOTICE_BASE_URL, LICENSE_LIMIT_OPERATION } from "./endpoints.js";
-import { toApiDateTime } from "./dateUtil.js";
 import { logger } from "../logger.js";
 import { toErrorMessage } from "../errors.js";
 
-/** 제한그룹 하나(=자격조건 하나). 그룹 내 항목 중 하나라도 우리가 보유하면 그 그룹은 충족된 것으로 본다. */
+/**
+ * 제한그룹 하나 = 참가 방법 하나.
+ *
+ * 나라장터 규칙 (2026-09-30 공고문 원문으로 확인 — 가양4단지 주차장 신설공사 R26BK01745222):
+ *   "다음 각 호 중 어느 하나에 해당하는 … 1) 토목공사업 또는 토목건축공사업을 등록한 자
+ *    2) 지반조성·포장공사업과 상하수도설비공사업을 모두 등록한 자"
+ *   API: 그룹1 순번1 토목공사업(허용 토목건축공사업) / 그룹2 순번1 상하수도설비 / 그룹2 순번2 지반조성·포장
+ * → **그룹끼리는 "또는"**(하나만 채우면 참가 가능), **그룹 안 순번끼리는 "그리고"**(모두 필요),
+ *   한 순번 안의 허용업종은 그 업종 대신 인정되는 것("또는").
+ * 나라장터 화면도 그룹 두 개를 "[건축공사업(0002)] 업종 또는 [토목건축공사업(0003)] 업종"으로 보여준다.
+ */
 export interface LicenseLimitGroup {
   groupNo: string;
-  /** 해당 그룹에서 허용되는 업종/면허명 목록 (이 중 하나라도 보유하면 충족) */
+  /** 표시용: 그룹에 나오는 업종/면허명 전부 (rows를 펼친 것) */
   allowedNames: string[];
+  /**
+   * 순번별 요건. 순번마다 [제한업종, ...허용업종] — 순번끼리는 모두 필요, 한 순번 안은 하나만 있으면 된다.
+   * 없으면 allowedNames 전체를 순번 하나로 본다.
+   */
+  rows?: string[][];
 }
 
 /**
@@ -26,12 +41,10 @@ function splitList(text: string): string[] {
     .map((m) => m[1])
     .filter((s): s is string => s !== undefined);
   if (bracketed.length > 0) {
-    return bracketed
-      .map((entry) => {
-        const slashIndex = entry.lastIndexOf("/");
-        return (slashIndex === -1 ? entry : entry.slice(0, slashIndex)).trim();
-      })
-      .filter((s) => s.length > 0);
+    // "업종명/코드" 그대로 둔다 — 판정은 코드로 한다(qualificationFilter.extractCode). 예전에는 코드를
+    // 떼어 이름만 남겼는데, 그러면 제한업종에 코드가 있는 순번에서 허용업종이 판정에 쓰이지 않았다
+    // (허용 토목건축공사업/0003을 보유해도 건축공사업/0002 순번을 못 채운 것으로 나옴).
+    return bracketed.map((entry) => entry.trim()).filter((s) => s.length > 0);
   }
 
   return text
@@ -48,7 +61,16 @@ function splitList(text: string): string[] {
  * 조회기간 전체를 한 번에 받아 여기서 공고번호별로 묶어 로컬에서 조회하는 방식으로 설계했다.
  */
 export function groupRawItemsByNotice(rawItems: RawItem[]): Map<string, LicenseLimitGroup[]> {
-  const byNotice = new Map<string, Map<string, string[]>>();
+  // 정정공고는 차수(bidNtceOrd 000·001·002)마다 같은 요건을 다시 싣는다. 합치면 순번이 겹쳐 요건이
+  // 부풀려지므로 공고마다 가장 최신 차수만 쓴다.
+  const latestOrd = new Map<string, string>();
+  for (const item of rawItems) {
+    const noticeNo = pickString(item, LICENSE_LIMIT_FIELD_CANDIDATES.noticeNo);
+    const ord = pickString(item, ["bidNtceOrd"]) ?? "";
+    if (noticeNo && ord > (latestOrd.get(noticeNo) ?? "")) latestOrd.set(noticeNo, ord);
+  }
+
+  const byNotice = new Map<string, Map<string, Map<string, string[]>>>();
 
   for (const item of rawItems) {
     const noticeNo = pickString(item, LICENSE_LIMIT_FIELD_CANDIDATES.noticeNo);
@@ -57,6 +79,9 @@ export function groupRawItemsByNotice(rawItems: RawItem[]): Map<string, LicenseL
       warnMissingFieldOnce("면허제한정보", "noticeNo/groupNo", Object.keys(item));
       continue;
     }
+    if ((pickString(item, ["bidNtceOrd"]) ?? "") !== (latestOrd.get(noticeNo) ?? "")) continue;
+    // 순번이 없으면(실측상 항상 있음) 예전처럼 그룹 전체를 순번 하나로 본다
+    const seqNo = pickString(item, LICENSE_LIMIT_FIELD_CANDIDATES.seqNo) ?? "";
 
     const names: string[] = [];
     const licenseLimitName = pickString(item, LICENSE_LIMIT_FIELD_CANDIDATES.licenseLimitName);
@@ -69,8 +94,10 @@ export function groupRawItemsByNotice(rawItems: RawItem[]): Map<string, LicenseL
       continue;
     }
 
-    const groupsForNotice = byNotice.get(noticeNo) ?? new Map<string, string[]>();
-    groupsForNotice.set(groupNo, [...(groupsForNotice.get(groupNo) ?? []), ...names]);
+    const groupsForNotice = byNotice.get(noticeNo) ?? new Map<string, Map<string, string[]>>();
+    const rowsForGroup = groupsForNotice.get(groupNo) ?? new Map<string, string[]>();
+    rowsForGroup.set(seqNo, [...(rowsForGroup.get(seqNo) ?? []), ...names]);
+    groupsForNotice.set(groupNo, rowsForGroup);
     byNotice.set(noticeNo, groupsForNotice);
   }
 
@@ -78,7 +105,10 @@ export function groupRawItemsByNotice(rawItems: RawItem[]): Map<string, LicenseL
   for (const [noticeNo, groupsForNotice] of byNotice) {
     result.set(
       noticeNo,
-      [...groupsForNotice.entries()].map(([groupNo, allowedNames]) => ({ groupNo, allowedNames }))
+      [...groupsForNotice.entries()].map(([groupNo, rowsForGroup]) => {
+        const rows = [...rowsForGroup.values()];
+        return { groupNo, allowedNames: rows.flat(), rows };
+      })
     );
   }
   return result;
@@ -101,12 +131,50 @@ export function groupRawItemsByNotice(rawItems: RawItem[]): Map<string, LicenseL
 const LICENSE_CACHE_TTL_MS = 10 * 60 * 1000;
 let licenseCache: { key: string; fetchedAt: number; groups: Map<string, LicenseLimitGroup[]> } | null = null;
 
+function licenseCallOptions(env: Env): ApiCallOptions {
+  return {
+    baseUrl: env.naraBidBaseUrl ?? DEFAULT_BID_NOTICE_BASE_URL,
+    operation: LICENSE_LIMIT_OPERATION,
+    serviceKey: env.naraBidServiceKey,
+    params: { inqryDiv: "1" },
+    timeoutMs: env.apiTimeoutMs,
+    maxRetries: env.apiMaxRetries,
+    retryDelayMs: env.apiRetryDelayMs,
+    label: "면허제한정보",
+  };
+}
+
+function licensePageParams(env: Env) {
+  return {
+    numOfRows: env.apiNumOfRows,
+    maxPages: env.apiMaxPages,
+    requestIntervalMs: env.apiRequestIntervalMs,
+    pageConcurrency: env.apiPageConcurrency,
+  };
+}
+
 /** 테스트에서 캐시를 리셋하기 위한 헬퍼 */
 export function _resetLicenseLimitCacheForTests(): void {
   licenseCache = null;
 }
 
-export async function fetchAllLicenseLimitGroups(env: Env, window: { begin: Date; end: Date }): Promise<Map<string, LicenseLimitGroup[]>> {
+export async function fetchAllLicenseLimitGroups(
+  env: Env,
+  window: { begin: Date; end: Date },
+  options: { incremental?: boolean } = {}
+): Promise<Map<string, LicenseLimitGroup[]>> {
+  if (options.incremental) {
+    // 받아둔 것에 이어 받기는 디스크 저장본이 대신하므로 아래 메모리 캐시는 건너뛴다.
+    // 메모리 캐시를 타면 10분 동안 새로 올라온 공고의 참가자격을 못 보게 된다.
+    try {
+      const rawItems = await fetchAllPagesIncremental(licenseCallOptions(env), window, licensePageParams(env));
+      return groupRawItemsByNotice(rawItems);
+    } catch (err) {
+      logger.warn("면허제한정보 조회 실패 (자격조건 필터를 건너뛰고 모두 통과시킴)", { error: toErrorMessage(err) });
+      return new Map();
+    }
+  }
+
   // 캐시 키를 조회 창의 "길이"로 잡는다.
   // 시작·종료 시각을 그대로 쓰면 toApiDateTime이 분 단위라 1분만 지나도 키가 달라져
   // 캐시가 사실상 한 번도 맞지 않는다. 창의 시작점은 매 호출마다 몇 분씩 밀릴 뿐
@@ -123,28 +191,7 @@ export async function fetchAllLicenseLimitGroups(env: Env, window: { begin: Date
   }
 
   try {
-    const rawItems = await fetchAllPages(
-      {
-        baseUrl: env.naraBidBaseUrl ?? DEFAULT_BID_NOTICE_BASE_URL,
-        operation: LICENSE_LIMIT_OPERATION,
-        serviceKey: env.naraBidServiceKey,
-        params: {
-          inqryDiv: "1",
-          inqryBgnDt: toApiDateTime(window.begin),
-          inqryEndDt: toApiDateTime(window.end),
-        },
-        timeoutMs: env.apiTimeoutMs,
-        maxRetries: env.apiMaxRetries,
-        retryDelayMs: env.apiRetryDelayMs,
-        label: "면허제한정보",
-      },
-      {
-        numOfRows: env.apiNumOfRows,
-        maxPages: env.apiMaxPages,
-        requestIntervalMs: env.apiRequestIntervalMs,
-        pageConcurrency: env.apiPageConcurrency,
-      }
-    );
+    const rawItems = await fetchAllPagesInWindow(licenseCallOptions(env), window, licensePageParams(env));
 
     logger.info("면허제한정보 전체 조회 완료", { rawCount: rawItems.length });
     const groups = groupRawItemsByNotice(rawItems);

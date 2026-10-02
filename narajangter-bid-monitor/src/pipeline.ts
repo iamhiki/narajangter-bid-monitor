@@ -36,6 +36,16 @@ export async function collectReportInput(
     now?: Date;
     lookbackDays?: number;
     /**
+     * 사전규격만 따로 볼 기간. 없으면 lookbackDays와 같다. 본공고를 "마감 전 전체"로 넓게 볼 때
+     * 사전규격까지 같이 넓히면 이미 본공고로 넘어간 지난 사전규격이 쏟아지므로 따로 둔다.
+     */
+    preStandardLookbackDays?: number;
+    /**
+     * 본공고·면허제한정보를 디스크에 받아둔 것에 새로 올라온 것만 이어 받을지 (api/incrementalFetch.ts).
+     * 넓은 기간을 자주 다시 보는 웹 UI "마감 전 공고 전체"용. 정기 발송은 매번 새로 받아야 하므로 기본 꺼짐.
+     */
+    incremental?: boolean;
+    /**
      * 진행 상황 알림. 조회에 40초 안팎이 걸려서, 대화형으로 쓸 때는 중간 표시가 없으면
      * 멈춘 것처럼 보인다. 실패해도 조회 자체를 막으면 안 되므로 호출부가 아니라
      * 여기서 삼킨다.
@@ -56,6 +66,13 @@ export async function collectReportInput(
      * 정기 실행에서는 필요 없고 메모리만 잡아먹으므로 기본 꺼짐.
      */
     withDiagnostics?: boolean;
+    /**
+     * 마감 지난 본공고도 같은 조건으로 걸러 closed로 따로 돌려줄지 (웹 UI의 "마감된 공고" 칸).
+     * 지난 공고를 다시 찾아보거나 참고하는 용도라 첨부는 받지 않는다. 정기 보고에는 쓰지 않는다.
+     */
+    withClosed?: boolean;
+    /** 제목의 제외 키워드를 건너뛸 공고번호 — 웹 UI에서 담당자가 "목록에 올리기"한 공고 */
+    forceInclude?: ReadonlySet<string>;
   } = {}
 ): Promise<CollectedInput> {
   const notify = async (message: string): Promise<void> => {
@@ -69,6 +86,8 @@ export async function collectReportInput(
 
   const now = options.now ?? new Date();
   const window: FetchWindow = lookbackWindow(now, options.lookbackDays ?? env.lookbackDays);
+  const preStandardWindow: FetchWindow =
+    options.preStandardLookbackDays === undefined ? window : lookbackWindow(now, options.preStandardLookbackDays);
 
   logger.info("조회 시작", {
     window: { begin: window.begin.toISOString(), end: window.end.toISOString() },
@@ -82,11 +101,11 @@ export async function collectReportInput(
   // 순차로 돌리면 두 조회 시간이 그대로 더해지지만, 동시에 돌리면 둘 중 긴 쪽만 걸린다.
   // 이 함수는 내부에서 오류를 삼키고 빈 Map을 돌려주므로 거부(reject)되지 않는다 —
   // 매칭이 0건이라 아래에서 await하지 않게 되더라도 안전하다.
-  const licenseGroupsPromise = fetchAllLicenseLimitGroups(env, window);
+  const licenseGroupsPromise = fetchAllLicenseLimitGroups(env, window, { incremental: options.incremental });
 
   const [bidResults, preStandardResults] = await Promise.all([
-    fetchBidNotices(env, window),
-    fetchPreStandardNotices(env, window),
+    fetchBidNotices(env, window, { incremental: options.incremental }),
+    fetchPreStandardNotices(env, preStandardWindow),
   ]);
 
   const totalFetchCalls = bidResults.length + preStandardResults.length;
@@ -102,17 +121,23 @@ export async function collectReportInput(
   await notify(`공고 ${fetchedCount.toLocaleString("ko-KR")}건 수집 완료 · 조건 매칭 중…`);
 
   const mongoliaKeywords = loadMongoliaKeywords();
+  // 담당자가 "목록에 올리기"한 공고 — 제목의 제외 키워드만 건너뛰고 나머지 조건(키워드·품목·금액·낙찰방법)은 그대로 본다
+  const forced = options.forceInclude ?? new Set<string>();
+  const noExclude = { ...appConfig, excludeKeywords: [], softExcludeKeywords: [] };
+  const withForced = (matches: MatchedNotice[], notices: NormalizedNotice[]): MatchedNotice[] => {
+    if (forced.size === 0) return matches;
+    const have = new Set(matches.map((m) => m.notice.noticeNo));
+    const extra = evaluateNotices(notices.filter((n) => forced.has(n.noticeNo) && !have.has(n.noticeNo)), noExclude, mongoliaKeywords);
+    return [...matches, ...extra];
+  };
   const { open: openBidNotices, expiredCount } = excludeExpiredNotices(
     bidResults.flatMap((r) => r.notices),
     now
   );
   logger.info("마감 지난 본공고 제외", { 제외: expiredCount });
-  const bidMatchesBeforeQualificationFilter = evaluateNotices(openBidNotices, appConfig, mongoliaKeywords);
-  const preStandardMatches = evaluateNotices(
-    preStandardResults.flatMap((r) => r.notices),
-    appConfig,
-    mongoliaKeywords
-  );
+  const bidMatchesBeforeQualificationFilter = withForced(evaluateNotices(openBidNotices, appConfig, mongoliaKeywords), openBidNotices);
+  const preStandardNotices = preStandardResults.flatMap((r) => r.notices);
+  const preStandardMatches = withForced(evaluateNotices(preStandardNotices, appConfig, mongoliaKeywords), preStandardNotices);
 
   // 사전규격은 대응하는 면허제한 조회 API가 없어 자격조건 필터 대상이 아니다 (본공고만 적용).
   logger.info("자격조건 필터 적용 시작", { 대상: bidMatchesBeforeQualificationFilter.length });
@@ -182,6 +207,21 @@ export async function collectReportInput(
     preStandard: { matches: preStandardMatches, failures: preStandardResults.filter((r) => r.failed) },
   };
 
+  if (options.withClosed) {
+    const openNos = new Set(openBidNotices.map((n) => n.noticeNo));
+    const expired = bidResults.flatMap((r) => r.notices).filter((n) => !openNos.has(n.noticeNo));
+    const closed = await applyQualificationFilter(
+      env,
+      appConfig,
+      evaluateNotices(expired, appConfig, mongoliaKeywords),
+      window,
+      licenseGroupsPromise
+    );
+    attachSimilarity(closed, new Map());
+    result.closed = closed;
+    logger.info("마감된 본공고 매칭", { 대상: expired.length, 매칭: closed.length });
+  }
+
   if (options.withDiagnostics) {
     // 면허제한정보 조회는 내부에서 오류를 삼키고 빈 Map을 주므로 여기서 거부되지 않는다.
     const licenseGroups = await licenseGroupsPromise;
@@ -199,7 +239,7 @@ export interface CollectionDiagnostics {
   context: DiagnoseContext;
 }
 
-export type CollectedInput = ReportInput & { diagnostics?: CollectionDiagnostics };
+export type CollectedInput = ReportInput & { diagnostics?: CollectionDiagnostics; closed?: MatchedNotice[] };
 
 /**
  * 매칭된 공고에 싱크로율을 붙인다 (제자리 수정).

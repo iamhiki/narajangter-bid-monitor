@@ -88,6 +88,7 @@ export function formatMatchReason(m: MatchedNotice): string {
     ...m.matchedProductCodes.map((c) => `품목 ${c.name}(${c.code})`),
     ...m.matchedIndustryCodes.map((c) => `업종 ${c.name}(${c.code})`),
     ...m.matchedKeywords.map((k) => `키워드 ${k}`),
+    ...(m.matchedServiceClasses ?? []).map((c) => `분류 ${c.name}(${c.code})`),
   ];
   return parts.length > 0 ? parts.join(" / ") : "(근거 없음)";
 }

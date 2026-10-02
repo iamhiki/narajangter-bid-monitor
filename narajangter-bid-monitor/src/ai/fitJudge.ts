@@ -135,7 +135,8 @@ export function buildNoticeMessage(input: FitInput): string {
       const how = r.held ? "" : ` <요건: ${r.bases.join("+")}>`;
       const cls = r.code ? input.productClasses?.[r.code] : undefined;
       const path = !r.held && cls ? ` [분류: ${cls.levels.filter((l) => l.digits >= 4).map((l) => l.name).join(" > ")}${cls.levels.at(-1)?.description ? ` — ${cls.levels.at(-1)!.description}` : ""}]` : "";
-      return `${r.held ? "보유" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${how}${rel}${path}`;
+      // "A 또는 B"로 건 요건에서 다른 쪽을 보유했으면 미보유가 아니다 (qualificationDoc.ts linkAlternatives)
+      return `${r.held ? "보유" : r.covered ? "미보유(또는 묶음의 다른 자격 보유로 충족)" : "미보유"} ${label}${r.code ? `(${r.code})` : ""}${how}${rel}${path}`;
     });
     lines.push(
       `요건 종류 설명: 등록 = 나라장터 입찰참가자격 등록에 세부품명만 추가하면 됨(등록 마감 ${d.registrationDeadline ?? "공고에 없음"}까지) / 직접생산 = 직접생산확인증명서 필요(공고 기간 안에 취득 어려움) / 면허 = 법령상 업종 등록·면허 필요`
@@ -144,6 +145,7 @@ export function buildNoticeMessage(input: FitInput): string {
       `공고문 참가자격에서 찾은 요건: ${req.length ? req.join(", ") : "코드 없음"}`,
       `지역제한: ${d.region ?? "공고문에서 못 찾음"}`,
       `지명경쟁·조합추천: ${d.designated ? (d.jiilDesignated ? "예 (명단에 지일 있음)" : "예 (명단에 지일 없음)") : "아님"}`,
+      `실적 요건: ${(d.performance ?? []).length ? d.performance.map((p) => p.sentence).join(" / ") : "공고문에서 못 찾음"}${d.performanceReviewDeadline ? ` (실적심사신청서 마감 ${d.performanceReviewDeadline})` : ""}`,
       `공고문 참가자격 발췌:\n${redactPersonal(d.excerpt).text}`
     );
   }

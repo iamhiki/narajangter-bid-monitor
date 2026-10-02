@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { detectFormat, extractDocumentText } from "../src/corpus/extractText.js";
 import { isOcrAvailable, joinOcrPages, ocrPdf } from "../src/corpus/ocr.js";
-import { findScannedPages, SCANNED_PAGE_HANGUL_THRESHOLD, type PdfPageText } from "../src/corpus/pdfText.js";
+import { findDigitlessPages, findScannedPages, SCANNED_PAGE_HANGUL_THRESHOLD, type PdfPageText } from "../src/corpus/pdfText.js";
 
 const tmp = mkdtempSync(join(tmpdir(), "corpus-test-"));
 
@@ -32,6 +32,17 @@ describe("detectFormat", () => {
   it("내용을 못 읽으면 확장자로 떨어진다", () => {
     expect(detectFormat(join(tmp, "없는파일.pdf"))).toBe("pdf");
     expect(detectFormat(join(tmp, "없는파일.xlsx"))).toBe("unknown");
+  });
+});
+
+describe("findDigitlessPages", () => {
+  it("글꼴이 깨져 숫자가 빠진 페이지('시행령 제 조 및 시행규칙 제 조')를 고른다 (국립광주과학관 과업지시서 실측)", () => {
+    const pages: PdfPageText[] = [
+      { page: 1, text: "국가를 당사자로 하는 계약에 관한 법률 시행령 제 조 및 같은 법 시행규칙 제 조에서 정한 자격요건", hangulCount: 40 },
+      { page: 2, text: "법률 시행령 제12조 및 같은 법 시행규칙 제14조에서 정한 자격요건", hangulCount: 30 },
+      { page: 3, text: "제 조 하나만 빠진 페이지 제14조", hangulCount: 12 },
+    ];
+    expect(findDigitlessPages(pages)).toEqual([1]);
   });
 });
 

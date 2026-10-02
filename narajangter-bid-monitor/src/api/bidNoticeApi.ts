@@ -5,7 +5,11 @@ import type { Env } from "../config/env.js";
 import type { FetchResult, FetchWindow } from "./types.js";
 
 /** 나라장터 입찰공고정보서비스 (본공고) - 물품/용역/공사 조회 */
-export async function fetchBidNotices(env: Env, window: FetchWindow): Promise<FetchResult[]> {
+export async function fetchBidNotices(
+  env: Env,
+  window: FetchWindow,
+  options: { incremental?: boolean } = {}
+): Promise<FetchResult[]> {
   const results = await fetchNoticesBySourceType({
     sourceLabel: "본공고",
     sourceType: "본공고",
@@ -21,6 +25,7 @@ export async function fetchBidNotices(env: Env, window: FetchWindow): Promise<Fe
     retryDelayMs: env.apiRetryDelayMs,
     requestIntervalMs: env.apiRequestIntervalMs,
     pageConcurrency: env.apiPageConcurrency,
+    incremental: options.incremental,
   });
   return dedupeNotices(results);
 }

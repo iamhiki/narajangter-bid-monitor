@@ -7,6 +7,7 @@ import {
   buildTelegramFailureMessage,
   buildTelegramMessages,
   escapeTelegramHtml,
+  missingQualificationLine,
   packIntoMessages,
   tallyReport,
 } from "../src/notify/telegramMessage.js";
@@ -319,5 +320,26 @@ describe("buildClosingSoonMessages (매일 마감 임박 입찰)", () => {
     const messages = buildClosingSoonMessages(makeInput(), [], { days: 7 });
     expect(messages).toHaveLength(1);
     expect(messages[0]).toContain("없습니다");
+  });
+});
+
+describe("missingQualificationLine", () => {
+  it("나라장터 업종제한 미보유를 표시한다 (공고는 빼지 않는다)", () => {
+    const m = makeMatch({
+      qualification: {
+        status: "미충족",
+        totalGroups: 2,
+        satisfiedBy: [],
+        missing: [{ groupNo: "2", names: ["건축공사업(0002)", "토목건축공사업(0001)"] }],
+      },
+    });
+    expect(missingQualificationLine(m)).toBe("⚠ 자격 미보유 — 필요: 건축공사업(0002) 또는 토목건축공사업(0001)");
+  });
+
+  it("충족이거나 판정이 없으면 줄을 만들지 않는다", () => {
+    expect(missingQualificationLine(makeMatch())).toBeNull();
+    expect(
+      missingQualificationLine(makeMatch({ qualification: { status: "충족", totalGroups: 1, satisfiedBy: [], missing: [] } }))
+    ).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import type { SimilarityBasis } from "../similarity/index.js";
 import type { NormalizedNotice } from "../api/types.js";
 import type { CodeEntry } from "../config/loadJsonConfig.js";
-import type { SatisfiedQualification } from "./qualificationFilter.js";
+import type { QualificationLayout, SatisfiedQualification } from "./qualificationFilter.js";
 
 export type Confidence = "강력추천" | "참고용";
 
@@ -10,6 +10,8 @@ export interface MatchedNotice {
   matchedProductCodes: CodeEntry[];
   matchedIndustryCodes: CodeEntry[];
   matchedKeywords: string[];
+  /** 조달분류로 걸린 경우 (codes.json serviceClasses). 제목 키워드 없이 이것만으로 들어온 공고는 첨부 과업으로 다시 확인한다 */
+  matchedServiceClasses?: CodeEntry[];
   confidence: Confidence;
   /**
    * 해외 개최(전시회/박람회/엑스포 + 한국관/단체관) 몽골 예외 플래그.
@@ -41,8 +43,9 @@ export interface MatchedNotice {
   /**
    * 참가자격(면허제한) 판정 — 본공고에만 붙는다 (사전규격은 면허제한 API가 없음).
    *
-   * 필터에서 떨어진 공고는 여기까지 오지 않으므로 "미충족" 상태는 없다.
+   * 미보유여도 목록에서 빼지 않는다 — 공동수급이 허용되면 그 자격을 가진 업체와 함께 참가할 수 있어서다.
    * - 충족: 공고의 제한그룹을 모두 보유 자격으로 채움 (satisfiedBy에 무엇으로 채웠는지)
+   * - 미충족: 채우지 못한 제한그룹이 있음 (missing에 무엇이 필요한지). 공동수급 허용 여부와 함께 봐야 한다
    * - 제한없음: 면허제한정보에 이 공고가 없음 (업종제한이 없는 공고)
    * - 조회실패: 면허제한정보 조회 자체가 실패해 fail-open으로 통과시킴
    */
@@ -50,9 +53,16 @@ export interface MatchedNotice {
 }
 
 export interface QualificationInfo {
-  status: "충족" | "제한없음" | "조회실패";
+  status: "충족" | "미충족" | "제한없음" | "조회실패";
   totalGroups: number;
   satisfiedBy: SatisfiedQualification[];
+  /**
+   * 미충족일 때 참가 방법(제한그룹)마다 필요한 자격. 방법끼리는 "또는"이라 이 중 하나만 갖추면 된다.
+   * text: "토목공사업(0001) 또는 토목건축공사업(0003)", 순번이 여럿이면 "A + B"(둘 다 필요)
+   */
+  missing: { groupNo: string; names: string[]; text?: string }[];
+  /** 화면 팝업용 — "모두 필요 / 이 중 하나" 묶음 (qualificationFilter.qualificationLayout). 예전 캐시에는 없다 */
+  layout?: QualificationLayout;
 }
 
 export interface SimilarityInfo {

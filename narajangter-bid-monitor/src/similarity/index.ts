@@ -8,7 +8,7 @@ import {
   type SparseVector,
 } from "./cosine.js";
 import { TfidfVectorizer } from "./tfidf.js";
-import { normalizeForTokens, termFrequency, tokenize } from "./tokenize.js";
+import { NGRAM_SIZES, normalizeForTokens, termFrequency, tokenize } from "./tokenize.js";
 
 export interface SimilarMatch {
   id: string;
@@ -227,6 +227,23 @@ export class SimilarityIndex {
   }
 
   /**
+   * 화면의 '싱크로율 근거'용 공통 키워드 — findSimilar와 같은 질의로, 공고와 이 과거사업에 그 말 그대로 함께 있는 것을
+   * 점수 기여도 큰 순으로 (sharedWords 참고).
+   */
+  sharedTerms(title: string, projectId: string, options: QueryOptions = {}, limit = 8): { name: string[]; body: string[] } | null {
+    const entry = this.projects.find((p) => p.project.id === projectId);
+    if (!entry) return null;
+    const name = sharedWords(title, this.nameVectorizer.transform(title), entry.nameVector, normalizeForTokens(entry.project.name), limit);
+    let body: string[] = [];
+    if (this.bodyVectorizer && entry.bodyVector) {
+      const hasQueryBody = Boolean(options.body && options.body.trim().length > 0);
+      const text = hasQueryBody ? `${title}\n${options.body}` : title;
+      body = sharedWords(text, this.bodyVectorizer.transform(text), entry.bodyVector, normalizeForTokens(entry.project.body), limit, true);
+    }
+    return { name, body };
+  }
+
+  /**
    * 한 공고와 한 과거사업 사이의 점수가 **어떻게 나왔는지** 항목별로 편다.
    *
    * 0.497 같은 숫자 하나만 보여주면 담당자가 임계값을 정할 근거가 없다. 어떤 n-gram이
@@ -299,6 +316,92 @@ export class SimilarityIndex {
           : { name: this.nameWeight, body: this.bodyWeight, applied: `사업명 ${this.nameWeight} · 본문 ${this.bodyWeight}` },
     };
   }
+}
+
+/**
+ * 입찰 서류마다 나오는 행정 문구 — 두 문서에 함께 있어도 "어떤 사업인지"를 알려주지 않으니 공통 키워드로 보이지 않는다.
+ * (점수 계산에는 그대로 들어간다. 화면의 근거 목록에서만 뺀다)
+ */
+const BOILERPLATE =
+  /^(?:과업|발주|계약|제안|평가|입찰|협상|우선순위|기술능력|가격|증빙|보증|보안|안전보건|산업안전|산업표준|직접생산|무상하자|하자|준공|착수|지원|수행|용역|사업|참가|대상자|점수|합산|제출|제시|확보|구축|보고|추진|조치|보완|배치|공장|준수|부담|협조|고려|제외|실적|기재|중소기업|중대재해|장비투입|산출내역|과정|대상|구성|따름|따릅|설치|제작|설계|하여야|한다|말한다|있다|없다|경우|관련|기타|사항|내용|범위|기간|방법|기준|이상|이하|포함|대한|위한|따라|통해)|\d/;
+
+/** 서술어("제외되며", "응하여야", "따릅니다")는 키워드가 아니다 */
+const VERB_ENDING = /(?:하여야|하여|되며|되어|됩니다|합니다|니다|하지|하며|하고|한다|된다|여야|하는|되는|할|될)$/;
+
+/** 조사·어미를 떼어 "진열장은/진열장을/진열장"을 한 말로 본다 */
+const PARTICLE = /(?<=[가-힣]{2})(?:으로서|로서|에서|에게|으로|이나|하여야|한다|하며|하고|별|은|는|이|가|을|를|의|에|과|와|로|도|나)$/;
+
+/** run 안에서 target에 그대로 들어 있는 가장 긴 구간들(2글자 이상)을 앞에서부터 */
+function piecesIn(run: string, target: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < run.length - 1; ) {
+    let j = i + 2;
+    if (!target.includes(run.slice(i, j))) {
+      i++;
+      continue;
+    }
+    while (j < run.length && target.includes(run.slice(i, j + 1))) j++;
+    out.push(run.slice(i, j));
+    i = j;
+  }
+  return out;
+}
+
+/**
+ * 공통 키워드 — 공고 원문(text)과 과거사업(target, 정규화된 사업명 또는 본문)에 **그 말 그대로** 함께 있는 것.
+ * 점수는 글자 조각(n-gram)으로 매기므로, 공고 낱말에서 겹친 조각이 덮는 구간을 찾고(띄어쓰기 없는 제목
+ * "주기철목사수난기념관재단장전시물제작설치"도 "기념관"·"전시물"…로 잘린다), 그 구간이 과거사업에 그대로
+ * 없으면 그대로 있는 부분만 남긴다 — "AI체험관"과 "지질체험시설"은 "체험"만 공통이다.
+ * 구간마다 그 안의 조각 기여도(가중치 곱)를 더하고, 긴 구간이 합만 커지지 않게 조각 수의 제곱근으로 나눈다.
+ */
+function sharedWords(text: string, a: SparseVector, b: SparseVector, target: string, limit: number, fromWordStart = false): string[] {
+  const scored = new Map<string, number>();
+  for (const raw of text.split(/[\s()[\]{}<>「」『』《》〈〉"'“”‘’,:;!?~]+/)) {
+    const norm = normalizeForTokens(raw);
+    if (norm.length < 2) continue;
+    const grams: { start: number; end: number; weight: number }[] = [];
+    for (const n of NGRAM_SIZES) {
+      for (let i = 0; i + n <= norm.length; i++) {
+        const token = norm.slice(i, i + n);
+        const qa = a.get(token);
+        const qb = b.get(token);
+        if (qa !== undefined && qb !== undefined) grams.push({ start: i, end: i + n, weight: qa * qb });
+      }
+    }
+    if (grams.length === 0) continue;
+    const covered = new Array<boolean>(norm.length).fill(false);
+    for (const g of grams) for (let i = g.start; i < g.end; i++) covered[i] = true;
+    for (let i = 0; i < norm.length; ) {
+      if (!covered[i]) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < norm.length && covered[j]) j++;
+      for (const piece of piecesIn(norm.slice(i, j), target)) {
+        let start = i + norm.slice(i, j).indexOf(piece);
+        let end = start + piece.length;
+        // 흔한 조각("기술", "안전")은 점수 계산에서 빠져 구간이 낱말 중간에서 시작할 수 있다 — "술능력", "전보건".
+        // 과거사업에도 더 긴 형태가 그대로 있으면 낱말 끝까지 넓힌다 ("기술능력", "안전보건")
+        while (start > 0 && target.includes(norm.slice(start - 1, end))) start--;
+        while (end < norm.length && target.includes(norm.slice(start, end + 1))) end++;
+        // 본문은 낱말 첫머리부터 겹친 말만 — 넓혀도 첫머리에 닿지 않는 조각("체험관" 속 "험관")은 버린다.
+        // 제목은 띄어쓰기 없이 붙여 쓴 것("…수난기념관재단장전시물…")이 있어 중간도 받는다
+        if (fromWordStart && start !== 0) continue;
+        const word = norm.slice(start, end).replace(PARTICLE, "");
+        if (word.length < 2 || BOILERPLATE.test(word) || VERB_ENDING.test(word)) continue;
+        const inside = grams.filter((g) => g.start >= start && g.end <= end);
+        if (inside.length === 0) continue;
+        const score = inside.reduce((sum, g) => sum + g.weight, 0) / Math.sqrt(inside.length);
+        if (score > (scored.get(word) ?? 0)) scored.set(word, score);
+      }
+      i = j;
+    }
+  }
+  return [...scored.entries()]
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, limit)
+    .map(([word]) => word);
 }
 
 /** 점수가 어떻게 나왔는지 항목별로 편 것. 화면·검수용. */

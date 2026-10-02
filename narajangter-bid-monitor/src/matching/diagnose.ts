@@ -2,12 +2,12 @@ import type { NormalizedNotice } from "../api/types.js";
 import type { LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { matchCodes } from "./codeMatcher.js";
+import { hasStandaloneProductMatch, matchCodes, matchServiceClasses } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import { linkedBidNoticeNo } from "./matchEngine.js";
-import { evaluateQualifications, uniqueSatisfied } from "./qualificationFilter.js";
+import { evaluateQualifications, missingLabels, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
  * 공고 한 건이 수집 파이프라인의 각 단계를 통과했는지 하나씩 짚는다 (② 정제 · ③ 미수집 원인 파악용).
@@ -83,7 +83,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
       : { step: "본공고 게시", ok: true, detail: isBid ? "본공고" : "아직 본공고 없음" }
   );
 
-  const excluded = matchExcludeKeyword(notice, config.excludeKeywords);
+  const excluded = matchExcludeKeyword(notice, config.excludeKeywords, config);
   steps.push(
     excluded
       ? { step: "제외키워드", ok: false, detail: `제목에 제외 키워드 '${excluded}'` }
@@ -115,25 +115,42 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
 
   const { matchedProductCodes, matchedIndustryCodes } = matchCodes(notice, config.productCodes, config.industryCodes);
   const matchedKeywords = matchKeywords(notice, config.keywords);
-  const candidate = matchedProductCodes.length > 0 || matchedKeywords.length > 0 || overseas.isMongolia;
+  const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
+  const candidate =
+    hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia || matchedServiceClasses.length > 0;
+  // 어디서 걸렸는지를 말로 구분한다 — "품목 조형물, 키워드 조형물"처럼 쓰면 같은 말이 두 번 나와
+  // 무엇이 다른지 알 수 없었다 (2026-10-02 요청). 품목 = 발주기관이 나라장터에 등록한 물품 분류,
+  // 키워드 = 공고 제목에 든 말.
+  const quoted = (xs: string[]) => xs.map((x) => `'${x}'`).join(", ");
+  const bare = (s: string) => s.replace(/\s+/g, "");
+  const inTitle = matchedKeywords.filter((k) => bare(notice.title).includes(bare(k)));
+  const inNameOnly = matchedKeywords.filter((k) => !inTitle.includes(k));
   const hits = [
-    ...matchedProductCodes.map((c) => `품목 ${c.name}`),
-    ...matchedKeywords.map((k) => `키워드 ${k}`),
-    ...(overseas.isMongolia ? ["몽골 해외개최"] : []),
-  ];
+    matchedProductCodes.length ? `[나라장터 물품분류] ${quoted(matchedProductCodes.map((c) => c.name))} — 우리 등록 품목` : null,
+    matchedServiceClasses.length ? `[나라장터 용역분류] ${quoted(matchedServiceClasses.map((c) => c.name))} — 우리 등록 분야` : null,
+    // 키워드는 제목 + 세부품명 이름에서 찾는다(keywordMatcher) — 제목에 없고 품명 이름에만 있으면 그렇게 적는다
+    // (신평초 보행환경안심길 "…디자인 구조물": 제목엔 '조형물'이 없고 세부품명이 '조형물'이었다)
+    inTitle.length ? `[공고 제목] ${quoted(inTitle)} — 우리 키워드` : null,
+    inNameOnly.length ? `[세부품명 이름] ${quoted(inNameOnly)} — 우리 키워드` : null,
+    overseas.isMongolia ? "몽골 해외개최" : null,
+  ].filter((x): x is string => x !== null);
   const industryNote =
     matchedIndustryCodes.length > 0
       ? ` (업종 ${matchedIndustryCodes.map((c) => c.name).join(", ")}은 맞지만 업종만으로는 수집하지 않음)`
       : "";
+  const keywordOnlyProducts = matchedProductCodes.filter((c) => c.requiresKeyword);
+  const productNote =
+    keywordOnlyProducts.length > 0
+      ? `제목에 등록 키워드가 없음 — 세부품명(${keywordOnlyProducts.map((c) => c.name).join(", ")})이 등록 품목이긴 하지만 ` +
+        `쓰임새가 넓어 키워드가 같이 있을 때만 수집함`
+      : `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님`;
   steps.push(
     candidate
-      ? { step: "키워드·품목", ok: true, detail: hits.join(", ") }
+      ? { step: "키워드·품목", ok: true, detail: hits.join(" · ") }
       : {
           step: "키워드·품목",
           ok: false,
-          detail:
-            `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님` +
-            industryNote,
+          detail: productNote + industryNote,
         }
   );
 
@@ -158,8 +175,7 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
     const held = uniqueSatisfied(result.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name));
     return { step: "참가자격", ok: true, detail: `충족 — ${held.join(", ")}` };
   }
-  // "업종명/0002" → "업종명(0002)" — 자격판정 툴팁과 같은 표기
-  const label = (name: string) => name.replace(/\s*\/\s*(\d{4})\s*$/, "($1)");
-  const missing = result.missingGroups.map((g) => g.allowedNames.slice(0, 4).map(label).join(" 또는 "));
-  return { step: "참가자격", ok: false, detail: `미보유 — ${missing.join(" / ")}` };
+  // 미보유여도 빼지 않는다 — 공동수급이 허용되면 함께 참가할 수 있어 표시만 한다 (applyQualificationFilter와 같은 판단)
+  const missing = missingLabels(result.missingGroups).map((g) => g.text);
+  return { step: "참가자격", ok: true, detail: `자격 미보유(공동수급 확인 필요) — 아래 중 하나 필요: ${missing.join(" / 또는 ")}` };
 }

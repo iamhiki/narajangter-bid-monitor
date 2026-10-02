@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -58,6 +58,20 @@ describe("loadAppConfig", () => {
     expect(config.keywords).toEqual(["도서관"]);
     expect(config.recipients).toEqual(["a@example.com"]);
     expect(config.minBudgetAmount).toBeNull();
+  });
+
+  it("떠 있는 프로세스에서 설정 파일을 고치면 다음 호출부터 새 설정을 읽는다 (재시작 불필요)", () => {
+    const dir = writeConfigDir({ keywords: { keywords: ["도서관"], excludeKeywords: [] } });
+    process.env.APP_CONFIG_DIR = dir;
+    expect(loadAppConfig().excludeKeywords).toEqual([]);
+    expect(loadAppConfig()).toBe(loadAppConfig()); // 안 바뀌었으면 캐시 그대로
+
+    const file = path.join(dir, "keywords.json");
+    writeFileSync(file, JSON.stringify({ keywords: ["도서관"], excludeKeywords: ["건설공사"] }));
+    // 같은 밀리초 안에 다시 써서 수정 시각이 안 바뀌는 경우를 피한다
+    const later = new Date(Date.now() + 5000);
+    utimesSync(file, later, later);
+    expect(loadAppConfig().excludeKeywords).toEqual(["건설공사"]);
   });
 
   it("minBudgetAmount를 지정하면 그대로 로드한다", () => {

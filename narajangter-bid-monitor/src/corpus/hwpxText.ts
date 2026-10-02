@@ -36,7 +36,11 @@ export function xmlToText(xml: string): string {
     // 문단/줄바꿈 태그는 공백이 아니라 줄바꿈으로 바꿔야 문단이 붙어버리지 않는다.
     .replace(/<\/hp:p>/g, "\n")
     .replace(/<hp:lineBreak\b[^>]*\/>/g, "\n")
-    .replace(/<[^>]*>/g, " ")
+    // 탭·공백 문자·표 칸 경계는 띄운다
+    .replace(/<hp:(?:tab|fwSpace|nbSpace)\b[^>]*\/>|<\/hp:tc>/g, " ")
+    // 나머지 태그(글자 서식이 바뀌는 run 경계 등)는 낱말 중간에도 온다 — 띄우면 "기술능력"이 "기 술능력"으로
+    // 끊긴다(2026-10-01 서울과기대 조형물 제안요청서). 그래서 그냥 지운다.
+    .replace(/<[^>]*>/g, "")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")

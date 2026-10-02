@@ -71,11 +71,7 @@ export async function extractPdfPages(filePath: string, options: PdfTextOptions 
     for (let pageNumber = 1; pageNumber <= limit; pageNumber++) {
       const page = await doc.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ")
-        .replace(/[ \t ]+/g, " ")
-        .trim();
+      const text = joinTextItems(content.items.flatMap((item) => ("str" in item ? [item as PdfTextItem] : [])));
       pages.push({ page: pageNumber, text, hangulCount: countHangul(text) });
       page.cleanup();
     }
@@ -97,6 +93,63 @@ export async function extractPdfPages(filePath: string, options: PdfTextOptions 
   };
 }
 
+/** pdfjs 텍스트 조각 — 필요한 필드만. transform = [a, b, c, d, x, y] */
+export interface PdfTextItem {
+  str: string;
+  transform: number[];
+  width: number;
+}
+
+const HANGUL = /[가-힣]/;
+/** 항목 기호로 시작하는 조각 — "가.", "1.", "1)", "(1)", "□", "○", "-", "※" */
+const ITEM_START = /^\s*(?:[가-하][.)]|\d{1,2}[.)](?!\d)|\(\d{1,2}\)|[□■○●◦▪※•❍◆◇▶\-])/;
+
+/**
+ * pdfjs 텍스트 조각을 이어 붙인다.
+ *
+ * 예전에는 조각마다 무조건 띄어쓰기를 넣었다. PDF는 한 낱말을 여러 조각으로 쪼개 저장하고, 한글 문서는
+ * 줄 끝에서 낱말 중간을 끊어 다음 줄로 넘기는 경우가 많아서 "전시 콘 텐츠", "육 성하고", "체계 적으로"처럼
+ * 낱말이 끊긴 채 뽑혔다(2026-10-01 고성 마동호 습지센터 과업지시서). 그러면 "유물 운송" 같은 문구 검사와
+ * 과업 요약이 깨진다. 이제 조각의 위치를 보고 정한다:
+ *  · 같은 줄: 앞 조각 끝과 이 조각 사이가 글자 크기의 0.2배보다 벌어졌을 때만 띄운다.
+ *  · 줄이 바뀜: 앞 줄이 오른쪽 끝까지 찼고(=폭 때문에 넘어간 줄) 양쪽이 한글이면 붙인다(낱말 중간 끊김).
+ *    오른쪽 끝까지 안 찬 줄은 문단이 끝난 것이라 줄바꿈으로 둔다.
+ * (싱크로율은 띄어쓰기를 지우고 비교하므로 이 변경으로 점수는 바뀌지 않는다 — similarity/tokenize.ts)
+ */
+export function joinTextItems(items: PdfTextItem[]): string {
+  const parts = items.filter((it) => it.str.length > 0);
+  if (parts.length === 0) return "";
+  const sizeOf = (it: PdfTextItem) => Math.abs(it.transform[3] ?? 0) || Math.hypot(it.transform[2] ?? 0, it.transform[3] ?? 0) || 10;
+  const rightEdge = Math.max(...parts.map((it) => (it.transform[4] ?? 0) + it.width));
+  let out = "";
+  let prev: PdfTextItem | null = null;
+  for (const it of parts) {
+    if (!prev) {
+      out = it.str;
+      prev = it;
+      continue;
+    }
+    const size = Math.max(sizeOf(prev), sizeOf(it));
+    const prevEnd = (prev.transform[4] ?? 0) + prev.width;
+    const sameLine = Math.abs((it.transform[5] ?? 0) - (prev.transform[5] ?? 0)) < size * 0.5;
+    let sep: string;
+    if (sameLine) {
+      sep = (it.transform[4] ?? 0) - prevEnd > size * 0.2 ? " " : "";
+    } else {
+      const lineFull = rightEdge - prevEnd < size * 2;
+      // 다음 줄이 항목 기호로 시작하면 새 항목이다 — "…높이고자 함" + "다. 창의적이고"가 "함다."로 붙지 않게
+      const newItem = ITEM_START.test(it.str);
+      const glue = lineFull && !newItem && HANGUL.test(out.slice(-1)) && HANGUL.test(it.str.charAt(0));
+      sep = glue ? "" : lineFull && !newItem ? " " : "\n";
+    }
+    // 조각 자체가 공백으로 끝나거나 시작하면 띄어쓰기를 겹치지 않는다
+    if (sep === " " && (/\s$/.test(out) || /^\s/.test(it.str))) sep = "";
+    out += sep + it.str;
+    prev = it;
+  }
+  return out.replace(/[ \t ]+/g, " ").replace(/ *\n */g, "\n").trim();
+}
+
 /**
  * 한글이 이 기준보다 적은 페이지는 스캔 이미지로 본다.
  *
@@ -105,6 +158,22 @@ export async function extractPdfPages(filePath: string, options: PdfTextOptions 
  * 원래 글자가 적은 텍스트 페이지까지 OCR로 보내 시간을 버린다.
  */
 export const SCANNED_PAGE_HANGUL_THRESHOLD = 20;
+
+/**
+ * 텍스트 레이어에서 숫자가 통째로 빠진 페이지 — 글꼴의 글자 대응표가 깨진 PDF는 한글만 남고 숫자·괄호가
+ * 사라져 "시행령 제 조 제 항", "소재지 가 전남"처럼 나온다 (국립광주과학관 과업지시서 실측). 법령 조항
+ * "제N조"는 공고문마다 거의 반드시 있어서, 번호 없는 "제 조"가 여럿인데 번호 있는 것은 하나도 없으면
+ * 숫자가 빠진 페이지로 본다. 이런 페이지는 OCR로 다시 읽는다.
+ */
+export function findDigitlessPages(pages: PdfPageText[]): number[] {
+  return pages
+    .filter((p) => {
+      const missing = (p.text.match(/제\s+(?:조|항|호)/g) ?? []).length;
+      const numbered = (p.text.match(/제\s*\d+\s*(?:조|항|호)/g) ?? []).length;
+      return missing >= 2 && numbered === 0;
+    })
+    .map((p) => p.page);
+}
 
 /** 텍스트 레이어가 비어 있어 OCR이 필요한 페이지 번호들 */
 export function findScannedPages(pages: PdfPageText[], threshold = SCANNED_PAGE_HANGUL_THRESHOLD): number[] {

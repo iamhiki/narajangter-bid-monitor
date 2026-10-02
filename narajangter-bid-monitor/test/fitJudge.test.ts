@@ -51,11 +51,16 @@ describe("buildNoticeMessage", () => {
         requirements: [{ kind: "업종", code: "4444", name: null, held: false, docName: "종합디자인분야", related: null, bases: ["면허"] }],
         region: "경상북도",
         designated: true,
+        designatedCount: null,
         jiilDesignated: false,
         registrationDeadline: "2026-10-13 18:00",
         classifiedItems: [{ code: "6010989901", name: "실물모형및전시물", held: true }],
         linkedBidNo: null,
         sectionFound: true,
+        performance: [{ sentence: "최근 3년 이내 단일 건으로 10억원 이상 준공실적이 있는 업체", years: 3, single: true, minAmountWon: 1e9 }],
+        performanceReviewDeadline: "2026/10/06 18:00",
+        submissionDeadline: null,
+        sizeLimit: null,
       },
       jointBid: "(없음)공동수급불허",
       taskText: null,
@@ -67,6 +72,8 @@ describe("buildNoticeMessage", () => {
     expect(msg).toContain("미보유 종합디자인분야(4444)");
     expect(msg).toContain("지역제한: 경상북도");
     expect(msg).toContain("명단에 지일 없음");
+    expect(msg).toContain("실적 요건: 최근 3년 이내 단일 건으로 10억원 이상 준공실적이 있는 업체");
+    expect(msg).toContain("실적심사신청서 마감 2026/10/06 18:00");
     expect(msg).toContain("2024 OO과학관 전시 (0.41)");
     expect(msg).toContain("과업지시서: 첨부 없음");
     // 공고문 발췌의 연락처는 외부 API로 나가기 전에 가린다
