@@ -13,8 +13,10 @@ export type ScopeFlagKind = "운송" | "대여" | "운영" | "홍보·도록" | 
 
 export interface ScopeFlag {
   kind: ScopeFlagKind;
-  /** 근거 문장 (본문에서 잘라낸 것) */
+  /** 근거 문장 (본문에서 잘라낸 것, 길면 걸린 말 둘레만) */
   sentence: string;
+  /** 문장 안에서 걸린 말 ("유물 운송") — 화면에서 강조한다 */
+  match?: string;
 }
 
 const OBJECT = "(?:유물|작품|전시품|출품\\s*자료|소장\\s*자료|소장품|전시\\s*자료)";
@@ -57,8 +59,23 @@ const AS_CONTENT = /^[\s가-힣ㆍ·,]{0,16}?(?:이|을|를)?\s*(?:담긴|담은
 /** 목차 줄("과업 범위 ------ 7")은 건너뛴다 */
 const TOC = /-{6,}|·{6,}|…{3,}/;
 
-/** 항목 경계. 한글 문서의 글머리 기호는 사용자 정의 영역 문자(U+F000~F8FF)로 추출되는 경우가 많다. */
-const BOUNDARY = /(?:[•○◦▪■□◆◇※-]|(?<![\d.])\d{1,2}\)|(?<![가-힣])[가-하]\.|다\.(?=\s)|함\.(?=\s)|음\.(?=\s)|(?<=\s)-\s)/g;
+/**
+ * 항목 경계. 한글 문서의 글머리 기호는 사용자 정의 영역 문자(U+F000~F8FF)로 추출되는 경우가 많다.
+ * 한글 자음 "ㅇ "을 글머리표로 쓰는 문서도 있다 (2026-10-02 고흥군 과학관 실감콘텐츠 과업지시서 — 항목 5개가 한 문장으로 잡혔다).
+ */
+const BOUNDARY = /(?:(?<![가-힣ㄱ-ㅎ])ㅇ(?=\s)|[•○◦▪■□◆◇※-]|(?<![\d.])\d{1,2}\)|(?<![가-힣])[가-하]\.|다\.(?=\s)|함\.(?=\s)|음\.(?=\s)|(?<=\s)-\s)/g;
+
+/** 화면 팝업에 보여 줄 근거 문장의 최대 길이 — 넘으면 걸린 말 앞뒤만 남기고 "…"로 줄인다 */
+const SENTENCE_MAX = 120;
+
+/** 항목 경계를 못 찾아 길게 잡힌 문장을 걸린 말 둘레로 줄인다 */
+function clip(sentence: string, hit: string): string {
+  if (sentence.length <= SENTENCE_MAX) return sentence;
+  const at = Math.max(0, sentence.indexOf(hit));
+  const from = Math.max(0, at - 45);
+  const to = Math.min(sentence.length, at + hit.length + 60);
+  return `${from > 0 ? "…" : ""}${sentence.slice(from, to).trim()}${to < sentence.length ? "…" : ""}`;
+}
 
 /** 일치한 위치를 감싸는 항목 한 줄(앞뒤 항목 기호 사이)을 잘라낸다 */
 function sentenceAround(flat: string, index: number, length: number): string {
@@ -70,7 +87,7 @@ function sentenceAround(flat: string, index: number, length: number): string {
   const after = flat.slice(index + length, index + length + 140);
   const end = after.search(BOUNDARY);
   const stop = end >= 0 ? index + length + end : Math.min(flat.length, index + length + 140);
-  return flat.slice(start, stop).replace(/^[\s•○◦▪■□◆◇※-\-]+/, "").trim();
+  return flat.slice(start, stop).replace(/^[\s•○◦▪■□◆◇※-\-]+/, "").replace(/^ㅇ\s+/, "").trim();
 }
 
 const PURPOSE = /사\s*업\s*목\s*적|추\s*진\s*목\s*적|과\s*업\s*목\s*적|용\s*역\s*목\s*적/;
@@ -93,7 +110,7 @@ function detectRestSpace(flat: string): ScopeFlag | null {
   const purpose = flat.slice(m.index, m.index + PURPOSE_SPAN);
   const rest = REST_WORDS.exec(purpose);
   if (!rest || EXHIBIT_WORDS.test(purpose)) return null;
-  return { kind: "휴게공간", sentence: sentenceAround(flat, m.index + rest.index, rest[0].length) };
+  return { kind: "휴게공간", sentence: clip(sentenceAround(flat, m.index + rest.index, rest[0].length), rest[0]), match: rest[0] };
 }
 
 export function detectScopeFlags(text: string, perKind = 3): ScopeFlag[] {
@@ -110,7 +127,7 @@ export function detectScopeFlags(text: string, perKind = 3): ScopeFlag[] {
       const key = sentence.replace(/\s+/g, "").slice(0, 40);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ kind, sentence });
+      out.push({ kind, sentence: clip(sentence, m[0]), match: m[0] });
     }
   }
   const rest = detectRestSpace(flat);

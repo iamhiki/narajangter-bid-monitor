@@ -326,6 +326,15 @@ body {
 .qtip .grp { font-size: 11px; color: var(--faint); margin-left: 4px; white-space: nowrap; }
 .qtip .warnline { color: var(--urgent); font-weight: 600; font-size: 12px; }
 .qtip h4.sub-h { margin-top: 12px; }
+/* 과업 경고 팝업 — 결론 한 줄 → 원문 인용(걸린 말 강조) → 출처 */
+.qtip p.lead { margin: 0 0 10px; font-size: 12.5px; line-height: 1.6; color: var(--ink-strong); }
+.qtip p.q-label { margin: 10px 0 4px; font-size: 11px; color: var(--muted); }
+.qtip blockquote.quote {
+  margin: 0 0 6px; padding: 6px 10px; border-left: 3px solid var(--warn); background: var(--bg);
+  font-size: 12px; line-height: 1.6; color: var(--ink);
+}
+.qtip blockquote.quote mark { background: var(--warn-tint); color: var(--ink-strong); font-weight: 600; padding: 0 2px; }
+.qtip p.src { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--faint); }
 /* 업종제한 묶음 — "필수 보유 / 이 중 하나" */
 .qtip .lay-blk { padding: 8px 0; border-top: 1px solid var(--line); }
 .qtip .lay-blk:first-child { border-top: 0; padding-top: 0; }
@@ -1573,9 +1582,13 @@ const tipBadge = (cls, inner, title, body) => `<span class="badge qual ${cls}" t
 function sizeText(size) {
   return [size.level === "소기업" ? "소기업·소상공인" : "중소기업·소상공인", ...size.alsoAllowed].join("·");
 }
+/**
+ * 자격 팝업의 기업 규모 한 줄. 소기업 한정은 옆에 sizeBadge가 따로 떠서 여기서 되풀이하지 않는다
+ * (2026-10-02 요청). 중소기업 한정은 배지가 없어 이 줄이 유일한 표시라 남긴다.
+ */
 function sizeLine(doc) {
   const size = doc?.sizeLimit;
-  if (!size) return "";
+  if (!size || size.level === "소기업") return "";
   return `<p>기업 규모: <b>${esc(sizeText(size))}</b>만 참가${size.conditional ? " (조건부 — 공고문 확인)" : ""}</p>`;
 }
 /**
@@ -1956,25 +1969,45 @@ function coreBadge(core) {
 
 const SCOPE_LABEL = { 운송: "유물 운송", 대여: "전시품 대여", 운영: "인력 운영", "홍보·도록": "홍보·도록" };
 /** 사업 목적이 휴게·독서 공간 조성 — 과업 일부가 아니라 사업 성격이라 배지를 따로 둔다 */
+/**
+ * 과업지시서 원문 인용 한 칸 — 걸린 말(f.match)을 강조한다.
+ * 팝업은 결론(무슨 업무인지·어떻게 할지)을 먼저, 원문은 짧은 인용으로 아래에 둔다 (2026-10-02 요청:
+ * 원문 덩어리를 그대로 늘어놓으면 담당자가 무엇이 문제인지 찾을 수 없었다).
+ */
+function scopeQuote(f) {
+  let html = esc(f.sentence);
+  if (f.match) {
+    const m = esc(f.match);
+    const at = html.indexOf(m);
+    if (at >= 0) html = html.slice(0, at) + `<mark>${m}</mark>` + html.slice(at + m.length);
+  }
+  return `<blockquote class="quote">${html}</blockquote>`;
+}
+
 function restSpaceBadge(scope) {
   const f = scope.flags.find((x) => x.kind === "휴게공간");
   const body =
-    `<p>사업 목적이 방문객 휴식·독서 공간 조성입니다.<br>전시 사업이 아니어서 따로 모았습니다.</p>` +
-    `<ul><li>${esc(f.sentence)}</li></ul>` +
-    `<p>출처: ${esc(scope.sourceFile)}</p>`;
+    `<p class="lead">사업 목적이 <b>방문객 휴식·독서 공간 조성</b>입니다.<br>전시 사업이 아니어서 따로 모았습니다.</p>` +
+    `<p class="q-label">과업지시서 원문</p>${scopeQuote(f)}` +
+    `<p class="src">출처: ${esc(scope.sourceFile)}</p>`;
   return tipBadge("warn", "⚠ 휴게·독서 공간 조성", "사업 성격", body);
 }
 
 function scopeBadge(scope) {
   const kinds = [...new Set(scope.flags.map((f) => f.kind))].filter((k) => k !== "휴게공간");
   if (!kinds.length) return "";
+  const names = kinds.map((k) => SCOPE_LABEL[k] || k);
+  const quotes = kinds
+    .map((k) => {
+      const qs = scope.flags.filter((f) => f.kind === k).map(scopeQuote).join("");
+      return kinds.length > 1 ? `<p class="q-label">${esc(SCOPE_LABEL[k] || k)} — 과업지시서 원문</p>${qs}` : `<p class="q-label">과업지시서 원문</p>${qs}`;
+    })
+    .join("");
   const body =
-    kinds
-      .map((k) => `<p><b>${esc(SCOPE_LABEL[k] || k)}</b></p><ul>${scope.flags.filter((f) => f.kind === k).map((f) => `<li>${esc(f.sentence)}</li>`).join("")}</ul>`)
-      .join("") +
-    `<p>제작·설치 외 업무입니다.<br>직접 하기 어렵다면 하청 업체와 비용을 견적에 넣어야 합니다.</p>` +
-    `<p>출처: ${esc(scope.sourceFile)}</p>`;
-  return `<span class="badge qual warn" tabindex="0">⚠ 과업에 ${esc(kinds.map((k) => SCOPE_LABEL[k] || k).join("·"))} 포함${qtip("제작·설치 외 과업", body)}</span>`;
+    `<p class="lead">과업에 <b>${esc(names.join("·"))}</b> 업무가 들어 있습니다.<br>제작·설치 외 업무라, 직접 하기 어렵다면 하청 업체와 비용을 견적에 넣어야 합니다.</p>` +
+    quotes +
+    `<p class="src">출처: ${esc(scope.sourceFile)}</p>`;
+  return `<span class="badge qual warn" tabindex="0">⚠ 과업에 ${esc(names.join("·"))} 포함${qtip("제작·설치 외 과업", body)}</span>`;
 }
 
 /**

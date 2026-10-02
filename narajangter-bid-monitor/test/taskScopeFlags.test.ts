@@ -82,3 +82,22 @@ describe("휴게·독서 공간 조성", () => {
     }
   });
 });
+
+describe("근거 문장 자르기 (2026-10-02 고흥군 과학관 실감콘텐츠)", () => {
+  it("한글 자음 'ㅇ' 글머리표도 항목 경계로 본다 — 항목 여러 개를 한 문장으로 잡지 않는다", () => {
+    const text =
+      "ㅇ 발주기관에서 제공한 것 이외에 제작과정에서 필요한 유물, 유적의 고화질 이미지는 직접 촬영 ㅇ 필요시 발주기관과 협의하에 이미지 확보 " +
+      "ㅇ 유물 촬영시 촬영 방법, 유물 운송 방법 등은 발주기관과 협의 ㅇ 기존 제작된 데이터 활용 시 발주기관과 우선 협의";
+    const f = detectScopeFlags(text).find((x) => x.kind === "운송");
+    expect(f?.sentence).toBe("유물 촬영시 촬영 방법, 유물 운송 방법 등은 발주기관과 협의");
+    expect(f?.match).toBe("유물 운송");
+  });
+
+  it("경계를 못 찾아 길어진 문장은 걸린 말 둘레만 남긴다", () => {
+    const filler = "전시 콘텐츠의 구성과 연출 방향을 발주기관과 협의하여 정한다 그리고 ".repeat(4);
+    const f = detectScopeFlags(`${filler}유물 운송 및 설치를 수행 ${filler}`).find((x) => x.kind === "운송");
+    expect(f!.sentence.length).toBeLessThanOrEqual(122);
+    expect(f!.sentence).toContain("유물 운송");
+    expect(f!.sentence.startsWith("…")).toBe(true);
+  });
+});
