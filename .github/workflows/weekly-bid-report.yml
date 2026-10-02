@@ -4,14 +4,26 @@ name: 나라장터 입찰 모니터링 주간 리포트
 # "입찰"(적격심사·최저가 등)은 마감이 짧아 daily-closing-alert.yml이 매일 아침 보낸다.
 on:
   schedule:
-    # 매주 월요일 07:00 KST = 일요일 22:00 UTC
-    - cron: "0 22 * * 0"
+    # 예비용. 월요일 07:00 실행은 외부 예약 서비스(cron-job.org)가 workflow_dispatch API로 깨운다 — GitHub 예약 실행은
+    # 몇 시간씩 건너뛰기도 해서 하나에만 맡기면 보고가 빠진다. 이 schedule은 그쪽이 멈췄을 때의 안전망이다.
+    # 그 주에 이미 보냈으면 cache/sent-reports.json 기록을 보고 조용히 끝나므로 두 번 오지 않는다 (src/state/sentReports.ts).
+    # 매주 월요일 08:10 KST = 일요일 23:10 UTC. 정각은 GitHub 예약 실행이 몰려 지연이 커서 피한다.
+    - cron: "10 23 * * 0"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "true로 설정하면 이메일을 보내지 않고 리포트만 생성합니다"
         required: false
         default: "false"
+      force:
+        description: "true로 설정하면 이번 주에 이미 보냈어도 다시 보냅니다"
+        required: false
+        default: "false"
+
+# 두 곳이 거의 같이 깨워도 한 번에 하나만 돈다 — 뒤에 도는 쪽이 앞 실행의 발송 기록을 보고 건너뛴다.
+concurrency:
+  group: weekly-bid-report
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -37,6 +49,13 @@ jobs:
 
       - name: 타입체크
         run: npm run typecheck
+
+      - name: 보고 발송 기록 불러오기
+        uses: actions/cache/restore@v4
+        with:
+          path: narajangter-bid-monitor/cache/sent-reports.json
+          key: sent-weekly-${{ github.run_id }}
+          restore-keys: sent-weekly-
 
       - name: 과거사업 코퍼스 풀기 (싱크로율용 — 암호 파일은 저장소, 비밀번호는 Secret)
         env:
@@ -64,7 +83,15 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           FEEDBACK_SHEET_ID: ${{ secrets.FEEDBACK_SHEET_ID }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          FORCE_SEND: ${{ github.event.inputs.force || 'false' }}
         run: npm run report
+
+      - name: 보고 발송 기록 저장
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: narajangter-bid-monitor/cache/sent-reports.json
+          key: sent-weekly-${{ github.run_id }}
 
       - name: 리포트 파일 업로드 (백업)
         if: always()

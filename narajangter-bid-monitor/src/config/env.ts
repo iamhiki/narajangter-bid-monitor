@@ -31,11 +31,15 @@ export type RunMode = "weekly" | "hourly" | "daily";
 
 export interface Env {
   /**
-   * weekly: 기간 전체를 모아 이메일 리포트 발송 (텔레그램 보고서는 보내지 않음).
+   * weekly: 기간 전체를 모아 이메일 리포트 발송, "입찰"을 뺀 공고는 텔레그램으로도 보고.
    * hourly: 새로 나온 공고만 골라 텔레그램으로 즉시 알림 (이메일은 보내지 않음).
    * daily: 7일 안에 마감되는 "입찰"(적격심사 등) 본공고를 매일 텔레그램으로 보고.
    */
   runMode: RunMode;
+  /** daily·weekly 보고를 이미 보냈는지 기억하는 파일 (두 곳이 깨워도 한 번만 보내려고) */
+  sentReportsPath: string;
+  /** true면 이미 보낸 보고도 다시 보낸다 (담당자가 직접 다시 받고 싶을 때) */
+  forceSend: boolean;
   /** hourly 모드에서 이미 알린 공고를 기억하는 파일 */
   notifiedStatePath: string;
 
@@ -86,6 +90,7 @@ export function loadEnv(): Env {
   const errors: string[] = [];
 
   const dryRun = parseBool(e.DRY_RUN, false);
+  const forceSend = parseBool(e.FORCE_SEND, false);
 
   const naraBidServiceKey = (e.NARA_BID_SERVICE_KEY ?? "").trim();
   if (!dryRun && !naraBidServiceKey) {
@@ -204,6 +209,8 @@ export function loadEnv(): Env {
     sendEmptyReport: parseBool(e.SEND_EMPTY_REPORT, true),
     alertEmailOnFailure: parseBool(e.ALERT_EMAIL_ON_FAILURE, true),
     dryRun,
+    forceSend,
+    sentReportsPath: e.SENT_REPORTS_PATH?.trim() || "cache/sent-reports.json",
     logLevel,
 
     smtpHost,
