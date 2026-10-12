@@ -215,6 +215,33 @@ const NAMED_LICENSES: { pattern: RegExp; name: string }[] = [
 const NAMED_LICENSE_SPAN = 400;
 
 /**
+ * 이름만 적힌 면허가 참가자격 요건인지. 앞부분(첫 항목)에 있으면 요건으로 본다.
+ * 뒤쪽 항목이라도 그 항목이 "… 건축사사무소 등록업체"처럼 등록·개설한 자를 정하는 문장이고
+ * 공동수급·"없는 경우" 같은 조건이 없으면 요건이다 — 영암군 마한문화공원 공고는 "가~마. 요건을 모두
+ * 갖춘 자" 중 마항(1,400자 뒤)이 건축사사무소였는데 앞 400자만 봐서 놓쳤다 (2026-10-12).
+ */
+function namedLicenseRequired(section: string, pattern: RegExp): boolean {
+  const all = new RegExp(pattern.source, "g");
+  for (const m of section.matchAll(all)) {
+    if (m.index! < NAMED_LICENSE_SPAN) return true;
+    // 항목 경계: "마. ", "○", "◦", "①", "1)" — 그 사이가 한 항목
+    const marker = /(?:^|\s)(?:[가-하]\s*\.|[○◦●▪ㅇ]|[①-⑳]|\d+\s*\))\s/g;
+    let start = 0;
+    let end = section.length;
+    for (const b of section.matchAll(marker)) {
+      if (b.index! <= m.index!) start = b.index!;
+      else {
+        end = b.index!;
+        break;
+      }
+    }
+    const item = section.slice(start, end);
+    if (/(등록|개설|신고|소지)[^.。]{0,20}(업체|자)/.test(item) && !/공동\s*(수급|도급|이행|응모)|없는\s*경우|경우에는|당선자/.test(item)) return true;
+  }
+  return false;
+}
+
+/**
  * 공고문 전체에서 참가자격 부분을 고른다. "참가자격"이라는 말은 청렴 서약 문구("참가자격 제한 등의
  * 불이익") 같은 데도 나와서 첫 번째 것을 쓰면 엉뚱한 곳을 잡는다(울산과학관 공고 실측).
  * 등장 위치마다 뒤 1500자 안에 자격 관련 단어가 몇 개인지 세어 가장 많은 곳을 쓴다.
@@ -536,9 +563,8 @@ export function analyzeQualificationText(
       seen.add(c.code);
     }
   }
-  const head = section.slice(0, NAMED_LICENSE_SPAN);
   for (const l of NAMED_LICENSES) {
-    if (l.pattern.test(head)) {
+    if (namedLicenseRequired(section, l.pattern)) {
       requirements.push({ kind: "업종", code: null, name: null, held: false, docName: l.name, related: null, bases: ["면허"] });
     }
   }
