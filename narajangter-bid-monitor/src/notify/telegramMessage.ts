@@ -222,7 +222,7 @@ function renderSummaryBlock(input: ReportInput, tally: ReportTally, weekly = fal
     escapeTelegramHtml(`${formatDateForSubject(input.generatedAt)} 기준 · 조회기간 ${period}`),
   ];
   if (weekly) {
-    lines.push(escapeTelegramHtml("마감 임박 공고와 전체 목록은 담당자 화면에서 확인하세요."));
+    lines.push(escapeTelegramHtml("입찰(적격심사·최저가 등) 새 공고는 매일 아침 따로 보냅니다. 전체 목록은 담당자 화면에서 확인하세요."));
   }
   lines.push("");
 
@@ -263,13 +263,20 @@ export interface WindowTotal {
   count: number;
 }
 
-function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTotal?: WindowTotal): string {
+function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTotal?: WindowTotal, bidsOnly = false): string {
   const d = input.generatedAt;
   const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const lines = [
-    `🆕 <b>새 공고 ${tally.total}건</b>`,
-    escapeTelegramHtml(`${formatDateForSubject(d)} ${time} 확인 · 본공고 ${tally.bid}건 · 사전규격 ${tally.preStandard}건`),
+    bidsOnly ? `🆕 <b>새 입찰 공고 ${tally.total}건</b>` : `🆕 <b>새 공고 ${tally.total}건</b>`,
+    escapeTelegramHtml(
+      bidsOnly
+        ? `${formatDateForSubject(d)} ${time} 확인 · 적격심사·최저가 등 입찰 본공고`
+        : `${formatDateForSubject(d)} ${time} 확인 · 본공고 ${tally.bid}건 · 사전규격 ${tally.preStandard}건`
+    ),
   ];
+  if (bidsOnly) {
+    lines.push(escapeTelegramHtml("이미 알린 공고는 다시 보내지 않습니다. 전체 목록과 마감 임박 공고는 담당자 화면에서 확인하세요."));
+  }
   if (windowTotal) {
     lines.push(
       escapeTelegramHtml(`최근 ${windowTotal.days}일 전체 ${windowTotal.count}건 중 새로 올라온 공고만 보냅니다 (전체 목록은 웹 화면)`)
@@ -283,13 +290,13 @@ function renderNewNoticesBlock(input: ReportInput, tally: ReportTally, windowTot
   return lines.join("\n");
 }
 
-export type TelegramMessageKind = "report" | "new" | "weekly";
+export type TelegramMessageKind = "report" | "new" | "newBids" | "weekly";
 
 /**
  * 리포트를 텔레그램 HTML 메시지 배열로 만든다 (4096자 상한 때문에 여러 건이 될 수 있다).
  *
  * kind "new"는 매시간 확인에서 새로 나온 공고만 보낼 때 쓴다 — 머리말과 끝맺음만 다르고
- * 공고 목록 모양은 같다. kind "weekly"는 주간 보고 머리말이다.
+ * 공고 목록 모양은 같다. kind "newBids"는 매일 아침 새 "입찰" 공고 알림, kind "weekly"는 주간 보고 머리말이다.
  */
 export function buildTelegramMessages(
   input: ReportInput,
@@ -298,7 +305,9 @@ export function buildTelegramMessages(
   const kind = options.kind ?? "report";
   const tally = tallyReport(input);
   const blocks: string[] = [
-    kind === "new" ? renderNewNoticesBlock(input, tally, options.windowTotal) : renderSummaryBlock(input, tally, kind === "weekly"),
+    kind === "new" || kind === "newBids"
+      ? renderNewNoticesBlock(input, tally, options.windowTotal, kind === "newBids")
+      : renderSummaryBlock(input, tally, kind === "weekly"),
   ];
 
   // 본공고와 사전규격은 할 일이 다르다 — 본공고는 지금 입찰, 사전규격은 아직 규격 공개 단계(의견 등록만).

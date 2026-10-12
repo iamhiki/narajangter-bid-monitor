@@ -10,7 +10,7 @@ import { logger } from "../logger.js";
  * 하나에만 맡기면 보고가 빠지고, 둘 다 보내게 두면 같은 보고를 두 번 받는다. 그래서 먼저 보낸 쪽이
  * 여기 남기고, 뒤에 도는 쪽은 기록을 보고 조용히 끝난다.
  *
- * 실행 사이에 이 파일은 GitHub Actions 캐시로 넘긴다 (지금 정기 실행은
+ * 실행 사이에 이 파일은 GitHub Actions 캐시로 넘긴다 (daily-closing-alert.yml,
  * weekly-bid-report.yml). 캐시가 비면(첫 실행, 만료) 한 번 더 나갈 수 있다 — 빠지는 것보다 낫다.
  */
 export type ScheduledReport = "daily" | "weekly";

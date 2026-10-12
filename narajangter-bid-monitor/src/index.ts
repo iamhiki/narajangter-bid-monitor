@@ -2,10 +2,9 @@ import { loadEnv, type Env } from "./config/env.js";
 import { loadAppConfig } from "./config/loadJsonConfig.js";
 import { collectReportInput, hasFetchFailures } from "./pipeline.js";
 import { buildReport, type ReportInput, type ReportSource } from "./report/buildReport.js";
-import { buildClosingSoonMessages, buildTelegramMessages } from "./notify/telegramMessage.js";
-import { sendTelegramFailureAlert, sendTelegramMessages, sendTelegramReport } from "./notify/telegram.js";
+import { buildTelegramMessages } from "./notify/telegramMessage.js";
+import { sendTelegramFailureAlert, sendTelegramReport } from "./notify/telegram.js";
 import { classifyBidMethod } from "./matching/bidMethod.js";
-import { CLOSING_SOON_DAYS, selectClosingSoon } from "./matching/deadline.js";
 import { appendMatchesToFeedbackSheet } from "./sheets/feedbackSheet.js";
 import { saveReportToDisk } from "./report/saveReport.js";
 import { createTransporter, verifyTransporter } from "./email/mailer.js";
@@ -20,7 +19,7 @@ import {
   shouldSendFailureAlert,
   type NotifiedState,
 } from "./state/notifiedStore.js";
-import { isPostedWithin } from "./state/recency.js";
+import { isPostedWithin, NEW_BID_HOURS } from "./state/recency.js";
 import { alreadySent, loadSentReports, markSent, reportPeriodKey } from "./state/sentReports.js";
 import { toErrorMessage } from "./errors.js";
 import { logger } from "./logger.js";
@@ -29,9 +28,8 @@ import { redactSecrets } from "./redact.js";
 /**
  * 두 가지 모드로 돈다 (RUN_MODE).
  *
- *   weekly — 매주 한 번, 기간 전체를 이메일 리포트와 텔레그램으로 보낸다. 정기 실행은 이것 하나다.
- *   daily  — 7일 안에 마감되는 "입찰" 본공고를 텔레그램으로 보고한다. 2026-10-12부터 정기 실행하지 않는다
- *            (마감 임박 공고는 담당자 화면에서 보므로 담당자 요청으로 끔). 코드는 수동 실행용으로 남긴다.
+ *   weekly — 매주 한 번, 기간 전체를 이메일 리포트로, "입찰"을 뺀 공고를 텔레그램으로 보낸다.
+ *   daily  — 매일 아침, 새로 올라온 "입찰"(적격심사·최저가 등) 본공고만 텔레그램으로 알린다.
  *   hourly — 새로 나온 공고만 골라 텔레그램으로 바로 알린다. 2026-10-02부터 정기 실행하지 않는다
  *            (공고가 뜰 때마다 알림이 와서 담당자 요청으로 끔). 코드는 수동 실행용으로 남긴다.
  */
@@ -43,7 +41,7 @@ async function run(): Promise<number> {
     env = loadEnv();
     const appConfig = loadAppConfig();
     const now = new Date();
-    if (env.runMode === "hourly") state = loadNotifiedState(env.notifiedStatePath);
+    if (env.runMode === "hourly" || env.runMode === "daily") state = loadNotifiedState(env.notifiedStatePath);
 
     // 매일·주간 보고는 cron-job.org와 GitHub 예약 실행 두 곳이 깨운다. 먼저 보낸 쪽이 있으면 조회도 하지 않고 끝낸다.
     const scheduled = env.runMode === "hourly" ? undefined : env.runMode;
@@ -59,7 +57,7 @@ async function run(): Promise<number> {
     // ①수집~③필터링은 텔레그램 수동 조회(scripts/telegramBot.ts)와 공유한다 (src/pipeline.ts).
     const reportInput = await collectReportInput(env, appConfig, {
       now,
-      // 매일 보고는 30일치를 훑어 마감 임박 건만 추리므로 첨부까지 받으면 느려지기만 한다.
+      // 매일 알림은 새 입찰 공고 몇 건만 보내므로 첨부까지 받으면 느려지기만 한다 (자세한 건 담당자 화면).
       withAttachments: env.runMode !== "daily",
       withJointBidStatus: true,
     });
@@ -67,7 +65,7 @@ async function run(): Promise<number> {
     if (env.runMode === "hourly") return await runHourly(env, reportInput, now, state!);
     const exitCode =
       env.runMode === "daily"
-        ? await runDaily(env, reportInput, now)
+        ? await runDaily(env, reportInput, now, state!)
         : await runWeekly(env, appConfig.recipients, reportInput, now);
     // 여기까지 왔으면 보고는 나갔다 (발송 실패는 위에서 예외로 빠진다). 일부 조회 실패(2)여도 보낸 것으로 친다.
     if (scheduled && sent && !env.dryRun) markSent(env.sentReportsPath, sent, scheduled, now);
@@ -83,16 +81,17 @@ async function runWeekly(env: Env, recipients: string[], reportInput: ReportInpu
 
   await saveReportToDisk(report, now);
 
+  const weeklyInput = withoutBids(reportInput);
   if (env.dryRun) {
     logger.info("DRY_RUN=true → 이메일·텔레그램 발송을 생략합니다. output/ 폴더의 리포트 파일을 확인하세요.");
     console.log(report.text);
-    const messages = buildTelegramMessages(reportInput, { kind: "weekly" });
-    console.log(`\n텔레그램 미리보기 (주간 공고 ${allMatches(reportInput).length}건, 메시지 ${messages.length}건)`);
+    const messages = buildTelegramMessages(weeklyInput, { kind: "weekly" });
+    console.log(`\n텔레그램 미리보기 (주간 공고 ${allMatches(weeklyInput).length}건, 메시지 ${messages.length}건)`);
     messages.forEach((message, i) => console.log(`\n--- 메시지 ${i + 1}/${messages.length} ---\n${message}`));
     return fetchFailed ? 2 : 0;
   }
 
-  const telegramFailed = await sendWeeklyTelegram(env, reportInput);
+  const telegramFailed = await sendWeeklyTelegram(env, weeklyInput);
 
   if (report.totalMatchCount === 0 && !env.sendEmptyReport) {
     logger.info("매칭 결과 0건이며 SEND_EMPTY_REPORT=false → 이메일 발송을 생략합니다.");
@@ -108,6 +107,18 @@ async function runWeekly(env: Env, recipients: string[], reportInput: ReportInpu
   await sendReportEmail(report, { transporter, from: env.smtpFrom, recipients });
 
   return fetchFailed || feedbackSheetFailed || telegramFailed ? 2 : 0;
+}
+
+/**
+ * 주간 텔레그램 보고에서 "입찰"(적격심사·최저가 등) 본공고를 뺀다 — 입찰은 매일 아침 새 공고 알림이 맡는다.
+ * 협상·규격가격동시 본공고와 사전규격이 남는다. 낙찰방법을 모르는 공고는 남긴다 (모르면 보내는 쪽).
+ * 이메일 주간 리포트는 전체를 담는다.
+ */
+function withoutBids(input: ReportInput): ReportInput {
+  return {
+    ...input,
+    bid: { ...input.bid, matches: input.bid.matches.filter((m) => classifyBidMethod(m.notice.bidMethod) !== "입찰") },
+  };
 }
 
 /** 텔레그램이 실패해도 이메일은 그대로 보낸다. 실패했으면 true. 0건이어도 보낸다 — 안 오면 고장인지 모른다. */
@@ -179,26 +190,41 @@ async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: N
 }
 
 /**
- * 매일 마감 임박 보고 — 7일 안에 마감되는 "입찰"(적격심사·최저가 등) 본공고.
+ * 매일 아침 새 "입찰"(적격심사·최저가 등) 본공고 알림.
  *
- * 2026-09-29 미팅: 입찰은 공고 후 7일 안에 마감되는 경우가 있어 주간 리포트로는 늦는다.
+ * 2026-09-29 미팅: 입찰은 공고 후 7일 안에 마감되는 경우가 있어 주간 보고로는 늦다.
+ * 2026-10-12 담당자 요청: 마감 전까지 같은 공고를 매일 다시 보내지 말고 새로 올라온 공고만 보낸다
+ * (마감 임박 공고는 담당자 화면에서 본다). 이미 알린 공고는 알림 기록(notified.json)으로 거르고,
+ * 새 공고가 없는 날은 아무것도 보내지 않는다.
  * 협상·규격가격동시는 제안서 준비 기간이 길어 여기 넣지 않는다 (주간 보고로 받는다).
- * 이미 알린 공고도 마감 전까지 매일 다시 보내므로 알림 기록(notified.json)을 쓰지 않는다.
  */
-async function runDaily(env: Env, reportInput: ReportInput, now: Date): Promise<number> {
+async function runDaily(env: Env, reportInput: ReportInput, now: Date, state: NotifiedState): Promise<number> {
+  state.consecutiveFailures = 0;
   const fetchFailed = hasFetchFailures(reportInput);
   const bids = reportInput.bid.matches.filter((m) => classifyBidMethod(m.notice.bidMethod) === "입찰");
-  const closingSoon = selectClosingSoon(bids, now, CLOSING_SOON_DAYS);
-  logger.info("마감 임박 입찰", { 본공고매칭: reportInput.bid.matches.length, 입찰: bids.length, 마감임박: closingSoon.length });
+  const fresh = bids.filter(
+    (m) => !isNotified(state, m.notice.noticeNo) && isPostedWithin(m.notice.postedAt, now, NEW_BID_HOURS)
+  );
+  logger.info("새 입찰 공고", { 본공고매칭: reportInput.bid.matches.length, 입찰: bids.length, 새공고: fresh.length });
 
-  const messages = buildClosingSoonMessages(reportInput, closingSoon, { days: CLOSING_SOON_DAYS });
+  const input: ReportInput = {
+    ...reportInput,
+    bid: { ...reportInput.bid, matches: fresh },
+    preStandard: { ...reportInput.preStandard, matches: [] },
+  };
   if (env.dryRun) {
-    console.log(`텔레그램 미리보기 (마감 임박 입찰 ${closingSoon.length}건, 메시지 ${messages.length}건)`);
+    const messages = fresh.length > 0 ? buildTelegramMessages(input, { kind: "newBids" }) : [];
+    console.log(`텔레그램 미리보기 (새 입찰 공고 ${fresh.length}건, 메시지 ${messages.length}건)`);
     messages.forEach((message, i) => console.log(`\n--- 메시지 ${i + 1}/${messages.length} ---\n${message}`));
     return fetchFailed ? 2 : 0;
   }
 
-  await sendTelegramMessages(messages, { botToken: env.telegramBotToken!, chatIds: env.telegramChatIds });
+  if (fresh.length > 0) {
+    // 보내다 실패하면 예외로 빠져 기록이 남지 않는다 — 다음 실행(예비 실행 포함)이 다시 보낸다.
+    await sendTelegramReport(input, { botToken: env.telegramBotToken!, chatIds: env.telegramChatIds, kind: "newBids" });
+    markNotified(state, fresh.map((m) => m.notice.noticeNo), now);
+  }
+  saveNotifiedState(env.notifiedStatePath, state, now);
   return fetchFailed ? 2 : 0;
 }
 

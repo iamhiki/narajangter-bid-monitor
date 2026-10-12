@@ -124,11 +124,17 @@ describe("buildTelegramMessages — 요약", () => {
     expect(summary).toContain("0건이라고 단정하지 마세요");
   });
 
-  it("주간 보고는 주간 머리말과 담당자 화면 안내를 단다", () => {
+  it("주간 보고는 입찰 새 공고가 매일 따로 간다고 알린다", () => {
     const summary = buildTelegramMessages(makeInput(), { kind: "weekly" })[0]!;
     expect(summary).toContain("주간 공고 보고");
-    expect(summary).toContain("담당자 화면에서 확인하세요");
+    expect(summary).toContain("매일 아침 따로 보냅니다");
     expect(summary).toContain("공고 <b>1건</b>이 확인되었습니다");
+  });
+
+  it("새 입찰 공고 알림은 입찰만, 이미 알린 공고는 다시 안 보낸다고 적는다", () => {
+    const summary = buildTelegramMessages(makeInput(), { kind: "newBids" })[0]!;
+    expect(summary).toContain("<b>새 입찰 공고 1건</b>");
+    expect(summary).toContain("이미 알린 공고는 다시 보내지 않습니다");
   });
 });
 
