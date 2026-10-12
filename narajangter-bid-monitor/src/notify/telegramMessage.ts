@@ -222,7 +222,7 @@ function renderSummaryBlock(input: ReportInput, tally: ReportTally, weekly = fal
     escapeTelegramHtml(`${formatDateForSubject(input.generatedAt)} 기준 · 조회기간 ${period}`),
   ];
   if (weekly) {
-    lines.push(escapeTelegramHtml("입찰(적격심사·최저가 등)은 매일 아침 마감 임박 보고로 따로 보냅니다."));
+    lines.push(escapeTelegramHtml("마감 임박 공고와 전체 목록은 담당자 화면에서 확인하세요."));
   }
   lines.push("");
 
@@ -289,7 +289,7 @@ export type TelegramMessageKind = "report" | "new" | "weekly";
  * 리포트를 텔레그램 HTML 메시지 배열로 만든다 (4096자 상한 때문에 여러 건이 될 수 있다).
  *
  * kind "new"는 매시간 확인에서 새로 나온 공고만 보낼 때 쓴다 — 머리말과 끝맺음만 다르고
- * 공고 목록 모양은 같다. kind "weekly"는 주간 보고 머리말이다 (입찰은 매일 보고가 맡아 빠진 목록).
+ * 공고 목록 모양은 같다. kind "weekly"는 주간 보고 머리말이다.
  */
 export function buildTelegramMessages(
   input: ReportInput,

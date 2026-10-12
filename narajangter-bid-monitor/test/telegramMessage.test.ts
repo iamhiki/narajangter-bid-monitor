@@ -124,10 +124,10 @@ describe("buildTelegramMessages — 요약", () => {
     expect(summary).toContain("0건이라고 단정하지 마세요");
   });
 
-  it("주간 보고는 입찰이 매일 보고로 따로 간다고 알린다", () => {
+  it("주간 보고는 주간 머리말과 담당자 화면 안내를 단다", () => {
     const summary = buildTelegramMessages(makeInput(), { kind: "weekly" })[0]!;
     expect(summary).toContain("주간 공고 보고");
-    expect(summary).toContain("매일 아침 마감 임박 보고로 따로 보냅니다");
+    expect(summary).toContain("담당자 화면에서 확인하세요");
     expect(summary).toContain("공고 <b>1건</b>이 확인되었습니다");
   });
 });
