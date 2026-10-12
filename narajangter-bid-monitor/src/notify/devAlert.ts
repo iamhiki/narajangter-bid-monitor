@@ -1,15 +1,18 @@
 import { toErrorMessage } from "../errors.js";
 import { logger } from "../logger.js";
+import { redactSecrets } from "../redact.js";
+import { sendTelegramMessages } from "./telegram.js";
+import { escapeTelegramHtml } from "./telegramMessage.js";
 
 /**
- * 개발자용 실행 실패 알림 (웹훅).
+ * 개발자용 실행 실패 알림.
  *
  * 2026-10-12 담당자 요청: 실패 알림은 담당자 텔레그램 방·수신자 이메일로 보내지 않는다. 보고가 빠져도
  * 담당자는 사내 화면에서 공고를 볼 수 있고, 실패는 4~5번에 한 번꼴이라 알림 피로만 쌓인다.
- * 대신 개발자가 오류를 볼 수 있게 웹훅(DEV_ALERT_WEBHOOK_URL)으로 원문과 실행 기록 링크를 보낸다.
+ * 대신 개발자가 오류를 볼 수 있게 원문과 실행 기록 링크를 보낸다 — 받는 곳은 설정된 곳 모두:
+ *   - DEV_ALERT_TELEGRAM_CHAT_ID: 보고에 쓰는 같은 봇으로 개발자 대화방에 보낸다 (텔레그램엔 웹훅 주소가 없다)
+ *   - DEV_ALERT_WEBHOOK_URL: Discord·Slack 웹훅 (그 밖의 주소에는 {text, content}를 함께 보낸다)
  * 아침 실행 실패도 보낸다 — 예비 실행까지 GitHub이 건너뛰면 보고가 조용히 빠지는데, 그걸 알 수 있는 곳은 여기뿐이다.
- *
- * Discord·Slack 웹훅을 받는다. 그 밖의 주소에는 {text, content}를 함께 보낸다.
  */
 
 /** 실패 원인 한 줄 — 원문 위에 붙여 무슨 종류의 실패인지 바로 보이게 한다. */
@@ -42,10 +45,11 @@ const RUN_NAME: Record<DevAlertInput["runMode"], string> = {
   hourly: "매시간 새 공고 알림",
 };
 
-/** 웹훅 본문의 상한. Discord는 2000자라 원문을 그 안에 맞춘다. */
+/** 본문 상한. Discord는 2000자라 원문을 그 안에 맞춘다 (텔레그램은 4096자). */
 const MAX_CHARS = 1900;
 
-export function buildDevAlertText(input: DevAlertInput): string {
+/** 알림 머리(무엇이·왜·그래서)와 오류 원문. 받는 곳마다 감싸는 모양만 다르다. */
+function buildDevAlertParts(input: DevAlertInput): { head: string; error: string } {
   const consequence =
     input.runMode === "hourly"
       ? "다음 정시 실행이 다시 시도합니다."
@@ -57,11 +61,22 @@ export function buildDevAlertText(input: DevAlertInput): string {
     input.occurredAt.toLocaleString("ko-KR"),
     consequence,
     ...(input.runUrl ? [input.runUrl] : []),
-    "",
   ].join("\n");
-  const room = MAX_CHARS - head.length - 8;
+  const room = MAX_CHARS - head.length - 12;
   const error = input.errorMessage.length > room ? `${input.errorMessage.slice(0, room)}\n…` : input.errorMessage;
-  return `${head}\`\`\`\n${error}\n\`\`\``;
+  return { head, error };
+}
+
+/** 웹훅용 — 원문은 코드 블록으로 */
+export function buildDevAlertText(input: DevAlertInput): string {
+  const { head, error } = buildDevAlertParts(input);
+  return [head, "```", error, "```"].join("\n");
+}
+
+/** 텔레그램용 (HTML) — 원문은 <pre>로 */
+export function buildDevAlertTelegram(input: DevAlertInput): string {
+  const { head, error } = buildDevAlertParts(input);
+  return `${escapeTelegramHtml(head)}\n<pre>${escapeTelegramHtml(error)}</pre>`;
 }
 
 export function buildDevAlertPayload(webhookUrl: string, text: string): Record<string, string> {
@@ -70,19 +85,40 @@ export function buildDevAlertPayload(webhookUrl: string, text: string): Record<s
   return { text, content: text };
 }
 
-/** 보내지 못해도 실행 결과를 바꾸지 않는다 — 로그에만 남긴다. */
-export async function sendDevAlert(webhookUrl: string, input: DevAlertInput): Promise<void> {
-  try {
-    const res = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildDevAlertPayload(webhookUrl, buildDevAlertText(input))),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    logger.info("개발자 웹훅 실패 알림 발송 완료");
-  } catch (err) {
-    // 웹훅 주소 자체가 비밀이라 오류에 주소를 싣지 않는다
-    logger.error("개발자 웹훅 실패 알림 발송 실패", { error: toErrorMessage(err).replace(webhookUrl, "<webhook>") });
+export interface DevAlertTargets {
+  webhookUrl?: string;
+  telegram?: { botToken: string; chatId: string };
+}
+
+/** 받을 곳이 하나라도 설정돼 있는지 */
+export function hasDevAlertTarget(targets: DevAlertTargets): boolean {
+  return Boolean(targets.webhookUrl || targets.telegram);
+}
+
+/** 보내지 못해도 실행 결과를 바꾸지 않는다 — 로그에만 남긴다. 주소·토큰은 오류에 싣지 않는다. */
+export async function sendDevAlert(targets: DevAlertTargets, input: DevAlertInput): Promise<void> {
+  if (targets.telegram) {
+    const { botToken, chatId } = targets.telegram;
+    try {
+      await sendTelegramMessages([buildDevAlertTelegram(input)], { botToken, chatIds: [chatId], maxRetries: 1 });
+      logger.info("개발자 텔레그램 실패 알림 발송 완료");
+    } catch (err) {
+      logger.error("개발자 텔레그램 실패 알림 발송 실패", { error: redactSecrets(toErrorMessage(err), [botToken]) });
+    }
+  }
+  if (targets.webhookUrl) {
+    const webhookUrl = targets.webhookUrl;
+    try {
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildDevAlertPayload(webhookUrl, buildDevAlertText(input))),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      logger.info("개발자 웹훅 실패 알림 발송 완료");
+    } catch (err) {
+      logger.error("개발자 웹훅 실패 알림 발송 실패", { error: redactSecrets(toErrorMessage(err), [webhookUrl]) });
+    }
   }
 }

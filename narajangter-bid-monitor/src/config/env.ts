@@ -63,6 +63,8 @@ export interface Env {
    * 담당자 텔레그램 방·수신자 이메일로는 실패 알림을 보내지 않는다 (src/notify/devAlert.ts).
    */
   devAlertWebhookUrl?: string;
+  /** 실행 실패를 알릴 개발자 텔레그램 대화방 — 보고와 같은 봇(TELEGRAM_BOT_TOKEN)으로 보낸다. 없으면 건너뛴다. */
+  devAlertTelegramChatId?: string;
   /** GitHub 예비 실행(schedule)인지 — 실패 알림에 "이번 보고가 빠졌다"를 적을지 정한다. 워크플로가 정한다. */
   backupRun: boolean;
   dryRun: boolean;
@@ -214,6 +216,7 @@ export function loadEnv(): Env {
 
     sendEmptyReport: parseBool(e.SEND_EMPTY_REPORT, true),
     devAlertWebhookUrl: e.DEV_ALERT_WEBHOOK_URL?.trim() || undefined,
+    devAlertTelegramChatId: e.DEV_ALERT_TELEGRAM_CHAT_ID?.trim() || undefined,
     backupRun: parseBool(e.BACKUP_RUN, false),
     dryRun,
     forceSend,

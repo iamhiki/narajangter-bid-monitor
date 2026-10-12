@@ -84,7 +84,8 @@ jobs:
           FEEDBACK_SHEET_ID: ${{ secrets.FEEDBACK_SHEET_ID }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           FORCE_SEND: ${{ github.event.inputs.force || 'false' }}
-          # 실행 실패는 담당자 방이 아니라 개발자 웹훅(Discord·Slack)으로만 간다. 시크릿이 없으면 로그에만 남는다.
+          # 실행 실패는 담당자 방이 아니라 개발자 텔레그램 대화방·웹훅으로만 간다. 시크릿이 없으면 로그에만 남는다.
+          DEV_ALERT_TELEGRAM_CHAT_ID: ${{ secrets.DEV_ALERT_TELEGRAM_CHAT_ID }}
           DEV_ALERT_WEBHOOK_URL: ${{ secrets.DEV_ALERT_WEBHOOK_URL }}
           # 예비 실행(schedule)이면 실패 알림에 "이번 보고가 빠졌다"고 적는다. 아침 실행은 cron-job.org가 부르는 workflow_dispatch
           BACKUP_RUN: ${{ github.event_name == 'schedule' }}

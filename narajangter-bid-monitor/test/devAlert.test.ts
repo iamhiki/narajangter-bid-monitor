@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDevAlertPayload, buildDevAlertText, describeFailure } from "../src/notify/devAlert.js";
+import { buildDevAlertPayload, buildDevAlertTelegram, buildDevAlertText, describeFailure } from "../src/notify/devAlert.js";
 
 // 2026-10-07 실제 실패 원문
 const NETWORK_FAILURE =
@@ -41,5 +41,19 @@ describe("buildDevAlertPayload", () => {
     expect(buildDevAlertPayload("https://discord.com/api/webhooks/1/abc", "hi")).toEqual({ content: "hi" });
     expect(buildDevAlertPayload("https://hooks.slack.com/services/T/B/x", "hi")).toEqual({ text: "hi" });
     expect(buildDevAlertPayload("https://example.com/hook", "hi")).toEqual({ text: "hi", content: "hi" });
+  });
+});
+
+describe("buildDevAlertTelegram", () => {
+  it("텔레그램용은 HTML로 감싸고 원문의 꺾쇠를 이스케이프한다", () => {
+    const text = buildDevAlertTelegram({
+      runMode: "weekly",
+      errorMessage: "<script>x</script> fetch failed",
+      occurredAt: new Date(),
+      backupRun: true,
+    });
+    expect(text).toContain("주간 보고 실패");
+    expect(text).toContain("<pre>&lt;script&gt;");
+    expect(text).not.toContain("<script>");
   });
 });

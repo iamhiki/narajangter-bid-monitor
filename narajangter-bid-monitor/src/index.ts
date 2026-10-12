@@ -4,7 +4,7 @@ import { collectReportInput, hasFetchFailures } from "./pipeline.js";
 import { buildReport, type ReportInput, type ReportSource } from "./report/buildReport.js";
 import { buildTelegramMessages } from "./notify/telegramMessage.js";
 import { sendTelegramReport } from "./notify/telegram.js";
-import { sendDevAlert } from "./notify/devAlert.js";
+import { hasDevAlertTarget, sendDevAlert, type DevAlertTargets } from "./notify/devAlert.js";
 import { classifyBidMethod } from "./matching/bidMethod.js";
 import { appendMatchesToFeedbackSheet } from "./sheets/feedbackSheet.js";
 import { saveReportToDisk } from "./report/saveReport.js";
@@ -253,10 +253,10 @@ async function appendToSheet(env: Env, matches: MatchedNotice[], now: Date): Pro
 }
 
 /**
- * 실행 실패 — 담당자 텔레그램 방·수신자 이메일로는 알리지 않고, 개발자 웹훅으로만 원문을 보낸다.
+ * 실행 실패 — 담당자 텔레그램 방·수신자 이메일로는 알리지 않고, 개발자 대화방(텔레그램)·웹훅으로만 원문을 보낸다.
  *
  * 2026-10-12 담당자 요청: 실패는 4~5번에 한 번꼴(대부분 GitHub→나라장터 접속 끊김)이고 보고가 빠져도
- * 사내 화면에서 공고를 볼 수 있어, 담당자가 실패 알림을 받을 이유가 없다. 개발자는 웹훅으로 본다.
+ * 사내 화면에서 공고를 볼 수 있어, 담당자가 실패 알림을 받을 이유가 없다. 개발자는 따로 받는다 (src/notify/devAlert.ts).
  */
 async function handleFailure(err: unknown, env: Env | undefined): Promise<number> {
   const secrets = env
@@ -266,12 +266,19 @@ async function handleFailure(err: unknown, env: Env | undefined): Promise<number
   logger.error("실행 실패", { error: message });
   if (!env || env.dryRun) return 1;
 
-  if (!env.devAlertWebhookUrl) {
-    logger.info("DEV_ALERT_WEBHOOK_URL이 없어 개발자 실패 알림을 건너뜁니다.");
+  const targets: DevAlertTargets = {
+    webhookUrl: env.devAlertWebhookUrl,
+    telegram:
+      env.devAlertTelegramChatId && env.telegramBotToken
+        ? { botToken: env.telegramBotToken, chatId: env.devAlertTelegramChatId }
+        : undefined,
+  };
+  if (!hasDevAlertTarget(targets)) {
+    logger.info("DEV_ALERT_TELEGRAM_CHAT_ID·DEV_ALERT_WEBHOOK_URL이 없어 개발자 실패 알림을 건너뜁니다.");
     return 1;
   }
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
-  await sendDevAlert(env.devAlertWebhookUrl, {
+  await sendDevAlert(targets, {
     runMode: env.runMode,
     errorMessage: message,
     occurredAt: new Date(),
