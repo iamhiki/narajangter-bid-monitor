@@ -267,13 +267,23 @@ async function handleFailure(err: unknown, env: Env | undefined, state: Notified
     // 알림을 안 보내도 횟수는 남겨야 다음 실행이 "연속"인지 안다
     saveNotifiedState(env.notifiedStatePath, state, now);
   }
+  if (env.runMode !== "hourly" && !env.failureAlert) {
+    // 매일·주간 아침 실행(cron-job.org)이 실패해도 GitHub 예비 실행이 한두 시간 뒤 다시 시도한다.
+    // 실패는 4~5번에 한 번꼴로 나지만 대부분 예비 실행에서 풀린다(2026-10-06·07) — 그때마다 알리면 피로만 쌓인다.
+    // 그래서 예비 실행까지 실패했을 때만 알린다 (FAILURE_ALERT, 워크플로가 실행 종류로 정한다).
+    logger.warn("예비 실행이 다시 시도하므로 실패 알림을 보내지 않습니다.");
+    return 1;
+  }
   // 매시간 모드에서는 장애가 이어지면 같은 알림이 매시간 쌓이므로 6시간에 한 번만 보낸다.
-  // 주간·매일 모드는 하루 한 번 이하로 돌기 때문에 매번 알려도 쌓이지 않는다.
   const alertAllowed = env.runMode !== "hourly" || (state !== undefined && shouldSendFailureAlert(state, now));
 
   if (alertAllowed && env.telegramEnabled && env.telegramBotToken) {
     try {
-      await sendTelegramFailureAlert(message, now, { botToken: env.telegramBotToken, chatIds: env.telegramChatIds });
+      await sendTelegramFailureAlert(message, now, {
+        botToken: env.telegramBotToken,
+        chatIds: env.telegramChatIds,
+        runMode: env.runMode,
+      });
       if (env.runMode === "hourly" && state) {
         state.lastFailureAlertAt = now.toISOString();
         saveNotifiedState(env.notifiedStatePath, state, now);

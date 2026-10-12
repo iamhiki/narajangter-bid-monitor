@@ -5,6 +5,7 @@ import {
   buildDocumentCaption,
   buildDocumentFilename,
   buildTelegramFailureMessage,
+  describeFailure,
   buildTelegramMessages,
   escapeTelegramHtml,
   missingQualificationLine,
@@ -299,15 +300,29 @@ describe("첨부 파일", () => {
 });
 
 describe("buildTelegramFailureMessage", () => {
-  it("오류 내용을 <pre>로 감싸고 HTML을 이스케이프한다", () => {
-    const message = buildTelegramFailureMessage("<script>alert(1)</script> 실패", new Date());
-    expect(message).toContain("<pre>");
-    expect(message).toContain("&lt;script&gt;");
-    expect(message).not.toContain("<script>");
+  // 2026-10-07 실제 실패 원문 — 담당자에게는 코드 경로 대신 원인 한 줄만 간다
+  const NETWORK_FAILURE =
+    "ApiError: [전체조회] 본공고/사전규격 조회가 모두 실패했습니다. API 키/네트워크 상태를 확인하세요.\n" +
+    "    at collectReportInput (/home/runner/work/narajangter-bid-monitor/src/pipeline.ts:115:11)";
+
+  it("접속 실패는 키 문제가 아니라 접속 문제로 알리고, 오류 원문·코드 경로는 넣지 않는다", () => {
+    const message = buildTelegramFailureMessage(NETWORK_FAILURE, new Date(), "daily");
+    expect(message).toContain("나라장터 서버에 접속하지 못했습니다");
+    expect(message).toContain("오늘 새 입찰 공고 알림을 보내지 못했습니다");
+    expect(message).toContain("담당자 화면에서 확인해 주세요");
+    expect(message).not.toContain("/home/runner");
+    expect(message).not.toContain("API 키");
   });
 
-  it("아주 긴 스택트레이스도 상한 이하로 줄인다", () => {
-    const message = buildTelegramFailureMessage("x".repeat(10000), new Date());
+  it("키가 거절되면 기술 담당자 확인이 필요하다고 알린다", () => {
+    expect(describeFailure("본공고 조회 실패 (HTTP 401): SERVICE_KEY_IS_NOT_REGISTERED_ERROR")).toContain("조회 키가 거절");
+  });
+
+  it("모르는 오류도 원문 없이 짧게 알린다", () => {
+    const message = buildTelegramFailureMessage("<script>alert(1)</script>" + "x".repeat(10000), new Date(), "weekly");
+    expect(message).toContain("예상하지 못한 오류");
+    expect(message).toContain("이번 주 주간 보고");
+    expect(message).not.toContain("<script>");
     expect(message.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
   });
 });

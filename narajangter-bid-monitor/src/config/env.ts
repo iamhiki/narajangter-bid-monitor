@@ -59,6 +59,11 @@ export interface Env {
 
   sendEmptyReport: boolean;
   alertEmailOnFailure: boolean;
+  /**
+   * 실패 시 알림(텔레그램·이메일)을 보낼지. 매일·주간 아침 실행은 false — 실패해도 GitHub 예비 실행이 다시
+   * 시도하므로, 예비 실행(true)까지 실패했을 때만 알린다. 워크플로가 실행 종류로 정한다. 기본 true.
+   */
+  failureAlert: boolean;
   dryRun: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
 
@@ -208,6 +213,7 @@ export function loadEnv(): Env {
 
     sendEmptyReport: parseBool(e.SEND_EMPTY_REPORT, true),
     alertEmailOnFailure: parseBool(e.ALERT_EMAIL_ON_FAILURE, true),
+    failureAlert: parseBool(e.FAILURE_ALERT, true),
     dryRun,
     forceSend,
     sentReportsPath: e.SENT_REPORTS_PATH?.trim() || "cache/sent-reports.json",

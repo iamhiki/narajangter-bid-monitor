@@ -242,9 +242,9 @@ export async function sendTelegramMessages(messages: string[], options: Telegram
 export async function sendTelegramFailureAlert(
   errorMessage: string,
   occurredAt: Date,
-  options: TelegramSendOptions
+  options: TelegramSendOptions & { runMode?: "weekly" | "daily" | "hourly" }
 ): Promise<void> {
-  await sendMessages([buildTelegramFailureMessage(errorMessage, occurredAt)], {
+  await sendMessages([buildTelegramFailureMessage(errorMessage, occurredAt, options.runMode)], {
     ...options,
     maxRetries: options.maxRetries ?? 1,
   });

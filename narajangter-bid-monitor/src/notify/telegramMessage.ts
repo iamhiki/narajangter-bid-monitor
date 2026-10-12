@@ -397,15 +397,45 @@ export function buildDocumentFilename(input: ReportInput): string {
   return `입찰공고_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.html`;
 }
 
-/** 실행 실패 알림용 단문 메시지 */
-export function buildTelegramFailureMessage(errorMessage: string, occurredAt: Date): string {
+/**
+ * 실패 원인을 담당자가 읽을 말로 바꾼다. 오류 원문(코드 경로가 섞인 긴 글)은 GitHub 로그에만 남긴다.
+ * 2026-10-06·07 실패는 GitHub 서버(미국)→나라장터 접속이 11분 동안 안 된 것("fetch failed")이었는데,
+ * 원문 첫 줄의 "API 키/네트워크 상태를 확인하세요"가 키 문제처럼 읽혔다.
+ */
+export function describeFailure(errorMessage: string): string {
+  if (/HTTP 40[13]|SERVICE_KEY|SERVICE KEY|인증키|등록되지 않은/i.test(errorMessage)) {
+    return "나라장터 조회 키가 거절되었습니다. 기술 담당자 확인이 필요합니다.";
+  }
+  if (/fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|timed?\s?out|aborted|전체조회|HTTP 5\d\d/i.test(errorMessage)) {
+    return "나라장터 서버에 접속하지 못했습니다. 보통 몇 시간 안에 저절로 풀립니다.";
+  }
+  if (/SMTP|EAUTH|Invalid login|메일/i.test(errorMessage)) {
+    return "이메일 발송에 실패했습니다. 기술 담당자 확인이 필요합니다.";
+  }
+  return "예상하지 못한 오류가 났습니다. 기술 담당자 확인이 필요합니다.";
+}
+
+const FAILED_DELIVERY: Record<"weekly" | "daily" | "hourly", string> = {
+  daily: "오늘 새 입찰 공고 알림을 보내지 못했습니다 (아침 실행과 예비 실행 모두 실패).",
+  weekly: "이번 주 주간 보고를 보내지 못했습니다 (아침 실행과 예비 실행 모두 실패).",
+  hourly: "새 공고 확인에 실패했습니다.",
+};
+
+/** 실행 실패 알림 — 담당자용 몇 줄. 무엇이 안 됐는지, 왜인지, 그동안 어떻게 하면 되는지. */
+export function buildTelegramFailureMessage(
+  errorMessage: string,
+  occurredAt: Date,
+  runMode: "weekly" | "daily" | "hourly" = "hourly"
+): string {
   return [
-    "🚨 <b>나라장터 입찰 모니터링 실행 실패</b>",
+    "⚠️ <b>나라장터 공고 확인 실패</b>",
     escapeTelegramHtml(occurredAt.toLocaleString("ko-KR")),
     "",
-    `<pre>${escapeTelegramHtml(truncate(errorMessage, 2500))}</pre>`,
+    escapeTelegramHtml(FAILED_DELIVERY[runMode]),
+    escapeTelegramHtml(describeFailure(errorMessage)),
+    escapeTelegramHtml("그동안 공고는 담당자 화면에서 확인해 주세요."),
     "",
-    escapeTelegramHtml("GitHub Actions 로그를 확인해주세요."),
+    "<i>기술 담당자: GitHub Actions 실행 기록에 자세한 내용이 있습니다.</i>",
   ].join("\n");
 }
 
