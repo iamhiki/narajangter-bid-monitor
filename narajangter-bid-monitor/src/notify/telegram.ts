@@ -5,7 +5,6 @@ import type { ReportInput } from "../report/buildReport.js";
 import {
   buildDocumentCaption,
   buildDocumentFilename,
-  buildTelegramFailureMessage,
   buildTelegramMessages,
   type TelegramMessageKind,
   type WindowTotal,
@@ -237,16 +236,4 @@ export async function sendTelegramReport(
 export async function sendTelegramMessages(messages: string[], options: TelegramSendOptions): Promise<void> {
   await sendMessages(messages, options);
   logger.info("텔레그램 발송 완료", { chatIds: options.chatIds, 메시지수: messages.length });
-}
-
-export async function sendTelegramFailureAlert(
-  errorMessage: string,
-  occurredAt: Date,
-  options: TelegramSendOptions & { runMode?: "weekly" | "daily" | "hourly" }
-): Promise<void> {
-  await sendMessages([buildTelegramFailureMessage(errorMessage, occurredAt, options.runMode)], {
-    ...options,
-    maxRetries: options.maxRetries ?? 1,
-  });
-  logger.info("텔레그램 실패 알림 발송 완료", { chatIds: options.chatIds });
 }

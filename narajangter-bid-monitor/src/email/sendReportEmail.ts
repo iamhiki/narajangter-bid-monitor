@@ -57,33 +57,3 @@ export async function sendReportEmail(report: ReportOutput, options: SendOptions
 
   logger.info("리포트 이메일 발송 완료", { recipients: options.recipients, totalMatchCount: report.totalMatchCount });
 }
-
-export async function sendFailureAlertEmail(
-  errorMessage: string,
-  options: SendOptions
-): Promise<void> {
-  const subject = "[나라장터 입찰 모니터링] 실행 실패 알림";
-  const text = [
-    "나라장터 입찰 모니터링 스크립트 실행 중 오류가 발생했습니다.",
-    "",
-    `시각: ${new Date().toLocaleString("ko-KR")}`,
-    "",
-    "오류 내용:",
-    errorMessage,
-    "",
-    "GitHub Actions 로그(또는 실행 서버 로그)를 확인해주세요.",
-  ].join("\n");
-  const html = `<pre style="font-family:monospace;white-space:pre-wrap;font-size:13px;">${text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")}</pre>`;
-
-  await sendWithRetry(
-    options.transporter,
-    { from: options.from, to: options.recipients, subject, html, text },
-    options.maxRetries ?? 2,
-    options.retryDelayMs ?? 1000
-  );
-
-  logger.info("실패 알림 이메일 발송 완료", { recipients: options.recipients });
-}

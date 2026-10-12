@@ -76,9 +76,10 @@ jobs:
           TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           FORCE_SEND: ${{ github.event.inputs.force || 'false' }}
-          # 실패 알림은 예비 실행(schedule)에서만 — 아침 실행(cron-job.org가 부르는 workflow_dispatch)이 실패해도
-          # 예비 실행이 다시 시도하므로 알리지 않는다. 둘 다 실패해야 담당자에게 알림이 간다.
-          FAILURE_ALERT: ${{ github.event_name == 'schedule' }}
+          # 실행 실패는 담당자 방이 아니라 개발자 웹훅(Discord·Slack)으로만 간다. 시크릿이 없으면 로그에만 남는다.
+          DEV_ALERT_WEBHOOK_URL: ${{ secrets.DEV_ALERT_WEBHOOK_URL }}
+          # 예비 실행(schedule)이면 실패 알림에 "이번 보고가 빠졌다"고 적는다. 아침 실행은 cron-job.org가 부르는 workflow_dispatch
+          BACKUP_RUN: ${{ github.event_name == 'schedule' }}
         run: npm run report
 
       - name: 보고 발송 기록·이미 알린 공고 기록 저장

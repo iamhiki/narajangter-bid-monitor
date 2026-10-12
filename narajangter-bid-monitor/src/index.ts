@@ -3,20 +3,19 @@ import { loadAppConfig } from "./config/loadJsonConfig.js";
 import { collectReportInput, hasFetchFailures } from "./pipeline.js";
 import { buildReport, type ReportInput, type ReportSource } from "./report/buildReport.js";
 import { buildTelegramMessages } from "./notify/telegramMessage.js";
-import { sendTelegramFailureAlert, sendTelegramReport } from "./notify/telegram.js";
+import { sendTelegramReport } from "./notify/telegram.js";
+import { sendDevAlert } from "./notify/devAlert.js";
 import { classifyBidMethod } from "./matching/bidMethod.js";
 import { appendMatchesToFeedbackSheet } from "./sheets/feedbackSheet.js";
 import { saveReportToDisk } from "./report/saveReport.js";
 import { createTransporter, verifyTransporter } from "./email/mailer.js";
-import { sendFailureAlertEmail, sendReportEmail } from "./email/sendReportEmail.js";
+import { sendReportEmail } from "./email/sendReportEmail.js";
 import type { MatchedNotice } from "./matching/types.js";
 import {
   isNotified,
   loadNotifiedState,
   markNotified,
   saveNotifiedState,
-  recordFailure,
-  shouldSendFailureAlert,
   type NotifiedState,
 } from "./state/notifiedStore.js";
 import { isPostedWithin, NEW_BID_HOURS } from "./state/recency.js";
@@ -71,7 +70,7 @@ async function run(): Promise<number> {
     if (scheduled && sent && !env.dryRun) markSent(env.sentReportsPath, sent, scheduled, now);
     return exitCode;
   } catch (err) {
-    return await handleFailure(err, env, state);
+    return await handleFailure(err, env);
   }
 }
 
@@ -253,7 +252,13 @@ async function appendToSheet(env: Env, matches: MatchedNotice[], now: Date): Pro
   }
 }
 
-async function handleFailure(err: unknown, env: Env | undefined, state: NotifiedState | undefined): Promise<number> {
+/**
+ * 실행 실패 — 담당자 텔레그램 방·수신자 이메일로는 알리지 않고, 개발자 웹훅으로만 원문을 보낸다.
+ *
+ * 2026-10-12 담당자 요청: 실패는 4~5번에 한 번꼴(대부분 GitHub→나라장터 접속 끊김)이고 보고가 빠져도
+ * 사내 화면에서 공고를 볼 수 있어, 담당자가 실패 알림을 받을 이유가 없다. 개발자는 웹훅으로 본다.
+ */
+async function handleFailure(err: unknown, env: Env | undefined): Promise<number> {
   const secrets = env
     ? [env.naraBidServiceKey, env.naraPrestdServiceKey, env.smtpPass, env.telegramBotToken, env.googleServiceAccountJson]
     : [];
@@ -261,51 +266,21 @@ async function handleFailure(err: unknown, env: Env | undefined, state: Notified
   logger.error("실행 실패", { error: message });
   if (!env || env.dryRun) return 1;
 
-  const now = new Date();
-  if (env.runMode === "hourly" && state) {
-    recordFailure(state);
-    // 알림을 안 보내도 횟수는 남겨야 다음 실행이 "연속"인지 안다
-    saveNotifiedState(env.notifiedStatePath, state, now);
-  }
-  if (env.runMode !== "hourly" && !env.failureAlert) {
-    // 매일·주간 아침 실행(cron-job.org)이 실패해도 GitHub 예비 실행이 한두 시간 뒤 다시 시도한다.
-    // 실패는 4~5번에 한 번꼴로 나지만 대부분 예비 실행에서 풀린다(2026-10-06·07) — 그때마다 알리면 피로만 쌓인다.
-    // 그래서 예비 실행까지 실패했을 때만 알린다 (FAILURE_ALERT, 워크플로가 실행 종류로 정한다).
-    logger.warn("예비 실행이 다시 시도하므로 실패 알림을 보내지 않습니다.");
+  if (!env.devAlertWebhookUrl) {
+    logger.info("DEV_ALERT_WEBHOOK_URL이 없어 개발자 실패 알림을 건너뜁니다.");
     return 1;
   }
-  // 매시간 모드에서는 장애가 이어지면 같은 알림이 매시간 쌓이므로 6시간에 한 번만 보낸다.
-  const alertAllowed = env.runMode !== "hourly" || (state !== undefined && shouldSendFailureAlert(state, now));
-
-  if (alertAllowed && env.telegramEnabled && env.telegramBotToken) {
-    try {
-      await sendTelegramFailureAlert(message, now, {
-        botToken: env.telegramBotToken,
-        chatIds: env.telegramChatIds,
-        runMode: env.runMode,
-      });
-      if (env.runMode === "hourly" && state) {
-        state.lastFailureAlertAt = now.toISOString();
-        saveNotifiedState(env.notifiedStatePath, state, now);
-      }
-    } catch (alertErr) {
-      logger.error("실패 알림 텔레그램 발송도 실패했습니다.", { error: redactSecrets(toErrorMessage(alertErr), secrets) });
-    }
-  }
-
-  // 이메일 실패 알림은 주간 모드만. 매시간 모드는 SMTP를 쓰지 않는다.
-  if (env.runMode === "weekly" && env.alertEmailOnFailure) {
-    try {
-      const appConfig = loadAppConfig();
-      const transporter = createTransporter(env);
-      await sendFailureAlertEmail(message, { transporter, from: env.smtpFrom, recipients: appConfig.recipients });
-    } catch (alertErr) {
-      logger.error("실패 알림 이메일 발송도 실패했습니다. 로그를 직접 확인해주세요.", {
-        error: toErrorMessage(alertErr),
-      });
-    }
-  }
-
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  await sendDevAlert(env.devAlertWebhookUrl, {
+    runMode: env.runMode,
+    errorMessage: message,
+    occurredAt: new Date(),
+    backupRun: env.backupRun,
+    runUrl:
+      GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
+        ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
+        : undefined,
+  });
   return 1;
 }
 

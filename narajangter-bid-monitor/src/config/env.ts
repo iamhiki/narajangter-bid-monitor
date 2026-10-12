@@ -58,12 +58,13 @@ export interface Env {
   apiPageConcurrency: number;
 
   sendEmptyReport: boolean;
-  alertEmailOnFailure: boolean;
   /**
-   * 실패 시 알림(텔레그램·이메일)을 보낼지. 매일·주간 아침 실행은 false — 실패해도 GitHub 예비 실행이 다시
-   * 시도하므로, 예비 실행(true)까지 실패했을 때만 알린다. 워크플로가 실행 종류로 정한다. 기본 true.
+   * 실행 실패를 알릴 개발자용 웹훅 주소 (Discord·Slack). 없으면 로그에만 남긴다.
+   * 담당자 텔레그램 방·수신자 이메일로는 실패 알림을 보내지 않는다 (src/notify/devAlert.ts).
    */
-  failureAlert: boolean;
+  devAlertWebhookUrl?: string;
+  /** GitHub 예비 실행(schedule)인지 — 실패 알림에 "이번 보고가 빠졌다"를 적을지 정한다. 워크플로가 정한다. */
+  backupRun: boolean;
   dryRun: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
 
@@ -212,8 +213,8 @@ export function loadEnv(): Env {
     apiPageConcurrency,
 
     sendEmptyReport: parseBool(e.SEND_EMPTY_REPORT, true),
-    alertEmailOnFailure: parseBool(e.ALERT_EMAIL_ON_FAILURE, true),
-    failureAlert: parseBool(e.FAILURE_ALERT, true),
+    devAlertWebhookUrl: e.DEV_ALERT_WEBHOOK_URL?.trim() || undefined,
+    backupRun: parseBool(e.BACKUP_RUN, false),
     dryRun,
     forceSend,
     sentReportsPath: e.SENT_REPORTS_PATH?.trim() || "cache/sent-reports.json",
