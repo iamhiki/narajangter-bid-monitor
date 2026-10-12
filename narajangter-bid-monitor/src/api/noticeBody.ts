@@ -3,7 +3,7 @@ import { extractDocumentText } from "../corpus/extractText.js";
 import { redactPersonal } from "../redactPersonal.js";
 import type { NormalizedNotice } from "./types.js";
 import { logger } from "../logger.js";
-import { preStandardAttachments } from "../matching/qualificationDoc.js";
+import { preStandardAttachmentsResolved } from "../matching/qualificationDoc.js";
 import { detectScopeFlags, type ScopeFlag } from "../matching/taskScopeFlags.js";
 
 /**
@@ -44,7 +44,8 @@ export async function fetchNoticeBody(
   options: FetchBodyOptions = {}
 ): Promise<NoticeBody | null> {
   // 사전규격은 첨부 파일명이 없고 URL만 온다 — 붙은 첨부가 곧 규격서·제안요청서라 순서대로 읽는다.
-  const candidates = notice.sourceType === "사전규격" ? preStandardAttachments(notice) : pickSpecAttachments(notice);
+  // 군 기관 규격은 나라장터에 첨부가 없어 국방전자조달에서 찾는다.
+  const candidates = notice.sourceType === "사전규격" ? await preStandardAttachmentsResolved(notice) : pickSpecAttachments(notice);
   if (candidates.length === 0) return null;
 
   for (const attachment of candidates) {

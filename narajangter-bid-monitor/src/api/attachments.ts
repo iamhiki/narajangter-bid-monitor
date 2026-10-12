@@ -23,6 +23,8 @@ export interface NoticeAttachment {
   url: string;
   /** 과업 내용이 담긴 문서인가 (입찰공고문·내역서 등과 구분) */
   isSpec: boolean;
+  /** 받을 때 함께 보낼 요청 머리글 — 국방전자조달 첨부는 상세 화면 세션 쿠키가 있어야 받아진다 (d2bPreStandard.ts) */
+  headers?: Record<string, string>;
 }
 
 /** 텍스트를 뽑을 문서 하나. ZIP 첨부는 안에 든 문서마다 하나씩 나온다. */
@@ -181,6 +183,7 @@ export async function downloadAttachment(
   try {
     const res = await fetch(attachment.url, {
       redirect: "follow",
+      headers: attachment.headers,
       signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
     });
     if (!res.ok) {
@@ -201,7 +204,8 @@ export async function downloadAttachment(
       return null;
     }
     // 서버가 오류 페이지(HTML)를 200으로 돌려주는 경우가 있어 앞부분을 확인한다.
-    if (buffer.subarray(0, 5).toString("latin1").toLowerCase().startsWith("<html")) {
+    // 국방전자조달은 세션이 없으면 "<!DOCTYPE …>비정상 접근입니다" 페이지를 200으로 준다.
+    if (/^\s*<(!doctype|html)/i.test(buffer.subarray(0, 32).toString("latin1"))) {
       logger.warn("첨부파일 대신 HTML이 왔습니다", { file: attachment.name });
       return null;
     }

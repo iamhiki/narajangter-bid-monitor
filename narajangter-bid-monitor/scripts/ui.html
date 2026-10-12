@@ -1978,11 +1978,24 @@ function reqBadge(need, words, tipTitle, tipBody) {
  * 공고문에 품명 요건이 없으면 공고가 분류된 세부품명으로 본다. 업종 자격(qualBadge)과 따로 보여준다 —
  * 대표 지시: 지일이 보유한 품명의 공고인지를 따로 가린다.
  */
+/**
+ * 참가자격을 확인하지 못한 까닭 — 첨부를 못 읽은 것과, 읽었는데 자격이 안 적힌 것을 나눠 말한다.
+ * 사전규격 제안요청서는 "제안참가자격 : 공고문 참조"처럼 본공고로 미루는 일이 흔하다.
+ */
+function unreadReason(where, doc) {
+  // "공고문을" / "첨부 규격서를" — 받침 있으면 을
+  const last = where.charCodeAt(where.length - 1) - 0xac00;
+  const obj = `${where}${last >= 0 && last % 28 ? "을" : "를"}`;
+  if (doc?.deferredToNotice) return `${where}에 참가자격이 "공고문 참조"로만 적혀 있습니다.<br>본공고가 올라오면 확인할 수 있습니다.`;
+  if (doc?.sourceFile) return `${obj} 읽었지만 참가자격 항목이 없습니다. 원문을 확인하세요.`;
+  return `${obj} 읽지 못했습니다. 원문을 확인하세요.`;
+}
+
 function productBadge(n, doc) {
   if (doc === undefined && enrich.running) return `<span class="badge qual faint">세부품명 확인 중…</span>`;
   const where = n.qualification ? "공고문" : "첨부 규격서";
   if (!doc) {
-    return `<span class="badge qual" tabindex="0">세부품명 확인 안 됨${qtip("세부품명", `<p>${where}를 읽지 못했습니다. 원문을 확인하세요.</p>`)}</span>`;
+    return `<span class="badge qual" tabindex="0">세부품명 확인 안 됨${qtip("세부품명", `<p>${unreadReason(where, null)}</p>`)}</span>`;
   }
   const need = doc.requirements.filter((r) => r.kind === "품명");
   const source = doc.sourceFile ? `<p>출처: ${esc(doc.sourceFile)}</p>` : "";
@@ -1995,6 +2008,10 @@ function productBadge(n, doc) {
     );
   }
   const items = doc.classifiedItems || [];
+  // 참가자격 항목을 못 찾았는데 분류 품명도 없으면 "제한 없음"이라 할 근거가 없다
+  if (doc.sectionFound === false && !items.length) {
+    return tipBadge("", "세부품명 확인 안 됨", "세부품명", `<p>${unreadReason(where, doc)}</p>${source}`);
+  }
   if (items.length) {
     const allHeld = items.every((i) => i.held);
     const miss = items.filter((i) => !i.held).length;
@@ -2017,10 +2034,11 @@ function qualBadge(n, doc) {
     const where = !q ? "첨부 규격서" : "공고문";
     if (doc === undefined && enrich.running) return `<span class="badge qual faint">${where}에서 자격 확인 중…</span>`;
     if (!doc || doc.sectionFound === false) {
-      const label = !q ? "자격 확인 안 됨" : q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음";
+      const deferred = !!doc?.deferredToNotice;
+      const label = !q ? (deferred ? "자격: 공고문 참조" : "자격 확인 안 됨") : q.status === "조회실패" ? "자격 확인 실패" : "업종제한 없음";
       return `<span class="badge qual ${q && q.status === "조회실패" ? "fail" : ""}" tabindex="0">${label}${tip(
         head,
-        `<p>${where}에서 참가자격을 찾지 못했습니다. 원문을 확인하세요.</p>${doc ? docFooter(doc) : ""}`
+        `<p>${unreadReason(where, doc)}</p>${doc ? docFooter(doc) : ""}`
       )}</span>`;
     }
     const need = doc.requirements.filter((r) => r.kind === "업종");

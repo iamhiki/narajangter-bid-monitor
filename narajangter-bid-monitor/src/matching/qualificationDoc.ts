@@ -2,6 +2,7 @@ import { findSubmissionDeadline, type SubmissionDeadline } from "./submissionDea
 import type { CodeEntry } from "../config/loadJsonConfig.js";
 import type { NormalizedNotice } from "../api/types.js";
 import { downloadDocuments, listAttachments, type NoticeAttachment } from "../api/attachments.js";
+import { d2bAttachmentsFor } from "../api/d2bPreStandard.js";
 import { extractDocumentText } from "../corpus/extractText.js";
 import { logger } from "../logger.js";
 
@@ -150,8 +151,16 @@ export interface QualificationDocResult {
   classifiedItems: { code: string; name: string; held: boolean }[];
   /** 사전규격에 연결된 본공고 번호 (본공고가 이미 나왔으면) */
   linkedBidNo: string | null;
-  /** 첨부에서 참가자격 항목을 찾았는지. false면 requirements·지역·지명은 비어 있고 분류 품목만 있다 */
+  /**
+   * 첨부에서 참가자격 항목을 찾았는지. false면 requirements·지역·지명은 비어 있고 분류 품목만 있다.
+   * false이면서 sourceFile이 있으면 그 첨부는 읽었지만 참가자격 항목이 없던 것이다
+   */
   sectionFound: boolean;
+  /**
+   * 첨부가 참가자격을 "공고문 참조"로 미뤘는지 — 사전규격 제안요청서에 흔하다 (장흥댐 물문화관 실측:
+   * "제안참가자격 : 공고문 참조"). 자격은 본공고 공고문이 나와야 알 수 있다
+   */
+  deferredToNotice?: boolean;
   /** 실적제한 — "최근 3년 이내 … 단일 건 10억원 이상 … 실적이 있는 업체". 없으면 빈 배열 */
   performance: PerformanceRequirement[];
   /** 실적제한 입찰의 실적심사신청서 제출 마감 (공고문 표기 그대로, 예: "2026/10/06 18:00") */
@@ -574,7 +583,8 @@ function isNoticeDocName(name: string): boolean {
 }
 
 /**
- * 공고 하나의 공고문을 받아 참가자격을 읽는다. 공고문이 없거나 참가자격 부분을 못 찾으면 null.
+ * 공고 하나의 공고문을 받아 참가자격을 읽는다. 공고문이 없거나 읽지 못했고 분류 품목·연결 본공고도 없으면 null.
+ * 읽었는데 참가자격 항목이 없으면 sectionFound: false (sourceFile에 읽은 파일).
  * 스캔 PDF를 대비해 OCR은 "auto"(텍스트 없는 쪽만) — Windows 로컬 UI에서만 쓰는 경로다.
  */
 export async function readQualificationFromNotice(
@@ -592,12 +602,22 @@ export async function readQualificationFromNotice(
   // (PDF는 글 순서가 섞여 코드가 이름과 떨어진다) 전부 읽고 코드가 가장 많이 나온 쪽을 쓴다.
   let best: QualificationDocResult | null = null;
   const codedCount = (r: QualificationDocResult) => r.requirements.filter((x) => x.code).length;
-  for (const attachment of pickNoticeDocAttachments(notice)) {
-    // ZIP("공고문 등.zip")이면 안에서 공고문으로 보이는 것만 읽는다
-    const docs = (await downloadDocuments(attachment)).filter((d, _, all) => all.length === 1 || isNoticeDocName(d.name.split(" › ").pop()!));
+  // 글자를 뽑은 첫 첨부 — 참가자격 항목을 못 찾았을 때 "읽긴 했다"를 화면에 알리려고
+  let readFile: string | null = null;
+  let deferredToNotice = false;
+  const preStandard = notice.sourceType === "사전규격";
+  const attachments = preStandard ? await preStandardAttachmentsResolved(notice) : pickNoticeDocAttachments(notice);
+  for (const attachment of attachments) {
+    // ZIP("공고문 등.zip")이면 안에서 공고문으로 보이는 것만 읽는다. 사전규격은 공고문이 따로 없고
+    // 제안요청서·규격서에 참가자격이 있어 ZIP 안 문서를 모두 읽는다 (국방전자조달 "사전규격공개.zip")
+    const docs = (await downloadDocuments(attachment)).filter(
+      (d, _, all) => preStandard || all.length === 1 || isNoticeDocName(d.name.split(" › ").pop()!)
+    );
     for (const doc of docs) {
       try {
         const { text } = await extractDocumentText(doc.path, { ocr: "auto", maxPages: 12 });
+        if (text.trim()) readFile ??= doc.name;
+        if (DEFERRED_TO_NOTICE.test(text.replace(/\s+/g, " "))) deferredToNotice = true;
         const section = findQualificationSection(text);
         if (!section) continue;
         const result: QualificationDocResult = {
@@ -613,10 +633,11 @@ export async function readQualificationFromNotice(
     }
   }
   if (best) return best;
-  // 참가자격 항목은 못 찾았어도 공고가 분류된 세부품명·연결된 본공고는 알려줄 수 있다.
-  if (classifiedItems.length || linkedBidNo) {
+  // 참가자격 항목은 못 찾았어도 공고가 분류된 세부품명·연결된 본공고, 첨부를 읽었다는 사실은 알려줄 수 있다.
+  if (classifiedItems.length || linkedBidNo || readFile) {
     return {
-      sourceFile: "",
+      sourceFile: readFile ?? "",
+      deferredToNotice,
       excerpt: "",
       requirements: [],
       region: null,
@@ -632,6 +653,18 @@ export async function readQualificationFromNotice(
     };
   }
   return null;
+}
+
+/** "제안참가자격 : 공고문 참조", "입찰참가자격은 입찰공고서에 따름" — 자격을 공고문으로 미룬 문장 */
+export const DEFERRED_TO_NOTICE = /(참가|응모)\s*자격\s*[:：]?\s*(은|는)?\s*(입찰\s*)?공고\s*(문|서)?\s*(을|를|에)?\s*(참조|참고|따름|따른다|의함|의한다|확인)/;
+
+/**
+ * 사전규격 첨부 — 나라장터에 첨부 URL이 없으면 국방전자조달(d2b.go.kr)에서 찾는다.
+ * 군 기관 규격은 나라장터에 첨부 없이 연계 안내만 올라온다 (d2bPreStandard.ts).
+ */
+export async function preStandardAttachmentsResolved(notice: NormalizedNotice): Promise<NoticeAttachment[]> {
+  const own = preStandardAttachments(notice);
+  return own.length ? own : d2bAttachmentsFor(notice);
 }
 
 /**
