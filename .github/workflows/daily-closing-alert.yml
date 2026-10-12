@@ -31,6 +31,30 @@ defaults:
     working-directory: narajangter-bid-monitor
 
 jobs:
+  # 월요일이면 주간 보고(weekly-bid-report.yml)도 깨운다.
+  # 주간 보고용 cron-job.org 호출이 10/5·10/12 두 번 다 오지 않았고, GitHub 예약 실행은 3시간씩 밀려(10/12 08:10 → 11:20)
+  # 주간 보고가 늦었다. 매일 08:10 호출은 잘 오므로 그 실행이 월요일에 주간 보고까지 깨운다.
+  # 이미 보낸 주라면 주간 보고 쪽이 발송 기록을 보고 바로 끝나므로 두 번 가지 않는다. 매일 알림의 성공·실패와 상관없이 돈다.
+  # (GITHUB_TOKEN으로 부른 workflow_dispatch는 새 실행을 만든다 — 그 밖의 이벤트와 달리 막히지 않는다)
+  kick-weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 월요일이면 주간 보고도 깨우기
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          if [ "$(TZ=Asia/Seoul date +%u)" != "1" ]; then
+            echo "월요일이 아니라 주간 보고를 깨우지 않습니다."
+            exit 0
+          fi
+          gh workflow run weekly-bid-report.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" -f dry_run="$DRY_RUN"
+          echo "주간 보고를 깨웠습니다 (dry_run=$DRY_RUN)."
+
   alert:
     runs-on: ubuntu-latest
     timeout-minutes: 30
