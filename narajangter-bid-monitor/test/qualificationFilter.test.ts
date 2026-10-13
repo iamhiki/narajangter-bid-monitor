@@ -4,6 +4,7 @@ import {
   extractCode,
   missingLabels,
   qualificationLayout,
+  requiredLicensesFrom,
   uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
@@ -255,5 +256,41 @@ describe("qualificationLayout — 조합으로 펼쳐 실린 그룹", () => {
     ].map(([sw, design], i) => ({ groupNo: String(i + 1), allowedNames: [], rows: [[`소프트웨어/${sw}`], [`산업디자인/${design}`]] }));
     const r = qualificationLayout(groups, held.products, held.industries);
     expect(r.methods).toHaveLength(3);
+  });
+});
+
+describe("조경·토목 면허를 필수로 요구하는 공고 (회사 답변 2026-10-13)", () => {
+  const civil = new Set(["0005", "0001", "0003", "4989", "4996", "4995"]);
+  const heldCodes = new Set(["0006", "0036", "1440"]);
+
+  it("모든 참가 방법이 조경·토목 계열 면허를 꼭 갖춰야 하면 그 면허들을 돌려준다 (돈의문박물관마을 녹지화 실측 모양)", () => {
+    const groups = [
+      { groupNo: "1", allowedNames: [], rows: [["조경공사업/0005"], ["토목공사업/0001", "토목건축공사업/0003"]] },
+      { groupNo: "2", allowedNames: [], rows: [["조경식재ㆍ시설물공사업/4993"], ["구조물해체ㆍ비계공사업/4995"], ["상ㆍ하수도설비공사업/4996"], ["지반조성ㆍ포장공사업/4989"]] },
+    ];
+    expect(requiredLicensesFrom(groups, civil, heldCodes)).toEqual(
+      expect.arrayContaining(["조경공사업(0005)", "토목공사업(0001)", "구조물해체ㆍ비계공사업(4995)"])
+    );
+  });
+
+  it("조경식재·시설물공사업만 요구하는 놀이터·조형물 공고는 거르지 않는다", () => {
+    expect(requiredLicensesFrom([{ groupNo: "1", allowedNames: ["조경식재ㆍ시설물공사업/4993"] }], civil, heldCodes)).toBeNull();
+  });
+
+  it("조경·토목 없이 참가할 방법이 하나라도 있으면 거르지 않는다", () => {
+    const groups = [
+      { groupNo: "1", allowedNames: ["토목공사업/0001"] },
+      { groupNo: "2", allowedNames: ["실내건축공사업/0006"] },
+    ];
+    expect(requiredLicensesFrom(groups, civil, heldCodes)).toBeNull();
+  });
+
+  it("같은 순번 안에 지일 보유 면허가 대안으로 있으면 필수가 아니다", () => {
+    expect(requiredLicensesFrom([{ groupNo: "1", allowedNames: ["토목공사업/0001", "실내건축공사업/0006"] }], civil, heldCodes)).toBeNull();
+  });
+
+  it("면허제한이 없거나 목록이 비어 있으면 거르지 않는다", () => {
+    expect(requiredLicensesFrom([], civil, heldCodes)).toBeNull();
+    expect(requiredLicensesFrom([{ groupNo: "1", allowedNames: ["토목공사업/0001"] }], new Set(), heldCodes)).toBeNull();
   });
 });

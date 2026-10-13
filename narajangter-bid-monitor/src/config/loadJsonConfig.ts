@@ -36,6 +36,8 @@ const keywordsFileSchema = z.object({
   makeSignals: z.array(z.string().trim().min(1)).default([]),
   excludeKeywordExceptions: z.record(z.array(z.string().trim().min(1))).default({}),
   minBudgetAmount: z.number().nonnegative().nullable().default(null),
+  /** 참가자격에서 이 면허들을 필수로 요구하면(조경·토목 등) 제외한다 — qualificationFilter.ts requiredLicensesFrom */
+  excludeRequiredLicenses: z.array(codeEntrySchema).default([]),
   businessTypes: z
     .array(businessTypeSchema)
     .min(1, "businessTypes 배열이 비어있습니다 (최소 1개 필요)")
@@ -123,6 +125,8 @@ export interface AppConfig {
   /** 제외 키워드가 이 말 안에만 들어 있으면 걸지 않는다 — 예: "건축"은 "실내건축"에서는 무시 */
   excludeKeywordExceptions?: Record<string, string[]>;
   minBudgetAmount: number | null;
+  /** 참가자격이 이 면허들을 필수로 요구하는 본공고는 제외 (면허제한정보 기준) */
+  excludeRequiredLicenses?: CodeEntry[];
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
   productCodes: CodeEntry[];
@@ -219,6 +223,7 @@ export function loadAppConfig(): AppConfig {
     makeSignals: keywordsData.makeSignals,
     excludeKeywordExceptions: keywordsData.excludeKeywordExceptions,
     minBudgetAmount: keywordsData.minBudgetAmount,
+    excludeRequiredLicenses: keywordsData.excludeRequiredLicenses,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,
     productCodes: codesData.productCodes,

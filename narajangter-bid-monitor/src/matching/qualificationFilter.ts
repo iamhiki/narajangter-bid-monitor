@@ -117,6 +117,39 @@ function isRowSatisfied(
   return { satisfied: matched.length > 0, usedNameFallback: true, matched };
 }
 
+/**
+ * 참가자격이 지정한 면허(조경·토목 등)를 **필수로** 요구하는가 — 모든 참가 방법(그룹)에, 그 면허들로만 채울 수 있는
+ * 순번이 하나 이상 있으면 그렇다. 지일이 보유한 면허로 채울 수 있는 순번은 필수로 치지 않는다.
+ * 하나라도 그런 순번이 없는 참가 방법이 있으면(= 조경·토목 없이 참가할 길이 있으면) null.
+ *
+ * 2026-10-13 회사 답변: "조경·토목공사업을 필수로 요구하는 공고는 자격 업종 기준으로 제외해도 됩니다."
+ * 예: 돈의문박물관마을 녹지화 및 공간재구성사업 — [조경공사업 + 토목공사업] 또는 [조경식재·시설물 + 구조물해체·비계 +
+ * 상·하수도설비 + 지반조성·포장] — 어느 방법이든 조경·토목 계열 면허가 있어야 한다.
+ *
+ * @returns 필수로 요구하는 면허 표기(업종명(코드)) 목록, 아니면 null
+ */
+export function requiredLicensesFrom(
+  groups: LicenseLimitGroup[],
+  codes: ReadonlySet<string>,
+  heldCodes: ReadonlySet<string>
+): string[] | null {
+  if (groups.length === 0 || codes.size === 0) return null;
+  const required = new Set<string>();
+  for (const group of groups) {
+    const rows = group.rows && group.rows.length > 0 ? group.rows : [group.allowedNames];
+    const onlyThese = rows.filter((row) => {
+      if (row.length === 0) return false;
+      return row.every((name) => {
+        const code = extractCode(name);
+        return code !== null && codes.has(code) && !heldCodes.has(code);
+      });
+    });
+    if (onlyThese.length === 0) return null;
+    for (const row of onlyThese) for (const name of row) required.add(qualificationLabel(name));
+  }
+  return [...required];
+}
+
 /** "업종명/0002" → "업종명(0002)" — 화면·알림에 쓰는 표기 */
 export function qualificationLabel(name: string): string {
   return name.trim().replace(/\s*\/\s*(\d{4})\s*$/, "($1)");
