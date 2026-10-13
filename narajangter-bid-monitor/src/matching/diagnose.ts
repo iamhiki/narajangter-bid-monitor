@@ -7,7 +7,7 @@ import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import { linkedBidNoticeNo } from "./matchEngine.js";
-import { evaluateQualifications, missingLabels, requiredLicensesFrom, uniqueSatisfied } from "./qualificationFilter.js";
+import { evaluateQualifications, excludeLicenseCodes, missingLabels, requiredLicensesFrom, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
  * 공고 한 건이 수집 파이프라인의 각 단계를 통과했는지 하나씩 짚는다 (② 정제 · ③ 미수집 원인 파악용).
@@ -172,7 +172,7 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
 
   // 조경·토목처럼 지일 분야가 아닌 면허를 필수로 요구하면 뺀다 (applyQualificationFilter와 같은 판단)
   const heldCodes = new Set([...ctx.config.heldProducts, ...ctx.config.heldIndustries].map((c) => c.code.trim()));
-  const required = requiredLicensesFrom(groups, new Set((ctx.config.excludeRequiredLicenses ?? []).map((c) => c.code.trim())), heldCodes);
+  const required = requiredLicensesFrom(groups, excludeLicenseCodes(ctx.config.excludeRequiredLicenses, notice.businessType), heldCodes);
   if (required) {
     return { step: "참가자격", ok: false, detail: `참가자격이 ${required.join(", ")} 면허를 필수로 요구 — 지일 사업 분야 아님` };
   }

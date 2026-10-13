@@ -150,6 +150,11 @@ export function requiredLicensesFrom(
   return [...required];
 }
 
+/** 이 업무구분 공고에 적용할 "필수 요구 시 제외" 면허 코드 (keywords.json excludeRequiredLicenses) */
+export function excludeLicenseCodes(entries: { code: string; businessTypes?: string[] }[] | undefined, businessType: string): Set<string> {
+  return new Set((entries ?? []).filter((e) => !e.businessTypes || e.businessTypes.includes(businessType)).map((e) => e.code.trim()));
+}
+
 /** "업종명/0002" → "업종명(0002)" — 화면·알림에 쓰는 표기 */
 export function qualificationLabel(name: string): string {
   return name.trim().replace(/\s*\/\s*(\d{4})\s*$/, "($1)");

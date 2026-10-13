@@ -5,6 +5,7 @@ import {
   missingLabels,
   qualificationLayout,
   requiredLicensesFrom,
+  excludeLicenseCodes,
   uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
@@ -292,5 +293,14 @@ describe("조경·토목 면허를 필수로 요구하는 공고 (회사 답변 
   it("면허제한이 없거나 목록이 비어 있으면 거르지 않는다", () => {
     expect(requiredLicensesFrom([], civil, heldCodes)).toBeNull();
     expect(requiredLicensesFrom([{ groupNo: "1", allowedNames: ["토목공사업/0001"] }], new Set(), heldCodes)).toBeNull();
+  });
+});
+
+describe("업무구분별 제외 면허", () => {
+  const entries = [{ code: "0005" }, { code: "4993", businessTypes: ["공사"] }];
+  it("businessTypes가 있는 면허는 그 업무구분 공고에만 적용한다", () => {
+    expect([...excludeLicenseCodes(entries, "공사")].sort()).toEqual(["0005", "4993"]);
+    expect([...excludeLicenseCodes(entries, "물품")]).toEqual(["0005"]);
+    expect([...excludeLicenseCodes(undefined, "공사")]).toEqual([]);
   });
 });

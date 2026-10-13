@@ -2,7 +2,7 @@ import type { Env } from "../config/env.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { fetchAllLicenseLimitGroups, type LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import { logger } from "../logger.js";
-import { evaluateQualifications, missingLabels, qualificationLayout, requiredLicensesFrom } from "./qualificationFilter.js";
+import { evaluateQualifications, excludeLicenseCodes, missingLabels, qualificationLayout, requiredLicensesFrom } from "./qualificationFilter.js";
 import type { MatchedNotice } from "./types.js";
 
 /**
@@ -31,7 +31,6 @@ export async function applyQualificationFilter(
   const groupsByNotice = await (licenseGroupsPromise ?? fetchAllLicenseLimitGroups(env, window));
 
   let missingCount = 0;
-  const excludeCodes = new Set((appConfig.excludeRequiredLicenses ?? []).map((c) => c.code.trim()));
   const heldCodes = new Set([...appConfig.heldProducts, ...appConfig.heldIndustries].map((c) => c.code.trim()));
   const excluded: string[] = [];
   const kept: MatchedNotice[] = [];
@@ -41,7 +40,7 @@ export async function applyQualificationFilter(
 
   for (const match of matches) {
     const groups = groupsByNotice.get(match.notice.noticeNo) ?? [];
-    if (requiredLicensesFrom(groups, excludeCodes, heldCodes)) {
+    if (requiredLicensesFrom(groups, excludeLicenseCodes(appConfig.excludeRequiredLicenses, match.notice.businessType), heldCodes)) {
       excluded.push(match.notice.noticeNo);
       continue;
     }
