@@ -444,7 +444,7 @@ ol.steps li.first { background: var(--urgent-tint); }
   background: var(--panel); color: var(--urgent); border: 1px solid var(--urgent); white-space: nowrap;
 }
 .due-tag.today { background: var(--urgent); color: var(--on-urgent); }
-/* 회사 방향과 다른 공고 — 맨 아래 접힌 칸 */
+/* 맨 아래 접힌 칸 (첨부로 다시 볼 공고·마감된 공고) */
 .off-group { margin-top: 28px; }
 .off-group > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px; }
 .off-group > summary::-webkit-details-marker { display: none; }
@@ -626,7 +626,7 @@ tr.nobody td { color: var(--faint); }
 .group-note { margin: 8px 0 12px; font-size: 12.5px; color: var(--muted); }
 .group { scroll-margin-top: 16px; }
 
-/* ── 오른쪽 바로가기 (본공고 / 사전규격 / 회사 방향과 다른 공고) ── */
+/* ── 오른쪽 바로가기 (본공고 / 사전규격 / 아래 접힌 칸) ── */
 .jump {
   position: fixed; z-index: 20; top: 140px;
   left: calc(50% + 590px + 16px);   /* 본문(1180px) 오른쪽 바깥 */
@@ -1240,12 +1240,11 @@ function renderRescueCard(n) {
 // 칸은 HTML에 고정해 두고 목록만 다시 그린다 — 칸 전체를 다시 그리면 찾기 칸에 치던 글자가 날아간다.
 const CLOSED_PAGE = 20;
 let closedLimit = CLOSED_PAGE;
-const closedFilters = { when: "all", grade: "all", qual: "all", dir: "all", part: "all" };
+const closedFilters = { when: "all", grade: "all", qual: "all", part: "all" };
 const CLOSED_TESTS = {
   when: { 7: (n) => closedWithin(n, 7), 30: (n) => closedWithin(n, 30) },
   grade: { 강력추천: (n) => n.confidence === "강력추천", 참고용: (n) => n.confidence === "참고용" },
   qual: { ok: (n) => n.qualification?.status !== "미충족", miss: (n) => n.qualification?.status === "미충족" },
-  dir: { core: (n) => !offDirection(n), off: (n) => !!offDirection(n) },
   part: Object.fromEntries(["미지정", "검토중", "참가", "보류", "불참"].map((st) => [st, (n) => (participation[n.noticeNo]?.status || "미지정") === st])),
 };
 /** 마감된 지 days일 안인지 (daysLeft는 지난 마감을 모두 -1로 주므로 따로 잰다) */
@@ -1264,12 +1263,15 @@ function closedPass(n, skip) {
   return Object.entries(closedFilters).every(([g, v]) => g === skip || v === "all" || CLOSED_TESTS[g][v](n));
 }
 let lastClosedOffKey = "";
-const closedOffKeyOf = () => lastClosed.filter(offDirection).map((n) => n.noticeNo).join(",");
+const closedOffKeyOf = () => lastClosed.filter(docOut).map((n) => n.noticeNo).join(",");
+/** 마감된 공고 중 첨부로 뺄 공고(docOut)를 뺀 것 — 마감 전 목록과 같은 기준 */
+const closedKept = () => lastClosed.filter((n) => !docOut(n));
 
 function renderClosed() {
   const box = $("closedGroup");
-  box.hidden = lastClosed.length === 0;
-  $("closedN").textContent = lastClosed.length + "건";
+  const kept = closedKept();
+  box.hidden = kept.length === 0;
+  $("closedN").textContent = kept.length + "건";
   lastClosedOffKey = closedOffKeyOf();
   if (box.hidden) {
     renderJumpNav();
@@ -1277,7 +1279,7 @@ function renderClosed() {
   }
   // 칩 옆 숫자 = 다른 조건은 그대로 두고 이 칩을 골랐을 때 몇 건인지 — 눌러서 0건이 되는 칩을 미리 알 수 있다
   const cchip = (group, value, label) => {
-    const cnt = value === "all" ? null : lastClosed.filter((x) => closedPass(x, group) && CLOSED_TESTS[group][value](x)).length;
+    const cnt = value === "all" ? null : kept.filter((x) => closedPass(x, group) && CLOSED_TESTS[group][value](x)).length;
     const on = closedFilters[group] === value;
     return `<button type="button" class="chip ${on ? "on" : ""}" data-cgroup="${group}" data-value="${esc(value)}">${esc(label)}${cnt === null ? "" : " " + cnt}</button>`;
   };
@@ -1285,7 +1287,6 @@ function renderClosed() {
     ["마감", [cchip("when", "all", "전체 기간"), cchip("when", "7", "최근 7일"), cchip("when", "30", "최근 30일")]],
     ["추천", [cchip("grade", "all", "전체"), cchip("grade", "강력추천", "강력추천"), cchip("grade", "참고용", "참고용")]],
     ["자격", [cchip("qual", "all", "전체"), cchip("qual", "ok", "참가 가능"), cchip("qual", "miss", "자격 미보유")]],
-    ["과업", [cchip("dir", "all", "전체"), cchip("dir", "core", "지일 본업"), cchip("dir", "off", "회사 방향과 다름")]],
     ["참가여부", [cchip("part", "all", "전체"), ...["미지정", "검토중", "참가", "보류", "불참"].map((st) => cchip("part", st, st))]],
   ];
   $("closedFilters").innerHTML = rows
@@ -1295,11 +1296,12 @@ function renderClosed() {
 }
 
 function renderClosedList() {
-  const list = lastClosed.filter((n) => closedPass(n));
+  const kept = closedKept();
+  const list = kept.filter((n) => closedPass(n));
   if ($("closedSort").value === "score") list.sort((a, b) => b.maxScore - a.maxScore);
   const active = Object.values(closedFilters).some((v) => v !== "all") || $("closedQ").value.trim();
   $("closedMeta").innerHTML =
-    `조건에 맞는 공고 <b>${list.length}건</b> / 전체 ${lastClosed.length}건` +
+    `조건에 맞는 공고 <b>${list.length}건</b> / 전체 ${kept.length}건` +
     (active ? ` <button type="button" class="linkish" id="closedReset">조건 모두 지우기</button>` : "");
   const more = list.length - closedLimit;
   $("closedList").innerHTML = list.length
@@ -1344,30 +1346,9 @@ function matchesLiveQuery(n) {
 }
 
 /**
- * 회사 방향과 다른 공고 — 첨부 과업지시서를 읽어 보니
- *  · 과업에 인력 운영(운영요원·도슨트), 유물 운송, 전시품 대여가 들어 있거나 (특별전·행사형)
- *  · 제목 키워드 없이 분류로만 들어왔는데 전시·제작 내용이 없는 공고.
- *  · 사업 목적이 휴게·독서 공간 조성인 공고 (2026-10-01 담당자 판단 — 독서왕김득신문학관 '늘 책봄 공간').
- *  · 첨부 문서에 적힌 지역제한에 본점 소재지가 없는 공고 (2026-10-14 요청). 본공고는 나라장터 참가가능지역으로 서버가
- *    이미 거르고, 사전규격은 그 정보가 없어 첨부를 읽은 결과로만 안다 — 잘못 읽었을 수 있어 지우지 않고 이 칸으로 옮긴다.
- * 자격이 되더라도 본공고 목록에 섞여 있으면 판단에 도움이 안 된다(2026-10-01 요청) — 맨 아래 접힌 칸으로 뺀다.
- * '홍보·도록'만 있는 공고는 도록 인쇄 정도라 그대로 둔다.
- */
-const OFF_KINDS = { 운영: "인력 운영", 운송: "유물 운송", 대여: "전시품 대여", 휴게공간: "휴게·독서 공간 조성" };
-function offDirection(n) {
-  const e = enrich.byNo[n.noticeNo];
-  if (e?.regionOk === false && e.qualDoc?.region) return `지역제한 — ${e.qualDoc.region} 업체만 참가`;
-  if (n.classOnly && e?.core?.status === "없음") return "과업지시서에 전시·제작 내용 없음";
-  const kinds = [...new Set((e?.scope?.flags || []).map((f) => f.kind))].filter((k) => OFF_KINDS[k]);
-  if (kinds.includes("휴게공간")) return "휴게·독서 공간 조성";
-  return kinds.length ? "과업에 " + kinds.map((k) => OFF_KINDS[k]).join("·") + " 포함" : null;
-}
-/**
  * 공고문에서 읽은 업종 자격 중 지일이 갖고 있지 않은 것 — 등록만 하면 되는 업종(기타자유업 9999 등)도 포함한다.
  * 나라장터 업종제한이 걸린 공고는 서버가 이미 걸렀으니, 업종제한이 없거나(사전규격·제한없음·조회실패) 공고문으로 읽은 경우만 본다.
- * 이런 공고는 목록에서 빼고 '제외된 공고' 탭에 '보유하지 않은 자격 필요'로 보낸다 (2026-10-14 요청 — 가천대학교 설계용역의
- * 건축사사무소 개설). 서버 ui.ts의 docQualBlocked와 같은 기준이어야 한다. 등록만 하면 되는 업종도 같은 날 요청으로 뺀다
- * (국립여수해양기상과학관 — 기타자유업 9999. 지일은 9901 행사대행업만 보유).
+ * 2026-10-14 요청 — 가천대학교 설계용역의 건축사사무소 개설, 국립여수해양기상과학관의 기타자유업 9999(지일은 9901만 보유).
  */
 function docQualBlocked(n, doc) {
   const q = n.qualification;
@@ -1376,26 +1357,31 @@ function docQualBlocked(n, doc) {
   const missing = (doc.requirements || []).filter((r) => r.kind === "업종" && isMissing(r));
   return missing.length ? missing : null;
 }
-let offOpen = false;
+/**
+ * 첨부를 읽어 보니 목록에서 빼고 '제외된 공고' 탭으로 보낼 공고 — 서버 ui.ts의 docExclusion과 같은 기준이어야 한다.
+ *  · 공고문 참가자격에 지일이 갖고 있지 않은 업종이 있음
+ *  · 첨부 문서의 지역제한에 본점 소재지가 없음 (사전규격은 나라장터 참가가능지역 정보가 없어 첨부로만 안다)
+ *  · 분류로만 들어왔는데 과업지시서에 전시·제작 내용이 없음, 사업 목적이 휴게·독서 공간 조성 (독서왕김득신문학관 '늘 책봄 공간')
+ * 예전에는 지역제한·과업 내용을 맨 아래 '회사 방향과 다른 공고' 칸에 모았는데, 참가할 수 없거나 본업이 아닌 공고라
+ * '제외된 공고' 탭으로 옮기고 칸을 없앴다 (2026-10-14 요청). 과업에 인력 운영·유물 운송·전시품 대여가 섞인 공고는
+ * 본업이 제작·설치라 목록에 두고 경고 배지만 단다 (같은 날 요청 — 그림책정원1937 기획전시, CES2027 경기도관).
+ */
+function docOut(n) {
+  const e = enrich.byNo[n.noticeNo];
+  if (docQualBlocked(n, e?.qualDoc)) return true;
+  if (e?.regionOk === false && e.qualDoc?.region) return true;
+  if (n.classOnly && e?.core?.status === "없음") return true;
+  return (e?.scope?.flags || []).some((f) => f.kind === "휴게공간");
+}
 let lastOffKey = "";
-const qualOut = (n) => !!docQualBlocked(n, enrich.byNo[n.noticeNo]?.qualDoc);
-/** 숨길 공고 목록(회사 방향과 다름 + 공고문 자격 미보유)이 바뀌었는지 보는 열쇠 */
-const offKeyOf = () => lastItems.filter((n) => offDirection(n) || qualOut(n)).map((n) => n.noticeNo).join(",");
+/** 목록에서 뺄 공고가 바뀌었는지 보는 열쇠 */
+const offKeyOf = () => lastItems.filter(docOut).map((n) => n.noticeNo).join(",");
 
 function applyFilters() {
-  // 공고문 자격 미보유 공고는 '제외된 공고' 탭으로 간다 (docQualBlocked) — 탭을 다시 열 때 새로 받게 비운다
+  // 첨부로 뺀 공고는 '제외된 공고' 탭으로 간다 — 탭을 다시 열 때 새로 받게 비운다
   if (offKeyOf() !== lastOffKey) exData = null;
   lastOffKey = offKeyOf();
-  const offItems = lastItems.filter((n) => offDirection(n) && !qualOut(n));
-  const items = lastItems.filter((n) => !offDirection(n) && !qualOut(n));
-  const offShown = offItems.filter(matchesLiveQuery);
-  const offGroup = offShown.length
-    ? '<details class="group off-group" id="offGroup"' + (offOpen ? " open" : "") + ">" +
-      '<summary><h2>회사 방향과 다른 공고 <span class="group-n">' + offShown.length + "건</span></h2></summary>" +
-      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없거나, 휴게·독서 공간 조성이 목적인 공고입니다. 첨부에 적힌 지역제한으로 지일이 참가할 수 없는 공고도 여기 모았습니다.</p>' +
-      offShown.map(renderNotice).join("") +
-      "</details>"
-    : "";
+  const items = lastItems.filter((n) => !docOut(n));
   const shown = items.filter(
     (n) =>
       matchesLiveQuery(n) &&
@@ -1432,12 +1418,12 @@ function applyFilters() {
   ].join("");
 
   if (!items.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>' + offGroup;
+    $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>';
     renderJumpNav();
     return;
   }
   if (!shown.length) {
-    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>' + offGroup;
+    $("liveResults").innerHTML = '<div class="empty">이 조건에 맞는 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>';
     renderJumpNav();
     return;
   }
@@ -1465,18 +1451,17 @@ function applyFilters() {
           ${list.map(renderNotice).join("")}
         </div>`;
     })
-    .join("") + offGroup;
+    .join("");
   renderJumpNav();
 }
 
 /**
  * 오른쪽 바로가기 — 목록이 길어 아래 칸까지 스크롤이 멀다(2026-10-01 요청).
- * 지금 목록에 있는 칸만 건수와 함께 보여 주고, 접힌 '회사 방향과 다른 공고'는 누르면 펼치면서 간다.
+ * 지금 목록에 있는 칸만 건수와 함께 보여 주고, 접힌 칸은 누르면 펼치면서 간다.
  */
 const JUMPS = [
   { id: "grpMain", label: "본공고" },
   { id: "grpPre", label: "사전규격" },
-  { id: "offGroup", label: "회사 방향과 다른 공고" },
   { id: "rescueGroup", label: "첨부로 다시 볼 공고" },
   { id: "closedGroup", label: "마감된 공고" },
 ];
@@ -2601,6 +2586,7 @@ const STAGE_LABEL = {
   // 일부만 보유한 공고는 빼지 않고 표시만 한다 (공동수급)
   참가자격: "보유하지 않은 자격 필요",
   참가지역: "다른 지역 업체만",
+  "과업 내용": "전시 사업 아님",
 };
 const stageLabel = (s) => STAGE_LABEL[s] || s;
 /** 빠진 이유 배지 팝업 — 그 조건이 무엇인지 (판정 규칙은 diagnose.ts) */
@@ -2613,7 +2599,8 @@ const STAGE_NOTE = {
   해외개최: "몽골이 아닌 해외 전시회의 한국관·단체관 공고입니다.",
   "키워드·품목": "제목·품명에 등록 키워드가 없고, 공고 품목도 지일 등록 품목이 아닙니다.",
   참가자격: "참가자격이 지일이 보유하지 않은 면허(조경·토목·건축사 등)를 꼭 갖추도록 요구합니다.<br>공동수급으로도 지일이 맡을 몫이 없습니다.",
-  참가지역: "다른 지역에 본사가 있는 업체만 참가할 수 있는 공고입니다.",
+  참가지역: "다른 지역에 본사가 있는 업체만 참가할 수 있는 공고입니다.<br>사전규격은 첨부 문서에 적힌 지역제한으로 판단했습니다.",
+  "과업 내용": "첨부 과업지시서를 읽어 보니 전시·제작 사업이 아닙니다.<br>제목에 키워드가 없고 과업에도 전시·제작 내용이 없거나, 사업 목적이 휴게·독서 공간 조성입니다.",
 };
 function excludedBadge(n) {
   if (!n.excludedAt) return tipBadge("hi", "목록에 있음", "목록에 있음", `<p>모든 조건을 통과해 공고 목록에 올라 있습니다.</p>`);
@@ -2640,6 +2627,7 @@ const STEP_NAME = {
   "키워드·품목": "우리 분야 해당",
   참가자격: "참가 자격",
   참가지역: "참가 가능 지역",
+  "과업 내용": "과업 내용",
 };
 async function loadExcluded() {
   $("exMeta").textContent = "불러오는 중…";
@@ -2670,6 +2658,7 @@ const STAGE_RULE = {
   "키워드·품목": "등록 키워드·품목이 없음",
   참가자격: "지일이 없는 면허·업종을 요구",
   참가지역: "본점 지역 밖 업체만 참가 가능",
+  "과업 내용": "과업지시서에 전시·제작 내용 없음, 휴게·독서 공간 조성",
 };
 const num = (v) => v.toLocaleString("ko-KR");
 
@@ -2839,10 +2828,6 @@ function toggleScoreWhy(box) {
     box.setAttribute("aria-expanded", "true");
   }
 }
-// '회사 방향과 다른 공고' 칸을 펼친 채로 두기 — 목록을 다시 그려도 접히지 않게
-document.addEventListener("toggle", (ev) => {
-  if (ev.target.id === "offGroup") offOpen = ev.target.open;
-}, true);
 
 document.addEventListener("keydown", (ev) => {
   const box = ev.target.closest?.(".card-score");

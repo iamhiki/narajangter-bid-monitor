@@ -31,6 +31,8 @@ export const DIAGNOSE_STEPS = [
   "키워드·품목",
   "참가자격",
   "참가지역",
+  // 첨부 과업지시서를 읽은 뒤(scripts/ui.ts docExcluded)에만 정해진다 — diagnoseNotice는 이 단계를 내지 않는다
+  "과업 내용",
 ] as const;
 export type DiagnoseStepName = (typeof DIAGNOSE_STEPS)[number];
 

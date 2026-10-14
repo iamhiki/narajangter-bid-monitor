@@ -448,20 +448,39 @@ function docQualBlocked(qualificationStatus: string | null, doc: QualificationDo
 }
 
 /**
- * 목록에 올랐지만 첨부 공고문을 읽어 보니 지일이 갖고 있지 않은 자격을 요구하는 공고 — '제외된 공고' 탭에
- * '참가자격' 단계로 덧붙인다. 화면 목록에서는 같은 기준으로 빠진다.
+ * 첨부를 읽어 보니 목록에서 뺄 공고 — 화면(ui.html)의 docOut과 같은 기준.
+ *  · 공고문 참가자격에 지일이 갖고 있지 않은 업종이 있음 → 참가자격
+ *  · 첨부 문서의 지역제한에 본점 소재지가 없음 → 참가지역. 사전규격은 나라장터 참가가능지역 정보가 없어 첨부로만 안다
+ *  · 분류로만 들어왔는데 과업지시서에 전시·제작 내용이 없음, 사업 목적이 휴게·독서 공간 조성 → 과업 내용
+ * 예전에는 지역제한·과업 내용을 목록 맨 아래 '회사 방향과 다른 공고' 칸에 두었는데, 참가할 수 없거나 본업이 아닌
+ * 공고라 '제외된 공고' 탭으로 옮겼다 (2026-10-14 요청).
  */
-function docQualExcluded(diag: CollectionDiagnostics): unknown[] {
+type ListItem = { noticeNo: string; qualification: { status: string } | null; classOnly: boolean };
+function docExclusion(item: ListItem, hq: string | null): { stage: "참가자격" | "참가지역" | "과업 내용"; detail: string } | null {
+  const e = enrichment.get(item.noticeNo);
+  const missing = docQualBlocked(item.qualification?.status ?? null, e?.qualDoc);
+  if (missing) return { stage: "참가자격", detail: `공고문 참가자격에 지일이 갖고 있지 않은 자격이 있습니다 — ${missing.join(", ")}` };
+  const region = e?.qualDoc?.region;
+  if (region && meetsRegion(region, hq) === false) return { stage: "참가지역", detail: `첨부 문서의 지역제한 — ${region} 업체만 참가` };
+  if (item.classOnly && e?.core?.status === "없음") return { stage: "과업 내용", detail: "제목에 키워드가 없고, 과업지시서에도 전시·제작 내용이 없습니다" };
+  if (e?.scope?.flags.some((f) => f.kind === "휴게공간")) return { stage: "과업 내용", detail: "사업 목적이 휴게·독서 공간 조성입니다" };
+  return null;
+}
+
+function docExcluded(diag: CollectionDiagnostics): unknown[] {
   const byNo = new Map(diag.notices.map((n) => [n.noticeNo, n]));
+  const hq = loadHeadquartersRegion();
   const out: unknown[] = [];
-  for (const item of (noticeCache?.items ?? []) as { noticeNo: string; qualification: { status: string } | null }[]) {
-    const missing = docQualBlocked(item.qualification?.status ?? null, enrichment.get(item.noticeNo)?.qualDoc);
+  for (const item of (noticeCache?.items ?? []) as ListItem[]) {
+    const why = docExclusion(item, hq);
     const notice = byNo.get(item.noticeNo);
-    if (!missing || !notice) continue;
-    const detail = `공고문 참가자격에 지일이 갖고 있지 않은 자격이 있습니다 — ${missing.join(", ")}`;
+    if (!why || !notice) continue;
     const d = diagnoseNotice(notice, diag.context);
-    const steps = d.steps.map((s) => (s.step === "참가자격" ? { ...s, ok: false, detail } : s));
-    out.push(noticeSummary(notice, { ...d, steps, excludedAt: "참가자격" }));
+    const marked = d.steps.some((s) => s.step === why.stage);
+    const steps = marked
+      ? d.steps.map((s) => (s.step === why.stage ? { ...s, ok: false, detail: why.detail } : s))
+      : [...d.steps, { step: why.stage, ok: false, detail: why.detail }];
+    out.push(noticeSummary(notice, { ...d, steps, excludedAt: why.stage }));
   }
   return out;
 }
@@ -996,9 +1015,10 @@ const server = createServer((req, res) => {
       return;
     }
     const base = excludedCandidates(lastDiagnostics);
-    const fromDoc = docQualExcluded(lastDiagnostics);
+    const fromDoc = docExcluded(lastDiagnostics) as { excludedAt: string }[];
     const items = [...fromDoc, ...base.items];
-    const byStage = { ...base.byStage, 참가자격: (base.byStage["참가자격"] ?? 0) + fromDoc.length };
+    const byStage = { ...base.byStage };
+    for (const n of fromDoc) byStage[n.excludedAt] = (byStage[n.excludedAt] ?? 0) + 1;
     json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
     return;
   }
