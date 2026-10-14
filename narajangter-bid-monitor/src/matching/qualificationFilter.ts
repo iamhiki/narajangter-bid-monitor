@@ -156,13 +156,15 @@ export function requiredLicensesFrom(
  * 2026-10-14 회사 요청: "건축사사무소 같은 자격은 우리가 갖고 있지 않으니까 그런 것도 없애줘."
  *
  * 코드가 없는 업종이 하나라도 있으면 판단하지 않는다(null) — 이름으로는 보유 여부를 확신할 수 없다.
+ * keepCodes(keywords.json keepMissingQualifications)의 업종을 요구하면 빼지 않는다 — 건축사사무소 설계용역은
+ * 보유하지 않아도 목록에서 보고 싶다는 요청 (2026-10-14, 같은 날 앞선 '없애줘' 요청을 되돌림).
  * @returns 공고가 요구한 업종 표기 목록, 아니면 null
  */
-export function holdsNoneOf(groups: LicenseLimitGroup[], heldCodes: ReadonlySet<string>): string[] | null {
+export function holdsNoneOf(groups: LicenseLimitGroup[], heldCodes: ReadonlySet<string>, keepCodes: ReadonlySet<string> = new Set()): string[] | null {
   const names = groups.flatMap((g) => g.allowedNames);
   if (names.length === 0) return null;
   const codes = names.map(extractCode);
-  if (codes.some((c) => c === null || heldCodes.has(c))) return null;
+  if (codes.some((c) => c === null || heldCodes.has(c) || keepCodes.has(c))) return null;
   return [...new Set(names.map(qualificationLabel))];
 }
 

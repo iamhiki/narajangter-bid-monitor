@@ -46,6 +46,8 @@ const keywordsFileSchema = z.object({
   excludeRequiredLicenses: z.array(codeEntrySchema.extend({ businessTypes: z.array(businessTypeSchema).optional() })).default([]),
   /** 참가자격 업종을 하나도 보유하지 않으면 제외할 업무구분 (qualificationFilter.ts holdsNoneOf) */
   excludeNoHeldQualificationTypes: z.array(businessTypeSchema).default([]),
+  /** 지일이 보유하지 않아도 이 자격을 요구하는 공고는 빼지 않고 목록에 둔다 (건축사사무소 — 설계용역 영업) */
+  keepMissingQualifications: z.array(codeEntrySchema).default([]),
   businessTypes: z
     .array(businessTypeSchema)
     .min(1, "businessTypes 배열이 비어있습니다 (최소 1개 필요)")
@@ -139,6 +141,8 @@ export interface AppConfig {
   excludeRequiredLicenses?: (CodeEntry & { businessTypes?: BusinessType[] })[];
   /** 이 업무구분의 본공고는 참가자격 업종을 하나도 보유하지 않으면 제외 (물품은 빼 둔다 — 조형물 공고) */
   excludeNoHeldQualificationTypes?: BusinessType[];
+  /** 보유하지 않아도 공고를 빼지 않는 자격 — 나라장터 면허제한은 코드로, 공고문 자격은 이름으로 맞춘다 */
+  keepMissingQualifications?: CodeEntry[];
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
   productCodes: CodeEntry[];
@@ -238,6 +242,7 @@ export function loadAppConfig(): AppConfig {
     minBudgetExemption: keywordsData.minBudgetExemption,
     excludeRequiredLicenses: keywordsData.excludeRequiredLicenses,
     excludeNoHeldQualificationTypes: keywordsData.excludeNoHeldQualificationTypes,
+    keepMissingQualifications: keywordsData.keepMissingQualifications,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,
     productCodes: codesData.productCodes,

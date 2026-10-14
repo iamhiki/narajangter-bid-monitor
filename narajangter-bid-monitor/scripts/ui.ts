@@ -443,8 +443,22 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
 function docQualBlocked(qualificationStatus: string | null, doc: QualificationDocResult | null | undefined): string[] | null {
   if (qualificationStatus !== null && qualificationStatus !== "조회실패" && qualificationStatus !== "제한없음") return null;
   if (!doc || doc.sectionFound === false) return null;
-  const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered);
+  const keep = keepQualifications();
+  const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered && !isKeptQualification(r, keep));
   return missing.length > 0 ? missing.map((r) => r.name ?? r.docName ?? r.code ?? "업종") : null;
+}
+
+/**
+ * 보유하지 않아도 공고를 빼지 않는 자격 (keywords.json keepMissingQualifications — 건축사사무소, 2026-10-14 요청).
+ * 화면(ui.html docQualBlocked)도 같은 목록을 /api/enrich로 받아 쓴다.
+ */
+function keepQualifications(): { code: string; name: string }[] {
+  return lastDiagnostics?.context.config.keepMissingQualifications ?? [];
+}
+/** 공고문 자격은 코드가 없는 경우가 많아("건축사사무소 개설(건축사법)") 코드가 아니면 이름 포함으로 맞춘다 — ui.html isKeptQualification과 같은 기준 */
+function isKeptQualification(r: { code: string | null; name: string | null; docName?: string | null }, keep: { code: string; name: string }[]): boolean {
+  const text = `${r.name ?? ""} ${r.docName ?? ""}`.replace(/\s+/g, "");
+  return keep.some((k) => (r.code !== null && r.code === k.code) || text.includes(k.name.replace(/\s+/g, "")));
 }
 
 /**
@@ -475,14 +489,18 @@ function docExcluded(diag: CollectionDiagnostics): unknown[] {
     const why = docExclusion(item, hq);
     const notice = byNo.get(item.noticeNo);
     if (!why || !notice) continue;
-    const d = diagnoseNotice(notice, diag.context);
-    const marked = d.steps.some((s) => s.step === why.stage);
-    const steps = marked
-      ? d.steps.map((s) => (s.step === why.stage ? { ...s, ok: false, detail: why.detail } : s))
-      : [...d.steps, { step: why.stage, ok: false, detail: why.detail }];
-    out.push(noticeSummary(notice, { ...d, steps, excludedAt: why.stage }));
+    out.push(noticeSummary(notice, withDocExclusion(diagnoseNotice(notice, diag.context), why)));
   }
   return out;
+}
+
+/** 첨부 문서로 빠진 이유를 조건별 확인 결과에 반영한다 — 같은 단계가 있으면 그 줄을 바꾸고, 없으면 덧붙인다 */
+function withDocExclusion(d: Diagnosis, why: NonNullable<ReturnType<typeof docExclusion>>): Diagnosis {
+  const marked = d.steps.some((s) => s.step === why.stage);
+  const steps = marked
+    ? d.steps.map((s) => (s.step === why.stage ? { ...s, ok: false, detail: why.detail } : s))
+    : [...d.steps, { step: why.stage, ok: false, detail: why.detail }];
+  return { ...d, steps, excludedAt: why.stage };
 }
 
 /**
@@ -1040,10 +1058,20 @@ const server = createServer((req, res) => {
     const found = lastDiagnostics.notices
       .filter((n) => (byNo ? n.noticeNo.toLowerCase().startsWith(needle) : norm(n.title).includes(needle)))
       .slice(0, 30);
+    // 나라장터 정보로는 통과해도 첨부 문서(공고문 참가자격·지역제한·과업)로 목록에서 빠진 공고가 있다 —
+    // 목록·'제외된 공고' 탭과 같은 판정을 써야 "목록에 있음"으로 잘못 나오지 않는다
+    // (2026-10-14 가천대 의과대학 공간조성 설계용역: 공고문에 건축사사무소 신고 요구)
+    const listed = new Map(((noticeCache?.items ?? []) as ListItem[]).map((it) => [it.noticeNo, it]));
+    const hq = loadHeadquartersRegion();
     json(res, {
       periodLabel: noticeCache?.periodLabel ?? null,
       total: lastDiagnostics.notices.length,
-      items: found.map((n) => noticeSummary(n, diagnoseNotice(n, lastDiagnostics!.context))),
+      items: found.map((n) => {
+        const d = diagnoseNotice(n, lastDiagnostics!.context);
+        const item = d.excludedAt === null ? listed.get(n.noticeNo) : undefined;
+        const why = item ? docExclusion(item, hq) : null;
+        return noticeSummary(n, why ? withDocExclusion(d, why) : d);
+      }),
     });
     return;
   }
@@ -1053,7 +1081,7 @@ const server = createServer((req, res) => {
     const byNo = Object.fromEntries(
       [...enrichment].map(([no, e]) => [no, { ...e, regionOk: e.qualDoc?.region ? meetsRegion(e.qualDoc.region, hq) : null }])
     );
-    json(res, { ...enrichState, headquartersRegion: hq, byNo });
+    json(res, { ...enrichState, headquartersRegion: hq, keepQualifications: keepQualifications(), byNo });
     return;
   }
 

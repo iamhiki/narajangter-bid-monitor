@@ -762,12 +762,11 @@ footer b { color: var(--muted); }
 
   <section id="tab-live">
     <div class="search">
-      <select id="days">
+      <select id="days" autocomplete="off">
         <option value="3">최근 3일</option>
-        <option value="7">최근 7일</option>
+        <option value="7" selected>최근 7일</option>
         <option value="14">최근 14일</option>
-        <option value="30">최근 30일</option>
-        <option value="open" selected>마감 전 공고 전체</option>
+        <option value="open">마감 전 공고 전체</option>
       </select>
       <button type="button" id="load">불러오기</button>
       <button type="button" id="refresh" class="ghost" title="방금 올라온 공고까지 나라장터에서 다시 받아옵니다">최신으로 다시 조회</button>
@@ -1354,8 +1353,16 @@ function docQualBlocked(n, doc) {
   const q = n.qualification;
   if (q && q.status !== "조회실패" && q.status !== "제한없음") return null;
   if (!doc || doc.sectionFound === false) return null;
-  const missing = (doc.requirements || []).filter((r) => r.kind === "업종" && isMissing(r));
+  const missing = (doc.requirements || []).filter((r) => r.kind === "업종" && isMissing(r) && !isKeptQualification(r));
   return missing.length ? missing : null;
+}
+/**
+ * 보유하지 않아도 목록에 두는 자격(건축사사무소 — 설계용역 영업, 2026-10-14 요청). 서버 ui.ts isKeptQualification과 같은 기준.
+ * 공고문 자격은 코드가 없는 경우가 많아 코드가 아니면 이름 포함으로 맞춘다.
+ */
+function isKeptQualification(r) {
+  const text = `${r.name || ""} ${r.docName || ""}`.replace(/\s+/g, "");
+  return (enrich.keepQualifications || []).some((k) => (r.code != null && r.code === k.code) || text.includes(k.name.replace(/\s+/g, "")));
 }
 /**
  * 첨부를 읽어 보니 목록에서 빼고 '제외된 공고' 탭으로 보낼 공고 — 서버 ui.ts의 docExclusion과 같은 기준이어야 한다.
@@ -2145,9 +2152,13 @@ function qualBadge(n, doc) {
     // 나라장터 업종제한에서 걸린 공고는 이미 "제외된 공고"로 갔다. 여기 미보유는 공고문 글에서 읽은 것이라
     // 잘못 읽었을 수 있어 목록에 남긴다 — 배지 이름과 팝업에 그 차이를 적는다
     // 미보유 업종이 있으면 목록에서 빠져 '제외된 공고' 탭에 간다 (docQualBlocked)
-    const note = need.some(isMissing)
+    // 건축사사무소처럼 보유하지 않아도 목록에 두기로 한 자격(isKeptQualification)만 빠졌으면 그렇게 적는다
+    const blocked = need.some((r) => isMissing(r) && !isKeptQualification(r));
+    const note = blocked
       ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다.<br>목록에서 빼고 '제외된 공고' 탭에 두었습니다. 원문을 확인하세요.</p>`
-      : "";
+      : need.some(isMissing)
+        ? `<p class="warnline">지일이 갖고 있지 않은 자격이지만, 볼 수 있게 목록에 남겨 둔 공고입니다.<br>참가 방법은 원문을 확인하세요.</p>`
+        : "";
     return reqBadge(
       need,
       { ok: "자격충족", fix: "자격 등록 추가", block: "공고문 자격 미보유" },

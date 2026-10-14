@@ -196,7 +196,7 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
   if (required) {
     return { step: "참가자격", ok: false, detail: `참가자격이 ${required.join(", ")} 면허를 필수로 요구 — 지일 사업 분야 아님` };
   }
-  const noneHeld = ctx.config.excludeNoHeldQualificationTypes?.includes(notice.businessType) ? holdsNoneOf(groups, heldCodes) : null;
+  const noneHeld = ctx.config.excludeNoHeldQualificationTypes?.includes(notice.businessType) ? holdsNoneOf(groups, heldCodes, new Set((ctx.config.keepMissingQualifications ?? []).map((c) => c.code.trim()))) : null;
   if (noneHeld) {
     return { step: "참가자격", ok: false, detail: `참가자격 업종(${noneHeld.join(", ")})을 하나도 보유하지 않음 — 공동수급으로도 참가 불가` };
   }

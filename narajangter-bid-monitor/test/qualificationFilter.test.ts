@@ -6,6 +6,7 @@ import {
   qualificationLayout,
   requiredLicensesFrom,
   excludeLicenseCodes,
+  holdsNoneOf,
   uniqueSatisfied,
 } from "../src/matching/qualificationFilter.js";
 import type { CodeEntry } from "../src/config/loadJsonConfig.js";
@@ -302,5 +303,18 @@ describe("업무구분별 제외 면허", () => {
     expect([...excludeLicenseCodes(entries, "공사")].sort()).toEqual(["0005", "4993"]);
     expect([...excludeLicenseCodes(entries, "물품")]).toEqual(["0005"]);
     expect([...excludeLicenseCodes(undefined, "공사")]).toEqual([]);
+  });
+});
+
+describe("holdsNoneOf", () => {
+  const groups = [{ groupNo: "1", allowedNames: ["건축사사무소/4817", "엔지니어링사업자/1162"] }];
+  const heldCodes = new Set(["4442", "4990"]);
+
+  it("요구 업종을 하나도 보유하지 않으면 그 업종들을 돌려준다", () => {
+    expect(holdsNoneOf(groups, heldCodes)).toEqual(["건축사사무소(4817)", "엔지니어링사업자(1162)"]);
+  });
+
+  it("목록에 두기로 한 업종(건축사사무소)을 요구하면 빼지 않는다 — 2026-10-14 요청", () => {
+    expect(holdsNoneOf(groups, heldCodes, new Set(["4817"]))).toBeNull();
   });
 });

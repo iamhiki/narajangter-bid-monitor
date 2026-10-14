@@ -33,6 +33,7 @@ export async function applyQualificationFilter(
 
   let missingCount = 0;
   const heldCodes = new Set([...appConfig.heldProducts, ...appConfig.heldIndustries].map((c) => c.code.trim()));
+  const keepCodes = new Set((appConfig.keepMissingQualifications ?? []).map((c) => c.code.trim()));
   const excluded: string[] = [];
   const noneHeld: string[] = [];
   const kept: MatchedNotice[] = [];
@@ -46,7 +47,7 @@ export async function applyQualificationFilter(
       excluded.push(match.notice.noticeNo);
       continue;
     }
-    if (appConfig.excludeNoHeldQualificationTypes?.includes(match.notice.businessType) && holdsNoneOf(groups, heldCodes)) {
+    if (appConfig.excludeNoHeldQualificationTypes?.includes(match.notice.businessType) && holdsNoneOf(groups, heldCodes, keepCodes)) {
       noneHeld.push(match.notice.noticeNo);
       continue;
     }

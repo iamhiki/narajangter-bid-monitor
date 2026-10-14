@@ -43,8 +43,8 @@ export function isBelowMinBudget(notice: NormalizedNotice, config: AppConfig): b
 export function isMinBudgetExempt(notice: NormalizedNotice, config: AppConfig): boolean {
   const ex = config.minBudgetExemption;
   if (!ex || !ex.businessTypes.includes(notice.businessType)) return false;
-  const title = notice.title.replace(/s+/g, "");
-  return ex.titleWords.some((w) => title.includes(w.replace(/s+/g, "")));
+  const title = notice.title.replace(/\s+/g, "");
+  return ex.titleWords.some((w) => title.includes(w.replace(/\s+/g, "")));
 }
 
 export function evaluateNotice(
