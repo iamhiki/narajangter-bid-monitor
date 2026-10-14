@@ -61,8 +61,11 @@ export type RequirementBasis = "등록" | "직접생산" | "면허";
  * 코드가 나온 문장에서 요건 종류를 읽는다. 앞쪽은 가장 가까운 항목 기호(1), 가., ○, ※)나 문장 끝("다.")
  * 이후만 본다 — 앞 항목의 "직접생산확인증명서"가 다음 항목 코드에 붙으면 오판한다.
  */
-export function requirementBasis(section: string, at: number, kind: DocRequirement["kind"]): RequirementBasis {
-  if (kind === "업종") return "면허";
+export function requirementBasis(section: string, at: number, kind: DocRequirement["kind"], code?: string, docName?: string | null): RequirementBasis {
+  // 기타자유업(9999 등)은 면허 없이 조달청 등록만 하면 되는 업종이다 — 미보유여도 '자격 등록 추가'로 보여 목록에 남긴다.
+  // 지일은 기타자유업(행사대행업, 9901)만 등록해 두어 "기타자유업(업종코드: 9999)" 공고가 면허 미보유로 빠졌다
+  // (2026-10-14 국립여수해양기상과학관 운영·유지관리 용역)
+  if (kind === "업종") return code === "9999" || /자유s*업/.test(docName ?? "") ? "등록" : "면허";
   const raw = section.slice(Math.max(0, at - 160), at);
   // 항목 번호 "6)"는 한두 자리만 — "영상정보디스플레이 장치(4511189301), 교육용로봇(…"의 "4511189301)"을
   // 항목 경계로 보면 앞의 "직접생산확인증명서"를 놓친다 (수정유스센터 공고 실측)
@@ -509,14 +512,14 @@ export function analyzeQualificationText(
     if (existing) {
       // 같은 코드가 여러 번 나오면 이름이 적힌 쪽을 쓴다 (첫 등장에 이름이 없을 수 있다)
       existing.docName ??= docName;
-      const basis = requirementBasis(section, at, kind);
+      const basis = requirementBasis(section, at, kind, code, existing.docName);
       if (!existing.bases.includes(basis)) existing.bases.push(basis);
       return;
     }
     seen.add(code);
     const name = (kind === "업종" ? industryName : productName).get(code) ?? null;
     const related = kind === "품명" && name === null ? relatedHeldProducts(code, heldProducts) : null;
-    const req: DocRequirement = { kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind)] };
+    const req: DocRequirement = { kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind, code, docName)] };
     requirements.push(req);
     posOf.set(req, at);
   };

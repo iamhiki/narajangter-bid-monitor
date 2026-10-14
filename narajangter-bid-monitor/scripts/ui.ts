@@ -29,6 +29,7 @@ import type { NormalizedNotice } from "../src/api/types.js";
 import type { PastProject } from "../src/corpus/types.js";
 import { buildSimilarityIndex } from "../src/similarity/loadCorpus.js";
 import { calibrate } from "../src/similarity/calibrate.js";
+import { groupWorkTerms } from "../src/similarity/workTerms.js";
 
 /**
  * 유사도 탐색기 — 로컬 웹 UI.
@@ -287,7 +288,27 @@ interface SimilarityView {
      * 뜻하는 말 (similarity/workTerms.ts). 일의 내용 → 시설 이름 순. 지역·기관명은 나오지 않는다.
      */
     keywords: string[];
+    /** 이 과거 사업의 꼬리표 — 공고와 겹치는 키워드(shared) 먼저, 그다음 이 사업에만 있는 키워드를 묶음 순서로 */
+    tags: { term: string; shared: boolean }[];
+    /** 꼬리표 칸이 넘쳐 보이지 않는 이 사업의 키워드 수 */
+    moreTags: number;
   }[];
+  /** 이 공고의 과업 프로필 — 공고 글에 나온 실적 키워드를 묶음별로 (workTerms.ts) */
+  profile: { name: string; terms: string[] }[];
+}
+
+/** 과거 사업 꼬리표 최대 개수. 겹치는 키워드는 이보다 많아도 다 보이고, 이 사업에만 있는 키워드는 남은 칸까지만 */
+const MAX_TAGS = 12;
+
+/** 과거 사업 꼬리표 — 겹치는 키워드(점수 기여 순) 다음에 이 사업에만 있는 키워드(묶음 순) */
+function projectTags(shared: string[], projectTerms: string[]): { tags: { term: string; shared: boolean }[]; moreTags: number } {
+  const sharedSet = new Set(shared);
+  const rest = groupWorkTerms(projectTerms.filter((t) => !sharedSet.has(t))).flatMap((g) => g.terms);
+  const room = Math.max(0, MAX_TAGS - shared.length);
+  return {
+    tags: [...shared.map((term) => ({ term, shared: true })), ...rest.slice(0, room).map((term) => ({ term, shared: false }))],
+    moreTags: Math.max(0, rest.length - room),
+  };
 }
 
 /**
@@ -312,9 +333,11 @@ function similarityView(title: string, body?: { text: string; fullText: string }
       bodyScore: t.bodyScore,
       sharedNameTokens: t.sharedNameTokens,
       keywordScore: t.keywordScore,
-      // 화면 근거 = 점수에 들어간 키워드 그대로 (다섯 개까지)
-      keywords: t.keywords.slice(0, 5),
+      // 화면 근거 = 점수에 들어간 키워드 그대로
+      keywords: t.keywords,
+      ...projectTags(t.keywords, t.projectTerms),
     })),
+    profile: groupWorkTerms(s.queryTerms),
   };
 }
 
@@ -353,12 +376,24 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     },
     overseas: m.overseasVenueFlag?.matchedMongoliaKeyword ?? null,
     qualification: m.qualification ?? null,
+    allowedRegions: allowedRegionsOf(n),
     mainWork: mainWorkOf(n, appConfig.heldIndustries),
     classOnly: isClassOnly(m),
     /** 담당자가 "목록에 올리기"한 공고면 누가·언제·왜 빠졌었는지 */
     promoted: promoted[n.noticeNo] ?? null,
     ...similarity,
   };
+}
+
+/**
+ * 나라장터 참가가능지역 (본공고만, api/regionLimitApi.ts) — 화면의 지역제한 배지. 본점 지역 밖인 공고는 서버가 이미
+ * '참가지역' 단계에서 뺐으니 목록에 남은 것은 모두 본점(강원) 업체가 참가할 수 있는 지역제한이다.
+ * [] = 지역제한 없음(전국), null = 사전규격이거나 조회 실패라 모름 — 사전규격은 첨부 공고문에서 읽은 지역(qualDoc.region)을 쓴다.
+ */
+function allowedRegionsOf(n: NormalizedNotice): string[] | null {
+  const map = lastDiagnostics?.context.participationRegions;
+  if (n.sourceType !== "본공고" || !map || map.size === 0) return null;
+  return map.get(n.noticeNo) ?? [];
 }
 
 function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
@@ -398,6 +433,37 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
   }
   excludedCache = { source: diag, items, byStage };
   return excludedCache;
+}
+
+/**
+ * 공고문에서 읽은 업종 자격 중 지일이 갖고 있지 않은 것(등록만 하면 되는 업종 포함) — 화면(ui.html)의 docQualBlocked와 같은 기준.
+ * 나라장터 업종제한이 걸린 공고는 '참가자격' 단계에서 이미 빠졌으니, 업종제한이 없는(사전규격·제한없음·조회실패) 공고만 본다.
+ * 첨부를 읽어야 아는 것이라 목록을 만들 때가 아니라 첨부를 읽은 뒤(enrichment)에 가린다 (2026-10-14 요청).
+ */
+function docQualBlocked(qualificationStatus: string | null, doc: QualificationDocResult | null | undefined): string[] | null {
+  if (qualificationStatus !== null && qualificationStatus !== "조회실패" && qualificationStatus !== "제한없음") return null;
+  if (!doc || doc.sectionFound === false) return null;
+  const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered);
+  return missing.length > 0 ? missing.map((r) => r.name ?? r.docName ?? r.code ?? "업종") : null;
+}
+
+/**
+ * 목록에 올랐지만 첨부 공고문을 읽어 보니 지일이 갖고 있지 않은 자격을 요구하는 공고 — '제외된 공고' 탭에
+ * '참가자격' 단계로 덧붙인다. 화면 목록에서는 같은 기준으로 빠진다.
+ */
+function docQualExcluded(diag: CollectionDiagnostics): unknown[] {
+  const byNo = new Map(diag.notices.map((n) => [n.noticeNo, n]));
+  const out: unknown[] = [];
+  for (const item of (noticeCache?.items ?? []) as { noticeNo: string; qualification: { status: string } | null }[]) {
+    const missing = docQualBlocked(item.qualification?.status ?? null, enrichment.get(item.noticeNo)?.qualDoc);
+    const notice = byNo.get(item.noticeNo);
+    if (!missing || !notice) continue;
+    const detail = `공고문 참가자격에 지일이 갖고 있지 않은 자격이 있습니다 — ${missing.join(", ")}`;
+    const d = diagnoseNotice(notice, diag.context);
+    const steps = d.steps.map((s) => (s.step === "참가자격" ? { ...s, ok: false, detail } : s));
+    out.push(noticeSummary(notice, { ...d, steps, excludedAt: "참가자격" }));
+  }
+  return out;
 }
 
 /**
@@ -929,7 +995,10 @@ const server = createServer((req, res) => {
       json(res, { error: "먼저 '실제 공고' 탭에서 나라장터 공고를 불러오세요." });
       return;
     }
-    const { items, byStage } = excludedCandidates(lastDiagnostics);
+    const base = excludedCandidates(lastDiagnostics);
+    const fromDoc = docQualExcluded(lastDiagnostics);
+    const items = [...fromDoc, ...base.items];
+    const byStage = { ...base.byStage, 참가자격: (base.byStage["참가자격"] ?? 0) + fromDoc.length };
     json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
     return;
   }

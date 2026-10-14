@@ -46,9 +46,9 @@ describe("calibrate — 단조성 (가장 중요)", () => {
 });
 
 describe("calibrate — 실측 기준점이 의도한 값으로 간다", () => {
-  it("제목 기준 (2026-10-14 실측): 무관 90분위 10%, 지일 과거사업 중앙 50%", () => {
-    expect(calibratedPercent(0.046, "제목")).toBe(10);
-    expect(calibratedPercent(0.138, "제목")).toBe(50);
+  it("제목 기준 (2026-10-14 실측): 무관 90분위 15%, 지일 과거사업 중앙 70%", () => {
+    expect(calibratedPercent(0.046, "제목")).toBe(15);
+    expect(calibratedPercent(0.138, "제목")).toBe(70);
     expect(calibratedPercent(1.0, "제목")).toBe(100);
   });
 
@@ -59,10 +59,10 @@ describe("calibrate — 실측 기준점이 의도한 값으로 간다", () => {
     expect(bandOf(calibrate(0.1, "제목"))).toBe("낮음");
   });
 
-  it("본문 기준 (2026-10-14 실측): 같은 문서 100%, 무관 중앙 12%, 지일 과거사업 중앙 50%", () => {
+  it("본문 기준 (2026-10-14 실측): 같은 문서 100%, 무관 중앙 5%, 지일 과거사업 중앙 70%", () => {
     expect(calibratedPercent(1.0, "제목+과업내용")).toBe(100);
-    expect(calibratedPercent(0.034, "제목+과업내용")).toBe(12);
-    expect(calibratedPercent(0.501, "제목+과업내용")).toBe(50);
+    expect(calibratedPercent(0.034, "제목+과업내용")).toBe(5);
+    expect(calibratedPercent(0.501, "제목+과업내용")).toBe(70);
   });
 
   it("본문 기준 경계: 0.565부터 높음, 0.37부터 경계선, 헷갈리는 비대상 중앙(0.103)은 낮음", () => {

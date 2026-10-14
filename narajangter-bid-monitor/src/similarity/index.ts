@@ -27,6 +27,8 @@ export interface SimilarMatch {
   keywordScore: number | null;
   /** 점수에 들어간 공통 실적 키워드 — 화면의 싱크로율 근거 (일의 내용 → 시설 이름 순) */
   keywords: string[];
+  /** 이 과거사업(사업명+과업지시서)에 나오는 실적 키워드 전부 — 화면의 과거 사업 꼬리표. 공고와 겹치는지는 keywords로 가린다 */
+  projectTerms: string[];
 }
 
 /**
@@ -56,6 +58,8 @@ export interface SimilarityResult {
   top: SimilarMatch[];
   /** 이 점수가 무엇을 근거로 나왔는지 */
   basis: SimilarityBasis;
+  /** 공고 글(제목+과업 글)에 나온 실적 키워드 — 화면의 '이 공고의 과업 프로필' (workTerms.ts의 groupWorkTerms로 묶는다) */
+  queryTerms: string[];
 }
 
 export interface SimilarityOptions {
@@ -215,7 +219,7 @@ export class SimilarityIndex {
    * 항상 제목 한 줄이고, 그 한 줄을 과거사업의 "사업명"과 "본문" 양쪽에 각각 대본다.
    */
   findSimilar(title: string, limit = 3, options: QueryOptions = {}): SimilarityResult {
-    if (this.projects.length === 0) return { maxScore: 0, top: [], basis: "제목" };
+    if (this.projects.length === 0) return { maxScore: 0, top: [], basis: "제목", queryTerms: [] };
 
     const queryForName = this.nameVectorizer.transform(title);
     // 공고 첨부(과업지시서)를 읽어온 경우 본문 비교의 질의를 제목이 아니라 과업 내용 전체로 쓴다.
@@ -260,6 +264,7 @@ export class SimilarityIndex {
           sharedNameTokens: evidence.sharedTokens,
           keywordScore: keyword ? keyword.score : null,
           keywords: keyword ? keyword.shared : [],
+          projectTerms: [...workTerms.keys()],
           score: keyword ? (1 - this.keywordWeight) * textScore + this.keywordWeight * keyword.score : textScore,
         };
       }
@@ -270,7 +275,7 @@ export class SimilarityIndex {
     // 임의 순서가 되어 아무 사업이나 "유사 과거사업"으로 찍힌다 — 실제로 점수 0인
     // "권봉수 의원"이 1위로 나오던 버그가 여기서 났다.
     const top = matches.filter((m) => m.score > 0).slice(0, limit);
-    return { maxScore: top[0]?.score ?? 0, top, basis };
+    return { maxScore: top[0]?.score ?? 0, top, basis, queryTerms: [...queryTerms.keys()] };
   }
 
   /**

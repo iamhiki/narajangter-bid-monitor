@@ -200,7 +200,7 @@ describe("SimilarityIndex", () => {
     // 아직 아카이브를 정리하지 않은 환경에서도 파이프라인이 죽으면 안 된다.
     const index = SimilarityIndex.build([]);
     expect(index.size).toBe(0);
-    expect(index.findSimilar("아무 공고")).toEqual({ maxScore: 0, top: [], basis: "제목" });
+    expect(index.findSimilar("아무 공고")).toEqual({ maxScore: 0, top: [], basis: "제목", queryTerms: [] });
   });
 
   it("본문이 있는 사업과 없는 사업을 함께 다룰 수 있다", () => {

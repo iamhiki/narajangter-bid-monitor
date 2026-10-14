@@ -289,7 +289,7 @@ body {
 .card-score small u { text-decoration: none; border-bottom: 1px dotted currentColor; }
 .score-why {
   display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 25;
-  width: min(440px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow-y: auto;
+  width: min(520px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow-y: auto;
   text-align: left; line-height: 1.5; cursor: default;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius);
   padding: 12px 14px; box-shadow: 0 2px 6px rgba(0, 0, 0, .08); font-size: 12.5px;
@@ -305,6 +305,15 @@ body {
 .card-score.edge .score-why b { display: inline; font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0; color: var(--ink-strong); }
 .score-why .nums { display: block; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .score-why .terms { display: block; font-size: 12px; margin-top: 2px; }
+/* 과업 프로필·과거 사업 꼬리표. 공고와 겹치는 꼬리표는 진하게, 이 사업에만 있는 꼬리표는 흐리게 */
+.score-why .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.score-why .tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 3px; font-size: 11.5px; line-height: 18px; color: var(--muted); }
+.score-why .tag.shared { border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.score-why .tag-more { font-size: 11.5px; line-height: 20px; color: var(--faint); }
+.score-why .profile { margin: 4px 0 10px; }
+.score-why .profile dt { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.score-why .profile dd { margin: 0; }
+.score-why h5 { margin: 10px 0 2px; font-size: 12.5px; font-weight: 700; color: var(--ink-strong); }
 .score-why .note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
 
 /* 내 이름 */
@@ -574,6 +583,22 @@ tr.nobody td { color: var(--faint); }
 
 /* ── 필터 칩 ──────────────────────────────────────────────── */
 .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+/* 제외된 공고 — 빠진 이유별 건수 표. 행을 누르면 그 이유로 빠진 공고만 본다 */
+.ex-intro { margin: 0 0 12px; }
+.ex-reasons { border-collapse: collapse; width: 100%; max-width: 680px; margin: 0 0 16px; font-size: 13px; background: var(--panel); }
+.ex-reasons th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line-strong); }
+.ex-reasons th.n, .ex-reasons td.n { text-align: right; width: 72px; font-variant-numeric: tabular-nums; }
+.ex-reasons td { padding: 7px 10px; border-bottom: 1px solid var(--line-soft); color: var(--ink); }
+.ex-reasons td.n { font-weight: 700; color: var(--ink-strong); }
+.ex-reasons td.rule { color: var(--muted); }
+.ex-reasons tr[data-stage] { cursor: pointer; }
+.ex-reasons tr.on td { background: var(--bg); }
+.ex-reasons tr.on td:first-child { box-shadow: inset 3px 0 0 var(--brand); font-weight: 700; color: var(--brand); }
+.ex-reasons tr.total td { font-weight: 700; }
+.ex-reasons tr.closed td { color: var(--muted); border-top: 1px solid var(--line); }
+.ex-reasons tr.closed td.n { color: var(--muted); font-weight: 600; }
+.ex-reasons button { all: unset; cursor: pointer; }
+.ex-reasons button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .chip-gap { width: 1px; height: 22px; background: var(--line); margin: 0 6px; }
 .chip {
   font-family: var(--body); font-size: 12.5px; cursor: pointer; padding: 6px 13px;
@@ -783,17 +808,14 @@ footer b { color: var(--muted); }
   </section>
 
   <section id="tab-excluded" hidden>
-    <p class="search-intro">
-      우리 키워드·품목에는 걸렸지만 <b>금액·제외 키워드·낙찰방법·참가 자격·지역 같은 조건으로 목록에서 빠진 공고</b>입니다. 여러 조건에 걸린 공고는 처음 걸린 조건 한 곳에만 셉니다.
-      좋은 공고가 잘못 빠지지 않았는지 훑어보세요. 목록에 아예 없는 공고는 공고번호로 찾을 수 있습니다.
-    </p>
+    <p class="sub ex-intro">키워드·품목은 맞지만 아래 조건에 걸려 목록에서 빠진 공고입니다. 여러 조건에 걸리면 처음 걸린 조건에만 셉니다.</p>
+    <div id="exFilters"></div>
     <form class="search" id="traceForm">
-      <input id="traceQ" placeholder="공고번호 또는 공고명 일부 — 왜 빠졌는지 보여줍니다" autocomplete="off">
+      <input id="traceQ" placeholder="공고번호 또는 공고명으로 빠진 이유 찾기" autocomplete="off">
       <button type="submit">찾기</button>
     </form>
     <div id="traceResults"></div>
-    <div class="filters" id="exFilters"></div>
-    <p class="sub" id="exMeta" style="margin:0 0 18px"></p>
+    <p class="sub" id="exMeta" style="margin:0 0 14px"></p>
     <div id="exResults"></div>
   </section>
 
@@ -872,7 +894,7 @@ const won = (n) => n == null ? "—" : (n / 100000000).toFixed(2) + "억";
 // 보정된 표시값(싱크로율) 기준 구간. src/similarity/calibrate.ts의 HIGH_BAND/LOW_BAND와
 // 같은 값이어야 하며, test/uiDocs.test.ts가 그 일치를 검사한다. 아직 가설이고,
 // 담당자 O/X 판정이 쌓이면 기준별로 나눠 다시 잡는다.
-const HIGH = 0.65, LOW = 0.35;
+const HIGH = 0.8, LOW = 0.5;
 
 const EXAMPLES = [
   "국립낙동강생물자원관 어린이 체험공간 전시 제작설치",
@@ -1340,14 +1362,32 @@ function offDirection(n) {
   if (kinds.includes("휴게공간")) return "휴게·독서 공간 조성";
   return kinds.length ? "과업에 " + kinds.map((k) => OFF_KINDS[k]).join("·") + " 포함" : null;
 }
+/**
+ * 공고문에서 읽은 업종 자격 중 지일이 갖고 있지 않은 것 — 등록만 하면 되는 업종(기타자유업 9999 등)도 포함한다.
+ * 나라장터 업종제한이 걸린 공고는 서버가 이미 걸렀으니, 업종제한이 없거나(사전규격·제한없음·조회실패) 공고문으로 읽은 경우만 본다.
+ * 이런 공고는 목록에서 빼고 '제외된 공고' 탭에 '보유하지 않은 자격 필요'로 보낸다 (2026-10-14 요청 — 가천대학교 설계용역의
+ * 건축사사무소 개설). 서버 ui.ts의 docQualBlocked와 같은 기준이어야 한다. 등록만 하면 되는 업종도 같은 날 요청으로 뺀다
+ * (국립여수해양기상과학관 — 기타자유업 9999. 지일은 9901 행사대행업만 보유).
+ */
+function docQualBlocked(n, doc) {
+  const q = n.qualification;
+  if (q && q.status !== "조회실패" && q.status !== "제한없음") return null;
+  if (!doc || doc.sectionFound === false) return null;
+  const missing = (doc.requirements || []).filter((r) => r.kind === "업종" && isMissing(r));
+  return missing.length ? missing : null;
+}
 let offOpen = false;
 let lastOffKey = "";
-const offKeyOf = () => lastItems.filter(offDirection).map((n) => n.noticeNo).join(",");
+const qualOut = (n) => !!docQualBlocked(n, enrich.byNo[n.noticeNo]?.qualDoc);
+/** 숨길 공고 목록(회사 방향과 다름 + 공고문 자격 미보유)이 바뀌었는지 보는 열쇠 */
+const offKeyOf = () => lastItems.filter((n) => offDirection(n) || qualOut(n)).map((n) => n.noticeNo).join(",");
 
 function applyFilters() {
-  const offItems = lastItems.filter(offDirection);
-  lastOffKey = offItems.map((n) => n.noticeNo).join(",");
-  const items = lastItems.filter((n) => !offDirection(n));
+  // 공고문 자격 미보유 공고는 '제외된 공고' 탭으로 간다 (docQualBlocked) — 탭을 다시 열 때 새로 받게 비운다
+  if (offKeyOf() !== lastOffKey) exData = null;
+  lastOffKey = offKeyOf();
+  const offItems = lastItems.filter((n) => offDirection(n) && !qualOut(n));
+  const items = lastItems.filter((n) => !offDirection(n) && !qualOut(n));
   const offShown = offItems.filter(matchesLiveQuery);
   const offGroup = offShown.length
     ? '<details class="group off-group" id="offGroup"' + (offOpen ? " open" : "") + ">" +
@@ -1534,16 +1574,29 @@ function scoreWhyHtml(n) {
         : "공고 제목만 (첨부를 아직 못 읽었거나 과업 내용이 담긴 첨부가 없음)";
   const head = `<h4>싱크로율 근거</h4>
     <p class="meta">비교한 것: ${esc(basis)}<br>원점수 ${fix(n.rawScore)} → 표시 ${Math.round(n.maxScore * 100)}%</p>`;
-  if (!list.length) return head + `<p class="meta">겹치는 과거 사업이 없습니다.</p>`;
+  const profile = n.profile || [];
+  const profileHtml =
+    `<h5>이 공고의 과업 프로필</h5>` +
+    (profile.length
+      ? `<dl class="profile">${profile
+          .map((g) => `<dt>${esc(g.name)}</dt><dd class="tags">${g.terms.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</dd>`)
+          .join("")}</dl>`
+      : `<p class="meta">공고 글에서 지일 실적 키워드를 찾지 못했습니다.</p>`);
+  if (!list.length) return head + profileHtml + `<p class="meta">겹치는 과거 사업이 없습니다.</p>`;
   const rows = list
     .map((t, i) => {
-      const kw = t.keywords || [];
+      const tags = t.tags || (t.keywords || []).map((term) => ({ term, shared: true }));
+      const tagsHtml = tags.length
+        ? `<span class="tags">${tags.map((g) => `<span class="tag${g.shared ? " shared" : ""}">${esc(g.term)}</span>`).join("")}${
+            t.moreTags ? `<span class="tag-more">외 ${t.moreTags}개</span>` : ""
+          }</span>`
+        : `<span class="terms">이 사업의 실적 키워드 없음</span>`;
       return `<li><b>${i + 1}. ${esc(t.name)}</b> (${esc(t.year)}) — ${Math.round((t.shown ?? t.score) * 100)}%
         <span class="nums">원점수 ${fix(t.score)} = 실적 키워드 ${fix(t.keywordScore)} × 80% + 글자 비교(사업명 ${fix(t.nameScore)} · 본문 ${fix(t.bodyScore)}) × 20%</span>
-        <span class="terms">${kw.length ? `겹치는 실적 키워드: ${esc(kw.join(", "))}` : "겹치는 실적 키워드 없음"}</span></li>`;
+        ${tagsHtml}</li>`;
     })
     .join("");
-  return head + `<ol>${rows}</ol>
+  return head + profileHtml + `<h5>비슷한 과거 사업</h5><p class="meta">진한 꼬리표가 이 공고와 겹치는 키워드입니다.</p><ol>${rows}</ol>
     <p class="note">원점수 = 실적 키워드 80% + 글자 비교(사업명 65%·과업 본문 35%) 20%. 실적 키워드는 아래 겹치는 말로 매기며, 박물관·과학관 같은 시설 이름은 무게를 낮춰 셉니다. 사업명이 세 글자 이상 통째로 겹치지 않으면(조각 3개 미만) 사업명 점수는 0으로 봅니다. 과업지시서가 없는 과거 사업은 비교하지 않습니다. 표시 %는 원점수 순서를 바꾸지 않고 눈금만 바꾼 값입니다.</p>`;
 }
 
@@ -1871,7 +1924,11 @@ function enrichBadges(n) {
   if (doc?.designated) {
     out.push(designatedBadge(doc));
   }
-  if (doc?.region) out.push(regionBadge(doc, e.regionOk));
+  // 본공고는 나라장터 참가가능지역이 정답이다 — 첨부에서 읽은 지역보다 먼저 쓴다. 사전규격은 첨부에서 읽은 지역만 있다
+  if (n.allowedRegions?.length) out.push(naraRegionBadge(n.allowedRegions));
+  else if (doc?.region) out.push(regionBadge(doc, e.regionOk));
+  // 사전규격은 나라장터 지역 정보가 없다 — 첨부에 지역 문구가 없을 때 배지가 비어 있으면 전국 대상으로 오해한다 (2026-10-14 요청)
+  else if (n.sourceType === "사전규격" && e.qualDoc !== undefined) out.push(preRegionUnknownBadge(doc));
   if (doc?.sizeLimit?.level === "소기업") out.push(sizeBadge(doc));
   if (doc?.performance?.length) out.push(performanceBadge(doc));
   if (n.classOnly) out.push(coreBadge(e.core));
@@ -2102,8 +2159,9 @@ function qualBadge(n, doc) {
       `<p>${where} 참가자격에 업종 면허 요건이 없습니다.</p>${sizeLine(doc)}${docFooter(doc)}`);
     // 나라장터 업종제한에서 걸린 공고는 이미 "제외된 공고"로 갔다. 여기 미보유는 공고문 글에서 읽은 것이라
     // 잘못 읽었을 수 있어 목록에 남긴다 — 배지 이름과 팝업에 그 차이를 적는다
+    // 미보유 업종이 있으면 목록에서 빠져 '제외된 공고' 탭에 간다 (docQualBlocked)
     const note = need.some(isMissing)
-      ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다.<br>잘못 읽었을 수 있어 목록에서 빼지 않았습니다. 원문을 확인하세요.</p>`
+      ? `<p class="warnline">나라장터에 등록된 업종제한이 없어 ${where}에서 읽은 자격입니다.<br>목록에서 빼고 '제외된 공고' 탭에 두었습니다. 원문을 확인하세요.</p>`
       : "";
     return reqBadge(
       need,
@@ -2270,6 +2328,31 @@ function regionBadge(doc, ok) {
   return ok === true
     ? tipBadge("okb", `✓ ${esc(regionText(doc, ok))}`, "지역제한", body)
     : tipBadge("warn", `⚠ ${esc(regionText(doc, ok))}`, "지역제한", body);
+}
+
+/**
+ * 나라장터 참가가능지역 배지 (본공고). 본점 지역 밖인 공고는 서버가 이미 '제외된 공고'로 뺐으니 여기 오는 것은 본점 충족이다.
+ * 지역이 여럿이면 그중 한 곳에 본점이 있으면 된다.
+ */
+function naraRegionBadge(regions) {
+  const hq = enrich.headquartersRegion;
+  const list = regions.join(" 또는 ");
+  const body =
+    `<p>본점 소재지가 <b>${esc(list)}</b>인 업체만 참가할 수 있습니다.</p>` +
+    (hq ? `<p>지일 본점 소재지: <b>${esc(hq)}</b> — 조건을 충족합니다</p>` : "") +
+    `<p>출처: 나라장터 참가가능지역 정보</p>`;
+  return tipBadge("okb", `✓ 지역제한 ${esc(list)} · 본점 충족`, "지역제한", body);
+}
+
+/** 사전규격인데 첨부에서 지역제한을 못 찾은 경우 — 지역제한은 본공고에서 정해질 수 있어 '전국'이라고 하지 않는다 */
+function preRegionUnknownBadge(doc) {
+  const read = doc
+    ? doc.deferredToNotice
+      ? "첨부 규격서가 참가자격을 본공고 공고문으로 미뤄 두었습니다."
+      : "첨부 규격서에 지역제한 문구가 없습니다."
+    : "첨부 규격서를 읽지 못해 지역제한을 확인하지 못했습니다.";
+  return tipBadge("", "지역제한 미정", "지역제한",
+    `<p>${read}</p><p>사전규격에는 나라장터 참가가능지역 정보가 없습니다.<br>지역제한은 본공고가 나올 때 정해질 수 있으니 본공고에서 확인하세요.</p>${doc?.sourceFile ? `<p>출처: ${esc(doc.sourceFile)}</p>` : ""}`);
 }
 
 /** 1000000000 → "10억원", 110121000 → "1.1억원", 70000000 → "7,000만원" */
@@ -2576,20 +2659,40 @@ async function loadExcluded() {
   }
 }
 
+/** 빠진 이유 표의 '기준' 칸 — 판정 규칙 한 줄 (자세한 설명은 카드 배지 팝업 STAGE_NOTE) */
+const STAGE_RULE = {
+  마감: "입찰 마감(사전규격은 의견 마감)이 지남",
+  "본공고 게시": "사전규격인데 본공고가 이미 나옴",
+  제외키워드: "제목에 무관 공고를 거르는 단어가 있음",
+  최소예산: "추정가격이 최소 금액 미만",
+  낙찰방법: "수의계약 또는 설계공모",
+  해외개최: "몽골 외 해외 전시회 한국관·단체관",
+  "키워드·품목": "등록 키워드·품목이 없음",
+  참가자격: "지일이 없는 면허·업종을 요구",
+  참가지역: "본점 지역 밖 업체만 참가 가능",
+};
+const num = (v) => v.toLocaleString("ko-KR");
+
 function renderExcluded() {
   const d = exData;
-  const stages = Object.entries(d.byStage).filter(([s, c]) => c > 0 && s !== "마감");
+  // 많이 빠진 이유부터 — 표를 위에서부터 읽으면 된다
+  const stages = Object.entries(d.byStage).filter(([s, c]) => c > 0 && s !== "마감").sort((a, b) => b[1] - a[1]);
   const active = d.items.filter((n) => n.excludedAt !== "마감").length;
   const closed = d.byStage["마감"] || 0;
-  $("exFilters").innerHTML = [
-    `<button type="button" class="chip ${exStage === "active" ? "on" : ""}" data-stage="active">확인할 공고 ${active}</button>`,
-    ...stages.map(([s, c]) => `<button type="button" class="chip ${exStage === s ? "on" : ""}" data-stage="${esc(s)}">${esc(stageLabel(s))} ${c}</button>`),
-    closed ? `<span class="chip-gap"></span><button type="button" class="chip ${exStage === "마감" ? "on" : ""}" data-stage="마감">마감 지난 공고 ${closed}</button>` : "",
-  ].join("");
+  const row = (stage, label, count, rule, cls = "") =>
+    `<tr data-stage="${esc(stage)}" class="${cls} ${exStage === stage ? "on" : ""}"><td><button type="button" data-stage="${esc(stage)}">${esc(label)}</button></td><td class="n">${num(count)}</td><td class="rule">${esc(rule)}</td></tr>`;
+  $("exFilters").innerHTML =
+    `<table class="ex-reasons"><thead><tr><th>빠진 이유</th><th class="n">건수</th><th>기준</th></tr></thead><tbody>` +
+    row("active", "전체 (마감 전)", active, `${d.periodLabel} 조회 기준`, "total") +
+    stages.map(([s, c]) => row(s, stageLabel(s), c, STAGE_RULE[s] || "")).join("") +
+    (closed ? row("마감", "마감 지남", closed, STAGE_RULE["마감"], "closed") : "") +
+    "</tbody></table>";
   const aiFit = d.items.filter((n) => enrich.byNo[n.noticeNo]?.ai?.judgment?.verdict === "적절").length;
+  const shownLabel = exStage === "active" ? "전체 (마감 전)" : exStage === "마감" ? "마감 지남" : stageLabel(exStage);
+  const shownN = exStage === "active" ? active : d.byStage[exStage] || 0;
   $("exMeta").innerHTML =
-    `${esc(d.periodLabel)} 공고 중 목록에서 빠진 후보 <b>${d.items.length}건</b> (마감 안 된 공고 <b>${active}건</b>)` +
-    (aiFit ? ` · AI가 적절하다고 본 공고 <b>${aiFit}건</b> — 잘못 빠졌을 수 있습니다` : "");
+    `<b>${esc(shownLabel)}</b> ${num(shownN)}건` +
+    (aiFit ? ` · AI 판단 '적절' <b>${aiFit}건</b> (잘못 빠졌을 수 있음)` : "");
   const list = d.items.filter((n) => (exStage === "active" ? n.excludedAt !== "마감" : n.excludedAt === exStage));
   $("exResults").innerHTML = list.length
     ? list.map((n) => renderDiagnosed(n)).join("")

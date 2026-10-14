@@ -233,6 +233,8 @@ describe("analyzeQualificationText", () => {
   it("업종 이름 앞 '…마감일 전일까지'는 이름이 아니다", () => {
     const r = analyze("참가자격 3) 나라장터에 입찰서제출마감일전일까지기타자유업종(업종코드 : 9999)으로 등록한 자");
     expect(r.requirements[0]).toMatchObject({ code: "9999", docName: "기타자유업종" });
+    // 기타자유업은 면허가 아니라 등록만 하면 되는 업종 — 미보유여도 '자격 등록 추가'
+    expect(r.requirements[0]!.bases).toEqual(["등록"]);
   });
 
   it("문장 인용은 '…소재한 자. 2)'의 '자.'에서 끝낸다 (경남 공고문 실측 — 항목 기호로 보면 '소재한'에서 잘린다)", () => {
