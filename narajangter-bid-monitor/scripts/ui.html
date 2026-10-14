@@ -1326,12 +1326,15 @@ function matchesLiveQuery(n) {
  *  · 과업에 인력 운영(운영요원·도슨트), 유물 운송, 전시품 대여가 들어 있거나 (특별전·행사형)
  *  · 제목 키워드 없이 분류로만 들어왔는데 전시·제작 내용이 없는 공고.
  *  · 사업 목적이 휴게·독서 공간 조성인 공고 (2026-10-01 담당자 판단 — 독서왕김득신문학관 '늘 책봄 공간').
+ *  · 첨부 문서에 적힌 지역제한에 본점 소재지가 없는 공고 (2026-10-14 요청). 본공고는 나라장터 참가가능지역으로 서버가
+ *    이미 거르고, 사전규격은 그 정보가 없어 첨부를 읽은 결과로만 안다 — 잘못 읽었을 수 있어 지우지 않고 이 칸으로 옮긴다.
  * 자격이 되더라도 본공고 목록에 섞여 있으면 판단에 도움이 안 된다(2026-10-01 요청) — 맨 아래 접힌 칸으로 뺀다.
  * '홍보·도록'만 있는 공고는 도록 인쇄 정도라 그대로 둔다.
  */
 const OFF_KINDS = { 운영: "인력 운영", 운송: "유물 운송", 대여: "전시품 대여", 휴게공간: "휴게·독서 공간 조성" };
 function offDirection(n) {
   const e = enrich.byNo[n.noticeNo];
+  if (e?.regionOk === false && e.qualDoc?.region) return `지역제한 — ${e.qualDoc.region} 업체만 참가`;
   if (n.classOnly && e?.core?.status === "없음") return "과업지시서에 전시·제작 내용 없음";
   const kinds = [...new Set((e?.scope?.flags || []).map((f) => f.kind))].filter((k) => OFF_KINDS[k]);
   if (kinds.includes("휴게공간")) return "휴게·독서 공간 조성";
@@ -1349,7 +1352,7 @@ function applyFilters() {
   const offGroup = offShown.length
     ? '<details class="group off-group" id="offGroup"' + (offOpen ? " open" : "") + ">" +
       '<summary><h2>회사 방향과 다른 공고 <span class="group-n">' + offShown.length + "건</span></h2></summary>" +
-      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없거나, 휴게·독서 공간 조성이 목적인 공고입니다. 참가 자격이 되더라도 지일이 하는 일과 성격이 달라 따로 모았습니다.</p>' +
+      '<p class="group-note">과업지시서를 읽어 보니 인력 운영·유물 운송·전시품 대여가 들어 있거나, 전시·제작 내용이 없거나, 휴게·독서 공간 조성이 목적인 공고입니다. 첨부에 적힌 지역제한으로 지일이 참가할 수 없는 공고도 여기 모았습니다.</p>' +
       offShown.map(renderNotice).join("") +
       "</details>"
     : "";
