@@ -107,6 +107,8 @@ export async function scanArchive(archiveRoot: string, options: ScanOptions = {}
       name: officialName ?? cleanFolderName(folder.name),
       officialName,
       body: body.slice(0, maxBodyLength),
+      // 실적 키워드 점수는 문서 전체로 센다 (similarity/keywordScore.ts)
+      ...(body.length > maxBodyLength ? { fullBody: body } : {}),
       budgetAmount: body.length > 0 ? extractBudgetAmount(body) : null,
       sourceFiles,
     });

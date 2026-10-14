@@ -1,8 +1,10 @@
-import { openSync, readSync, closeSync } from "node:fs";
+import { openSync, readSync, closeSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
+import { unzipSync } from "fflate";
 import { extractHwpText } from "./hwpText.js";
 import { extractHwpxText, stripImageNoise } from "./hwpxText.js";
 import { isOcrAvailable, ocrPdf, type OcrOptions } from "./ocr.js";
+import { extractDocxText, extractXlsxText, officeKind } from "./officeText.js";
 import { extractPdfPages, findDigitlessPages, findScannedPages } from "./pdfText.js";
 import type { ExtractResult } from "./types.js";
 
@@ -25,7 +27,8 @@ export interface ExtractOptions {
 /**
  * 과업지시서/제안요청서 1개 파일 → 본문 텍스트.
  *
- * 지원: .hwp(바이너리 OLE), .hwpx(zip+XML), .pdf(텍스트 레이어 + 선택적 OCR).
+ * 지원: .hwp(바이너리 OLE), .hwpx(zip+XML), .pdf(텍스트 레이어 + 선택적 OCR),
+ * .docx·.xlsx(zip+XML — 공사 공고의 시방서·공내역서, officeText.ts).
  *
  * PDF는 두 단계로 처리한다. 먼저 내장 텍스트 레이어를 읽고, 글자가 없는 페이지만 골라
  * OCR에 넘긴다(`ocr: "auto"`). 수행능력평가서처럼 앞쪽 서식은 텍스트이고 뒤쪽 증명서는
@@ -44,11 +47,15 @@ export async function extractDocumentText(
   if (format === "pdf") return extractPdfDocument(filePath, options);
 
   const raw =
-    format === "hwpx"
-      ? extractHwpxText(filePath)
-      : format === "hwp"
-        ? extractHwpText(filePath)
-        : { text: "", reason: `지원하지 않는 형식: ${extname(filePath) || "(확장자 없음)"}` };
+    format === "docx"
+      ? extractDocxText(filePath)
+      : format === "xlsx"
+        ? extractXlsxText(filePath)
+        : format === "hwpx"
+          ? extractHwpxText(filePath)
+          : format === "hwp"
+            ? extractHwpText(filePath)
+            : { text: "", reason: `지원하지 않는 형식: ${extname(filePath) || "(확장자 없음)"}` };
 
   if (raw.text.length === 0) return raw;
   return { text: normalizeWhitespace(stripImageNoise(raw.text)), reason: raw.reason };
@@ -121,12 +128,13 @@ function joinPages(pages: { page: number; text: string }[]): string {
  *
  * 매직바이트: zip은 "PK\x03\x04", OLE 복합문서는 D0 CF 11 E0 A1 B1 1A E1.
  */
-export function detectFormat(filePath: string): "hwp" | "hwpx" | "pdf" | "unknown" {
+export function detectFormat(filePath: string): "hwp" | "hwpx" | "pdf" | "docx" | "xlsx" | "unknown" {
   const header = readHeaderBytes(filePath, 8);
   if (header) {
     // "%PDF"
     if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) return "pdf";
-    if (header[0] === 0x50 && header[1] === 0x4b) return "hwpx";
+    // zip — hwpx·docx·xlsx가 모두 zip이라 안의 항목 이름으로 가른다
+    if (header[0] === 0x50 && header[1] === 0x4b) return zipKind(filePath);
     if (header[0] === 0xd0 && header[1] === 0xcf && header[2] === 0x11 && header[3] === 0xe0) return "hwp";
   }
   // 내용을 못 읽었을 때만 확장자로 떨어진다.
@@ -134,7 +142,20 @@ export function detectFormat(filePath: string): "hwp" | "hwpx" | "pdf" | "unknow
   if (ext === ".hwpx") return "hwpx";
   if (ext === ".hwp") return "hwp";
   if (ext === ".pdf") return "pdf";
+  if (ext === ".docx") return "docx";
+  if (ext === ".xlsx") return "xlsx";
   return "unknown";
+}
+
+/** zip 안 항목 이름만 훑는다 (filter가 false를 돌려 실제로 풀지는 않는다). 못 읽으면 예전처럼 hwpx로 본다. */
+function zipKind(filePath: string): "hwpx" | "docx" | "xlsx" {
+  try {
+    const names: string[] = [];
+    unzipSync(new Uint8Array(readFileSync(filePath)), { filter: (f) => (names.push(f.name), false) });
+    return officeKind(names) ?? "hwpx";
+  } catch {
+    return "hwpx";
+  }
 }
 
 function readHeaderBytes(filePath: string, length: number): Buffer | null {

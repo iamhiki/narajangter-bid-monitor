@@ -593,7 +593,8 @@ export function analyzeQualificationText(
 /** 입찰공고문으로 보이는 첨부를 우선순위대로. HWPX가 HWP·PDF보다 추출이 깨끗하다. */
 export function pickNoticeDocAttachments(notice: NormalizedNotice): NoticeAttachment[] {
   if (notice.sourceType === "사전규격") return preStandardAttachments(notice);
-  const all = listAttachments(notice);
+  // 엑셀(내역서·품목표)은 공고문이 아니다 — 첫 첨부 대체 규칙에 걸리지 않게 문서만 본다
+  const all = listAttachments(notice).filter((a) => !/\.xlsx$/i.test(a.name));
   const extRank = (name: string) => (/\.hwpx$/i.test(name) ? 0 : /\.pdf$/i.test(name) ? 1 : /\.hwp$/i.test(name) ? 2 : 3);
   const named = all.filter((a) => isNoticeDocName(a.name)).sort((a, b) => extRank(a.name) - extRank(b.name));
   if (named.length) return named;

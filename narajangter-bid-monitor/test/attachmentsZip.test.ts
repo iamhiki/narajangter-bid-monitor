@@ -43,7 +43,8 @@ describe("ZIP 첨부", () => {
       })
     );
     const docs = expandArchive(zipPath, "제안요청서 등.zip");
-    expect(docs.map((d) => d.name)).toEqual(["제안요청서 등.zip › 01_제안요청서.hwpx", "제안요청서 등.zip › 02_전시기획안.pdf"]);
+    // 엑셀도 꺼내되(공내역서.zip) 맨 뒤에 둔다
+    expect(docs.map((d) => d.name)).toEqual(["제안요청서 등.zip › 01_제안요청서.hwpx", "제안요청서 등.zip › 02_전시기획안.pdf", "제안요청서 등.zip › 03_작품리스트.xlsx"]);
     expect(readFileSync(docs[0]!.path, "utf8")).toBe("PK");
     // 두 번째 호출은 풀어 둔 것을 그대로 쓴다
     expect(expandArchive(zipPath, "제안요청서 등.zip").map((d) => d.path)).toEqual(docs.map((d) => d.path));

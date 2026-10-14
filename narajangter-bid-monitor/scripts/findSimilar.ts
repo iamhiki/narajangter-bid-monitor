@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PastProject } from "../src/corpus/types.js";
-import { SimilarityIndex } from "../src/similarity/index.js";
+import { buildSimilarityIndex } from "../src/similarity/loadCorpus.js";
 
 /**
  * 공고 제목을 넣으면 가장 비슷한 과거사업을 보여준다 — ④단계 프로토타입 확인용.
@@ -23,7 +23,7 @@ try {
   process.exit(1);
 }
 
-const index = SimilarityIndex.build(projects);
+const index = buildSimilarityIndex(projects);
 console.log(`코퍼스 ${index.size}건 로드 완료\n`);
 
 /** 실제 나라장터에 올라올 법한 제목들. 코퍼스에 그대로 있는 문자열이 아니어야 의미가 있다. */

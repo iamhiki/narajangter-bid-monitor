@@ -43,13 +43,13 @@ export interface AttachmentDocument {
 const SPEC_PATTERN = /과업|제안요청|요청서|과업내용|시방|규격서/;
 const EXCLUDE_PATTERN = /내역서|산출|계약정보요약|낙찰자|유의서|청렴|서식|양식/;
 
-/** 우리가 텍스트를 뽑을 수 있는 형식만 받는다. */
-const DOCUMENT = /\.(hwp|hwpx|pdf)$/i;
+/** 우리가 텍스트를 뽑을 수 있는 형식만 받는다. docx·xlsx는 공사 공고의 시방서·공내역서 (corpus/officeText.ts) */
+const DOCUMENT = /\.(hwp|hwpx|pdf|docx|xlsx)$/i;
 /**
  * ZIP도 받는다 — 국립중앙박물관처럼 제안요청서를 "제안요청서 등.zip"에만 넣는 기관이 있다.
  * 2026-10-01 실측: 리스트에 남은 특별전 9건 중 3건의 제안요청서가 ZIP 안에만 있었다.
  */
-const SUPPORTED = /\.(hwp|hwpx|pdf|zip)$/i;
+const SUPPORTED = /\.(hwp|hwpx|pdf|docx|xlsx|zip)$/i;
 const ARCHIVE = /\.zip$/i;
 
 /** 응답 항목에서 첨부파일 목록을 뽑는다. 최대 10개 슬롯이 규격이다. */
@@ -82,11 +82,21 @@ export function specRank(name: string): number {
   return base + (ARCHIVE.test(name) ? 0.5 : 0);
 }
 
-/** 과업 내용이 담긴 첨부만, 우선순위대로. */
+/** 과업 내용이 담긴 첨부만, 우선순위대로. 엑셀은 규격서라는 이름이어도 표라서 과업 문서로 치지 않는다. */
 export function pickSpecAttachments(notice: NormalizedNotice): NoticeAttachment[] {
   return listAttachments(notice)
-    .filter((a) => a.isSpec)
+    .filter((a) => a.isSpec && !/\.xlsx$/i.test(a.name))
     .sort((a, b) => specRank(a.name) - specRank(b.name));
+}
+
+/**
+ * 공내역서 — 과업지시서가 없는 공사 공고에서 "무엇을 만드는 공사인지"가 드러나는 첨부.
+ * 공종·품명 목록(전시 가벽, 진열장, 그래픽 패널…)이라 과업 내용 대신 쓴다 (noticeBody.ts의 대체 경로).
+ * 2026-10-13 실측: 제목만으로 매긴 공사 공고 대부분이 공고문 + 공내역서.xlsx(또는 그 zip)만 붙이고 있었다.
+ * 산출근거·단가산출서는 숫자 계산표라 뺀다.
+ */
+export function pickQuantityAttachments(notice: NormalizedNotice): NoticeAttachment[] {
+  return listAttachments(notice).filter((a) => /내역/.test(a.name) && /\.(xlsx|zip)$/i.test(a.name) && !/산출|단가/.test(a.name));
 }
 
 /**
@@ -104,7 +114,7 @@ function decodeEntryName(name: string): string {
 }
 
 /**
- * ZIP을 풀어 안의 hwp·hwpx·pdf를 꺼낸다. `<zip 경로>.d/`에 풀어 두고 다음부터는 다시 풀지 않는다.
+ * ZIP을 풀어 안의 hwp·hwpx·pdf·docx·xlsx를 꺼낸다. `<zip 경로>.d/`에 풀어 두고 다음부터는 다시 풀지 않는다.
  * 과업 문서로 보이는 이름을 앞에 둔다. 압축이 깨졌으면 빈 배열.
  */
 export function expandArchive(zipPath: string, zipName: string, maxBytes?: number): AttachmentDocument[] {
@@ -134,7 +144,8 @@ export function expandArchive(zipPath: string, zipName: string, maxBytes?: numbe
     writeFileSync(indexPath, JSON.stringify(entries), "utf8");
   }
   return entries
-    .sort((a, b) => specRank(a.name) - specRank(b.name))
+    // 엑셀(공내역서·작품 목록)은 과업 문서 뒤에 — 과업 본문을 찾을 때는 건너뛰고 개요 대용으로만 쓴다 (noticeBody.ts)
+    .sort((a, b) => specRank(a.name) + (/\.xlsx$/i.test(a.name) ? 5 : 0) - specRank(b.name) - (/\.xlsx$/i.test(b.name) ? 5 : 0))
     .map((e) => ({ name: `${zipName} › ${e.name}`, path: join(dir, e.file) }));
 }
 

@@ -9,9 +9,8 @@ import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
 import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
-import { fetchNoticeBody } from "../src/api/noticeBody.js";
+import { fetchNoticeBody, fetchNoticeOutline } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
-import { CORE_CONTENT_TERMS, keywordEvidence } from "../src/similarity/keywordEvidence.js";
 import { announceName } from "../src/net/mdns.js";
 import { findCoreWords, findMakeEvidence, MAKE_EVIDENCE_MIN } from "../src/matching/coreWork.js";
 import { findSubmissionDeadline, type SubmissionDeadline } from "../src/matching/submissionDeadline.js";
@@ -27,7 +26,7 @@ import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/
 import type { CollectionDiagnostics } from "../src/pipeline.js";
 import type { NormalizedNotice } from "../src/api/types.js";
 import type { PastProject } from "../src/corpus/types.js";
-import { SimilarityIndex } from "../src/similarity/index.js";
+import { buildSimilarityIndex } from "../src/similarity/loadCorpus.js";
 import { calibrate } from "../src/similarity/calibrate.js";
 
 /**
@@ -128,7 +127,7 @@ try {
 
 // 인덱스는 시작할 때 한 번만 만든다. 103건이면 수십 ms라 요청마다 만들어도 되지만,
 // 코퍼스가 커져도 같은 코드가 버티도록 여기서 잡아둔다.
-const index = SimilarityIndex.build(projects);
+const index = buildSimilarityIndex(projects);
 const byId = new Map(projects.map((p) => [p.id, p]));
 
 const stats = {
@@ -253,6 +252,11 @@ interface SimilarityView {
   rawScore: number;
   basis: string;
   /**
+   * 근거 키워드를 찾은 공고 쪽 글 — 과업지시서(또는 연결 사전규격 제안요청서)를 읽었으면 "과업지시서",
+   * 과업지시서가 없어 입찰공고문 개요·공내역서로 찾았으면 "공고문·내역서", 제목만이면 null.
+   */
+  textSource: "과업지시서" | "공고문·내역서" | null;
+  /**
    * 싱크로율 근거 — 화면에서 % 숫자를 눌러야 보인다(개발·검수용). 과거사업마다 원점수·표시값,
    * 사업명 점수·본문 점수, 사업명끼리 겹친 조각 수, 실제로 겹친 말.
    */
@@ -265,40 +269,28 @@ interface SimilarityView {
     nameScore: number;
     bodyScore: number | null;
     sharedNameTokens: number;
-    /** 사업명 공통 키워드 (공고 제목과 과거 사업명에 그 말 그대로 함께 있는 것) */
-    nameKeywords: string[];
+    /** 실적 키워드 점수 (0~1) — 원점수의 80%가 이 값이다 (similarity/keywordScore.ts) */
+    keywordScore: number | null;
     /**
-     * 과업 본문 공통 키워드 — 지일 핵심 키워드 중 두 과업지시서에 함께 나온 것 (similarity/keywordEvidence.ts).
-     * 사업명 공통 키워드와 같은 말(포함 관계 포함)은 빼서 같은 정보를 두 번 보이지 않는다.
+     * 실적 키워드 — 점수에 들어간, 공고(제목+과업 글)와 이 과거 실적(사업명+과업지시서)에 함께 나온 일의 종류를
+     * 뜻하는 말 (similarity/workTerms.ts). 일의 내용 → 시설 이름 순. 지역·기관명은 나오지 않는다.
      */
-    bodyKeywords: string[];
+    keywords: string[];
   }[];
 }
 
-/** 싱크로율. 과업지시서·제안요청서 본문을 읽었으면 그 본문으로, 아니면 제목으로 과거사업과 비교한다. */
-/** 과업 본문 근거로 볼 핵심 키워드 — 등록 키워드 + 본업 내용어 */
-function evidenceVocabulary(): string[] {
-  return [...loadAppConfig().keywords, ...CORE_CONTENT_TERMS];
-}
-
-/** 사업명 공통 키워드와, 그와 겹치지 않는 과업 본문 공통 키워드 */
-function keywordsFor(title: string, projectId: string, body?: string): { nameKeywords: string[]; bodyKeywords: string[] } {
-  const named = index.sharedTerms(title, projectId, {}, 6)?.name ?? [];
-  // "체험시설, 체험"처럼 다른 키워드 안에 든 짧은 말은 뺀다
-  const nameKeywords = named.filter((k) => !named.some((o) => o !== k && o.includes(k)));
-  const fromBody = body ? keywordEvidence(body, byId.get(projectId)?.body ?? "", evidenceVocabulary(), 6).map((e) => e.keyword) : [];
-  // 사업명 키워드를 지우고도 새 내용이 두 글자 이상 남는 것만 — "상징조형물"(상징+조형물)은 빼고 "전시공간"(+공간)은 남긴다
-  const leftover = (k: string) => nameKeywords.reduce((rest, n) => rest.split(n).join(""), k);
-  const bodyKeywords = fromBody.filter((k) => leftover(k).length >= 2).slice(0, 4);
-  return { nameKeywords, bodyKeywords };
-}
-
-function similarityView(title: string, body?: string): SimilarityView {
-  const s = index.findSimilar(title, 3, body ? { body } : {});
+/**
+ * 싱크로율. 과업지시서·제안요청서 본문을 읽었으면 그 본문으로, 아니면 제목으로 과거사업과 비교한다.
+ * outline(공고문 개요·공내역서)은 기준을 바꾸지 않고 실적 키워드 점수에만 보탠다 (index.ts의 keywordText).
+ */
+function similarityView(title: string, body?: { text: string; fullText: string }, outline?: string): SimilarityView {
+  // 글자 비교는 앞 12,000자, 실적 키워드는 문서 전체(과업지시서) 또는 공고문·내역서 개요로 센다
+  const s = index.findSimilar(title, 3, body ? { body: body.text, keywordText: body.fullText } : outline ? { keywordText: outline } : {});
   return {
     maxScore: calibrate(s.maxScore, s.basis),
     rawScore: s.maxScore,
     basis: s.basis,
+    textSource: body ? "과업지시서" : outline ? "공고문·내역서" : null,
     similar: s.top.map((t) => ({
       id: t.id,
       name: t.name,
@@ -308,7 +300,9 @@ function similarityView(title: string, body?: string): SimilarityView {
       nameScore: t.nameScore,
       bodyScore: t.bodyScore,
       sharedNameTokens: t.sharedNameTokens,
-      ...keywordsFor(title, t.id, body),
+      keywordScore: t.keywordScore,
+      // 화면 근거 = 점수에 들어간 키워드 그대로 (다섯 개까지)
+      keywords: t.keywords.slice(0, 5),
     })),
   };
 }
@@ -564,7 +558,7 @@ async function runAiJudgment(
   const e = enrichment.get(n.noticeNo) ?? {};
   // 과업지시서는 싱크로율 계산 때 이미 받아둔 첨부 캐시를 그대로 쓴다 (다시 받지 않음).
   const body = await fetchNoticeBody(n, { maxLength: 6000 }).catch(() => null);
-  const similar = index.findSimilar(n.title, 3, body ? { body: body.text } : {});
+  const similar = index.findSimilar(n.title, 3, body ? { body: body.text, keywordText: body.fullText } : {});
   const result = await judgeFit(
     {
       notice: n,
@@ -662,7 +656,9 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
         const needCore = classOnly.has(n.noticeNo) && e.core === undefined;
         if (e.similarity === undefined || e.scope === undefined || needCore) {
           const body = await fetchNoticeBody(n).catch(() => null);
-          e.similarity = body ? similarityView(n.title, body.text) : null;
+          // 과업지시서가 없으면 입찰공고문 개요·공내역서에서 근거 키워드만 찾는다 (점수는 제목 기준 그대로)
+          const outline = body ? null : await fetchNoticeOutline(n).catch(() => null);
+          e.similarity = body ? similarityView(n.title, body) : outline ? similarityView(n.title, undefined, outline.text) : null;
           e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
           e.specSubmission = body ? findSubmissionDeadline(body.text) : null;
           if (needCore) {
@@ -862,7 +858,7 @@ const server = createServer((req, res) => {
       if (noticeMissing) return json(res, { maxScore: 0, top: [], notice: null, noticeMissing });
 
       const body = notice ? await fetchNoticeBody(notice).catch(() => null) : null;
-      const result = index.findSimilar(notice ? notice.title : q, 10, body ? { body: body.text } : {});
+      const result = index.findSimilar(notice ? notice.title : q, 10, body ? { body: body.text, keywordText: body.fullText } : {});
       json(res, {
         maxScore: calibrate(result.maxScore, result.basis),
         basis: result.basis,

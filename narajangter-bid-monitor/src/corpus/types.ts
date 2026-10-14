@@ -19,6 +19,11 @@ export interface PastProject {
   officialName: string | null;
   /** 과업지시서/제안요청서 본문 (추출 실패 시 빈 문자열) */
   body: string;
+  /**
+   * 과업지시서 전체 본문 (자르지 않음, 12,000자를 넘을 때만). 실적 키워드 점수는 이걸로 센다 — 뒤쪽 세부 과업 목록까지
+   * 봐야 해서다 (similarity/keywordScore.ts). 2026-10-14 이전에 만든 코퍼스에는 없을 수 있다.
+   */
+  fullBody?: string;
   /** 본문에서 추출한 총사업비(원). 못 찾으면 null. */
   budgetAmount: number | null;
   /** 본문을 뽑아온 파일들 (상대경로) */

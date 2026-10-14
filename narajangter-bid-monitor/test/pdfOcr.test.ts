@@ -31,7 +31,8 @@ describe("detectFormat", () => {
 
   it("내용을 못 읽으면 확장자로 떨어진다", () => {
     expect(detectFormat(join(tmp, "없는파일.pdf"))).toBe("pdf");
-    expect(detectFormat(join(tmp, "없는파일.xlsx"))).toBe("unknown");
+    expect(detectFormat(join(tmp, "없는파일.xlsx"))).toBe("xlsx");
+    expect(detectFormat(join(tmp, "없는파일.xls"))).toBe("unknown");
   });
 });
 

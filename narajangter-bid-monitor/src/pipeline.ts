@@ -254,7 +254,7 @@ export function attachSimilarity(matches: MatchedNotice[], bodies?: Map<string, 
 
   for (const match of matches) {
     const body = bodies?.get(match.notice.noticeNo);
-    const result = index.findSimilar(match.notice.title, 3, body ? { body: body.text } : {});
+    const result = index.findSimilar(match.notice.title, 3, body ? { body: body.text, keywordText: body.fullText } : {});
     match.similarity = {
       score: result.maxScore,
       shown: calibrate(result.maxScore, result.basis),

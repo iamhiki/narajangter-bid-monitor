@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PastProject } from "../src/corpus/types.js";
-import { SimilarityIndex, type SimilarityOptions } from "../src/similarity/index.js";
+import { type SimilarityOptions } from "../src/similarity/index.js";
+import { buildSimilarityIndex } from "../src/similarity/loadCorpus.js";
 
 /**
  * 싱크로율 성능 측정 (④단계 평가 도구).
@@ -98,7 +99,7 @@ const members = new Map<string, string[]>();
 for (const [id, root] of cluster) members.set(root, [...(members.get(root) ?? []), id]);
 const evalTargets = projects.filter((p) => (members.get(cluster.get(p.id)!) ?? []).length > 1);
 
-const index = SimilarityIndex.build(projects, overrides);
+const index = buildSimilarityIndex(projects, overrides);
 
 interface Outcome {
   query: string;

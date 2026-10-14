@@ -8,6 +8,7 @@ import {
   type SparseVector,
 } from "./cosine.js";
 import { TfidfVectorizer } from "./tfidf.js";
+import { DEFAULT_FREQUENCY_MODE, extractWorkTerms, keywordCosine, KEYWORD_SMOOTHING, KEYWORD_TEXT_LIMIT, type FrequencyMode, type KeywordScoreOptions } from "./keywordScore.js";
 import { NGRAM_SIZES, normalizeForTokens, termFrequency, tokenize } from "./tokenize.js";
 
 export interface SimilarMatch {
@@ -22,6 +23,10 @@ export interface SimilarMatch {
   bodyScore: number | null;
   /** 사업명끼리 실제로 겹친 n-gram 수 — 점수가 우연인지 판단하는 근거 */
   sharedNameTokens: number;
+  /** 실적 키워드 점수 (0~1). 어휘 없이 만든 인덱스면 null. */
+  keywordScore: number | null;
+  /** 점수에 들어간 공통 실적 키워드 — 화면의 싱크로율 근거 (일의 내용 → 시설 이름 순) */
+  keywords: string[];
 }
 
 /**
@@ -36,6 +41,12 @@ export type SimilarityBasis = "제목" | "제목+과업내용";
 export interface QueryOptions {
   /** 공고 첨부에서 읽어온 과업 내용. 있으면 본문 비교의 질의로 쓴다. */
   body?: string;
+  /**
+   * 실적 키워드를 셀 글 — 주면 body 대신 이 글(+제목)에서 센다. 글자 조각 점수와 기준(제목/본문)은 그대로다.
+   * - 과업지시서를 읽은 공고: 12,000자로 자르기 전 문서 (noticeBody.ts의 fullText) — KEYWORD_TEXT_LIMIT까지 세서 세부 과업 목록을 더 본다
+   * - 과업지시서가 없는 공고: 입찰공고문 개요·공내역서 품명 (noticeBody.ts의 fetchNoticeOutline)
+   */
+  keywordText?: string;
 }
 
 export interface SimilarityResult {
@@ -59,7 +70,22 @@ export interface SimilarityOptions {
   missingBodyShrinkage?: number;
   /** 본문 포화 계수 k (기본 DEFAULT_SATURATION_K). 클수록 1~2회 언급을 박하게 본다. */
   saturationK?: number;
+  /** 실적 키워드 어휘 (keywordEvidence.ts의 workVocabulary). 없으면 키워드 점수를 섞지 않는다. */
+  keywordVocabulary?: string[];
+  /** 키워드 점수 비중 (기본 DEFAULT_KEYWORD_WEIGHT) */
+  keywordWeight?: number;
+  /** 키워드 점수의 작은 묶음 할인 (기본 KEYWORD_SMOOTHING) */
+  keywordSmoothing?: number;
+  /** 키워드 나온 횟수를 무게로 바꾸는 방식 (기본 DEFAULT_FREQUENCY_MODE) */
+  keywordFrequency?: FrequencyMode;
 }
+
+/**
+ * 실적 키워드 점수 비중. 2026-10-13 실측 — 비중을 올릴수록 헷갈리는 비대상 공고(박물관 창호교체·놀이터 정비 등)가
+ * 더 잘 갈리다가 0.8 근처에서 멈췄다 (keywordScore.ts 주석의 표). 1.0(키워드만)도 비슷하게 가르지만 같은 종류의
+ * 과거 실적끼리 점수가 같아져 어느 실적이 가장 비슷한지 순서가 흐려지므로, 남은 0.2를 글자 비교로 둔다.
+ */
+export const DEFAULT_KEYWORD_WEIGHT = 0.8;
 
 /**
  * 사업명 매칭으로 인정할 최소 공통 n-gram 수.
@@ -99,6 +125,8 @@ interface IndexedProject {
   /** 본문의 L2 정규화 TF-IDF 벡터. 본문끼리 코사인을 잴 때 쓴다. */
   bodyVector: SparseVector | null;
   bodyLength: number;
+  /** 사업명+본문에 나오는 실적 키워드 (keywordScore.ts) */
+  workTerms: Map<string, number>;
 }
 
 /**
@@ -120,7 +148,10 @@ export class SimilarityIndex {
     private readonly bodyWeight: number,
     private readonly minSharedNgrams: number,
     private readonly missingBodyShrinkage: number,
-    private readonly saturationK: number
+    private readonly saturationK: number,
+    private readonly keywordVocabulary: string[],
+    private readonly keywordWeight: number,
+    private readonly keywordOptions: KeywordScoreOptions
   ) {}
 
   static build(projects: PastProject[], options: SimilarityOptions = {}): SimilarityIndex {
@@ -135,9 +166,12 @@ export class SimilarityIndex {
     const bodies = projects.map((p) => p.body).filter((body) => body.length > 0);
     const bodyVectorizer = bodies.length > 0 ? TfidfVectorizer.fit(bodies, options.stopPhrases) : null;
 
+    const keywordVocabulary = options.keywordVocabulary ?? [];
     const indexed: IndexedProject[] = projects.map((project) => {
+      // 실적 키워드는 글자 비교(12,000자)보다 길게 KEYWORD_TEXT_LIMIT까지 센다 (fullBody — 없으면 12,000자 본문)
+      const workTerms = extractWorkTerms(`${project.name}\n${(project.fullBody ?? project.body).slice(0, KEYWORD_TEXT_LIMIT)}`, keywordVocabulary);
       if (project.body.length === 0) {
-        return { project, nameVector: nameVectorizer.transform(project.name), bodyTermFrequency: null, bodyVector: null, bodyLength: 0 };
+        return { project, nameVector: nameVectorizer.transform(project.name), bodyTermFrequency: null, bodyVector: null, bodyLength: 0, workTerms };
       }
       const tokens = tokenize(project.body, options.stopPhrases);
       return {
@@ -146,6 +180,7 @@ export class SimilarityIndex {
         bodyTermFrequency: termFrequency(tokens),
         bodyVector: bodyVectorizer ? bodyVectorizer.transform(project.body) : null,
         bodyLength: tokens.length,
+        workTerms,
       };
     });
 
@@ -161,7 +196,11 @@ export class SimilarityIndex {
       bodyWeight,
       options.minSharedNgrams ?? MIN_SHARED_NGRAMS,
       options.missingBodyShrinkage ?? MISSING_BODY_SHRINKAGE,
-      options.saturationK ?? DEFAULT_SATURATION_K
+      options.saturationK ?? DEFAULT_SATURATION_K,
+      keywordVocabulary,
+      // 어휘가 없으면(테스트·예전 호출) 키워드 점수를 섞지 않는다 — 글자 조각 점수만
+      keywordVocabulary.length > 0 ? (options.keywordWeight ?? DEFAULT_KEYWORD_WEIGHT) : 0,
+      { smoothing: options.keywordSmoothing ?? KEYWORD_SMOOTHING, frequency: options.keywordFrequency ?? DEFAULT_FREQUENCY_MODE }
     );
   }
 
@@ -185,9 +224,11 @@ export class SimilarityIndex {
     const queryForBody = this.bodyVectorizer ? this.bodyVectorizer.transform(bodyQueryText) : null;
     const hasQueryBody = Boolean(options.body && options.body.trim().length > 0);
     const basis: SimilarityBasis = hasQueryBody ? "제목+과업내용" : "제목";
+    const keywordQueryText = options.keywordText ? `${title}\n${options.keywordText.slice(0, KEYWORD_TEXT_LIMIT)}` : bodyQueryText;
+    const queryTerms = extractWorkTerms(keywordQueryText, this.keywordVocabulary);
 
     const matches: SimilarMatch[] = this.projects.map(
-      ({ project, nameVector, bodyTermFrequency, bodyVector, bodyLength }) => {
+      ({ project, nameVector, bodyTermFrequency, bodyVector, bodyLength, workTerms }) => {
         const evidence = cosineWithEvidence(queryForName, nameVector);
         // 우연히 겹친 n-gram 한두 개로 점수가 나오면 엉뚱한 사업이 1위가 된다.
         // 증거가 모자라면 사업명 점수를 아예 0으로 본다.
@@ -206,6 +247,10 @@ export class SimilarityIndex {
                 saturatedCoverage(queryForBody, bodyTermFrequency, bodyLength, this.averageBodyLength, this.saturationK)
             : null;
 
+        const textScore = combine(nameScore, bodyScore, this.nameWeight, this.bodyWeight, this.missingBodyShrinkage);
+        // 실적 키워드 점수를 섞는다(80%) — 화면 근거 키워드가 곧 점수의 근거가 되도록 (keywordScore.ts)
+        const keyword = this.keywordWeight > 0 ? keywordCosine(queryTerms, workTerms, this.keywordOptions) : null;
+
         return {
           id: project.id,
           name: project.name,
@@ -213,7 +258,9 @@ export class SimilarityIndex {
           nameScore,
           bodyScore,
           sharedNameTokens: evidence.sharedTokens,
-          score: combine(nameScore, bodyScore, this.nameWeight, this.bodyWeight, this.missingBodyShrinkage),
+          keywordScore: keyword ? keyword.score : null,
+          keywords: keyword ? keyword.shared : [],
+          score: keyword ? (1 - this.keywordWeight) * textScore + this.keywordWeight * keyword.score : textScore,
         };
       }
     );

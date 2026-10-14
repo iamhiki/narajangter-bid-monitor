@@ -7,6 +7,7 @@
  * 그래서 화면 근거는 핵심 키워드로 한정한다. 문맥(문장)은 검수·디버깅용으로 함께 돌려주지만 화면에는 키워드만
  * 보인다 — 줄글을 늘어놓으면 아무도 읽지 않는다(같은 날 사용자 지적).
  */
+import { WORK_TERMS } from "./workTerms.js";
 
 /** 등록 키워드(config/keywords.json) 외에 지일 본업을 뜻하는 말 — 과업 본문에서 근거로 볼 말 */
 export const CORE_CONTENT_TERMS = [
@@ -26,11 +27,17 @@ export interface KeywordEvidence {
   pastContext: string;
 }
 
-/** "제작·설치", "전시 물"처럼 띄어쓰기·가운뎃점이 끼어도 찾는다 */
+/** "제작·설치", "전시 물", "제작 및 설치"처럼 띄어쓰기·가운뎃점·'및'이 끼어도 찾는다 */
 function termPattern(term: string): RegExp {
   const chars = [...term.replace(/[\s·ㆍ‧∙・․]+/g, "")].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(chars.join("[\\s·ㆍ‧∙・․]*"), "g");
+  return new RegExp(chars.join("(?:[\\s·ㆍ‧∙・․,]|및)*"), "g");
 }
+
+/** 실적 키워드 어휘 — 실적 키워드 목록 + 본업 내용어 + 등록 키워드, 띄어쓰기 없앤 꼴로 중복 없이 */
+export function workVocabulary(extra: string[] = []): string[] {
+  return [...new Set([...WORK_TERMS, ...CORE_CONTENT_TERMS, ...extra].map((t) => t.replace(/[\s·ㆍ‧∙・․]+/g, "")).filter((t) => t.length >= 2))];
+}
+
 
 /** 일치 위치 앞뒤로 잘라 한 줄 문맥을 만든다 */
 function contextAround(text: string, index: number, length: number, radius = 28): string {

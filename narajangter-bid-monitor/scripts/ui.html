@@ -1523,22 +1523,25 @@ function scoreBoxHtml(n, open = false) {
 const fix = (v) => (v == null ? "—" : Number(v).toFixed(3));
 function scoreWhyHtml(n) {
   const list = n.similar || [];
-  const basis = n.basis === "제목+과업내용" ? "공고 제목 + 첨부 과업지시서" : "공고 제목만 (첨부를 아직 못 읽었거나 읽지 못함)";
+  const basis =
+    n.basis === "제목+과업내용"
+      ? "공고 제목 + 첨부 과업지시서"
+      : n.textSource === "공고문·내역서"
+        ? "공고 제목 + 입찰공고문·내역서의 실적 키워드 (과업지시서가 첨부되지 않음)"
+        : "공고 제목만 (첨부를 아직 못 읽었거나 과업 내용이 담긴 첨부가 없음)";
   const head = `<h4>싱크로율 근거</h4>
     <p class="meta">비교한 것: ${esc(basis)}<br>원점수 ${fix(n.rawScore)} → 표시 ${Math.round(n.maxScore * 100)}%</p>`;
   if (!list.length) return head + `<p class="meta">겹치는 과거 사업이 없습니다.</p>`;
   const rows = list
     .map((t, i) => {
-      const nameKw = t.nameKeywords || [];
-      const bodyKw = t.bodyKeywords || [];
+      const kw = t.keywords || [];
       return `<li><b>${i + 1}. ${esc(t.name)}</b> (${esc(t.year)}) — ${Math.round((t.shown ?? t.score) * 100)}%
-        <span class="nums">원점수 ${fix(t.score)} = 사업명 ${fix(t.nameScore)} · 본문 ${fix(t.bodyScore)} · 사업명 겹친 조각 ${t.sharedNameTokens ?? "—"}개</span>
-        ${nameKw.length ? `<span class="terms">사업명 공통 키워드: ${esc(nameKw.join(", "))}</span>` : ""}
-        ${bodyKw.length ? `<span class="terms">과업 본문 공통 키워드: ${esc(bodyKw.join(", "))}</span>` : ""}</li>`;
+        <span class="nums">원점수 ${fix(t.score)} = 실적 키워드 ${fix(t.keywordScore)} × 80% + 글자 비교(사업명 ${fix(t.nameScore)} · 본문 ${fix(t.bodyScore)}) × 20%</span>
+        <span class="terms">${kw.length ? `겹치는 실적 키워드: ${esc(kw.join(", "))}` : "겹치는 실적 키워드 없음"}</span></li>`;
     })
     .join("");
   return head + `<ol>${rows}</ol>
-    <p class="note">원점수 = 사업명 비교 65% + 과업 본문 비교 35%. 사업명이 세 글자 이상 통째로 겹치지 않으면(조각 3개 미만) 사업명 점수는 0으로 봅니다. 본문이 없는 과거 사업은 사업명 점수의 약 83%만 줍니다. 표시 %는 원점수 순서를 바꾸지 않고 눈금만 바꾼 값입니다.</p>`;
+    <p class="note">원점수 = 실적 키워드 80% + 글자 비교(사업명 65%·과업 본문 35%) 20%. 실적 키워드는 아래 겹치는 말로 매기며, 박물관·과학관 같은 시설 이름은 무게를 낮춰 셉니다. 사업명이 세 글자 이상 통째로 겹치지 않으면(조각 3개 미만) 사업명 점수는 0으로 봅니다. 과업지시서가 없는 과거 사업은 비교하지 않습니다. 표시 %는 원점수 순서를 바꾸지 않고 눈금만 바꾼 값입니다.</p>`;
 }
 
 /**
@@ -1548,7 +1551,8 @@ function scoreWhyHtml(n) {
 function applyBodyScores() {
   for (const n of [...lastItems, ...lastClosed]) {
     const s = enrich.byNo[n.noticeNo]?.similarity;
-    if (!s || (s.maxScore === n.maxScore && s.basis === n.basis)) continue;
+    // 점수가 그대로여도 공고문·내역서로 근거 키워드를 새로 찾았으면(textSource) 근거 칸을 다시 그린다
+    if (!s || (s.maxScore === n.maxScore && s.basis === n.basis && s.textSource === n.textSource)) continue;
     const before = scoreBand(n);
     Object.assign(n, s);
     const box = document.querySelector(`[data-score="${CSS.escape(n.noticeNo)}"]`);
