@@ -13,6 +13,8 @@ describe("classifyBidMethod", () => {
     ["최저가낙찰제", "입찰"],
     ["수의시담-수의시담", "수의"],
     ["소액수의견적-소액수의견적(2인 이상 견적 제출)-국민연금보험료 등 합산액 감액 적용", "수의"],
+    ["설계공모-일반설계공모", "설계공모"],
+    ["설계공모-제안설계공모", "설계공모"],
   ])("'%s' → %s", (bidMethod, expected) => {
     expect(classifyBidMethod(bidMethod)).toBe(expected);
   });

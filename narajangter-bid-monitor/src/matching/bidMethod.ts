@@ -24,8 +24,10 @@ export function isNegotiatedContract(bidMethod: string | null): boolean {
  *   입찰         — 그 밖의 경쟁입찰 (적격심사, 최저가, 2단계 등). 마감이 짧은 경우가 많아
  *                  매일 마감 임박 보고 대상이다 (RUN_MODE=daily).
  *   수의         — 수의시담·소액수의견적 등 수의계약. 수집 대상에서 뺀다.
+ *   설계공모     — 설계공모(일반·제안·간이). 작품 공모로 설계자만 뽑는 발주라 뺀다 (2026-10-14).
+ *                  제목에는 '설계공모'가 없고 낙찰방법에만 적힌 공고가 있다 — 신안갯벌박물관 리모델링 기본 및 실시설계 용역.
  */
-export const BID_METHOD_CATEGORIES = ["협상", "규격가격동시", "입찰", "수의"] as const;
+export const BID_METHOD_CATEGORIES = ["협상", "규격가격동시", "입찰", "수의", "설계공모"] as const;
 export type BidMethodCategory = (typeof BID_METHOD_CATEGORIES)[number];
 
 /**
@@ -40,6 +42,7 @@ export function classifyBidMethod(bidMethod: string | null): BidMethodCategory |
   if (!bidMethod || !bidMethod.trim()) return null;
   const s = bidMethod.replace(/[\s·ㆍ.,]/g, "");
   if (s.includes("수의")) return "수의";
+  if (s.includes("설계공모")) return "설계공모";
   if (s.includes("협상에의한")) return "협상";
   if (s.includes("규격가격동시")) return "규격가격동시";
   return "입찰";
