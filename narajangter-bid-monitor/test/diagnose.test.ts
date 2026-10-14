@@ -131,11 +131,11 @@ describe("diagnoseNotice", () => {
     expect(diagnoseNotice(makeNotice({ noticeNo: "N-ARCH" }), ctx).excludedAt).toBeNull(); // 설정이 없으면 표시만
   });
 
-  it("마감 지난 본공고는 마감에서 빠지지만, 사전규격은 거르지 않는다", () => {
+  it("마감 지난 본공고와 의견 마감 지난 사전규격은 마감에서 빠진다", () => {
     expect(diagnoseNotice(makeNotice({ deadline: "2026-09-28 10:00:00" }), ctx).excludedAt).toBe("마감");
     expect(
       diagnoseNotice(makeNotice({ deadline: "2026-09-28 10:00:00", sourceType: "사전규격", bidMethod: null }), ctx).excludedAt
-    ).toBeNull();
+    ).toBe("마감");
   });
 });
 

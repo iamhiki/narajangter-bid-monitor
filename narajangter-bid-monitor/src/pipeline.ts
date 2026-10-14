@@ -141,7 +141,12 @@ export async function collectReportInput(
   );
   logger.info("마감 지난 본공고 제외", { 제외: expiredCount });
   const bidMatchesBeforeQualificationFilter = withForced(evaluateNotices(openBidNotices, appConfig, mongoliaKeywords), openBidNotices);
-  const preStandardNotices = preStandardResults.flatMap((r) => r.notices);
+  // 사전규격도 의견 마감이 지나면 뺀다 (2026-10-14 요청). 본공고가 올라오면 본공고 목록에 따로 나온다.
+  const { open: preStandardNotices, expiredCount: preStandardExpired } = excludeExpiredNotices(
+    preStandardResults.flatMap((r) => r.notices),
+    now
+  );
+  logger.info("의견 마감 지난 사전규격 제외", { 제외: preStandardExpired });
   const preStandardMatches = withForced(evaluateNotices(preStandardNotices, appConfig, mongoliaKeywords), preStandardNotices);
 
   // 사전규격은 대응하는 면허제한 조회 API가 없어 자격조건 필터 대상이 아니다 (본공고만 적용).

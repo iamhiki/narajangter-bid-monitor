@@ -73,11 +73,9 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   const isBid = notice.sourceType === "본공고";
   const steps: DiagnoseStep[] = [];
 
-  // 마감 — 본공고만. 사전규격의 마감은 의견 등록 마감이라 지나도 의미가 있다 (deadline.ts 참고).
-  if (!isBid) {
-    steps.push({ step: "마감", ok: true, detail: "사전규격은 마감으로 거르지 않음" });
-  } else if (isDeadlinePassed(notice.deadline, ctx.now)) {
-    steps.push({ step: "마감", ok: false, detail: `이미 마감됨 (${notice.deadline})` });
+  // 마감 — 사전규격은 의견 등록 마감 (지나면 뺀다, 2026-10-14 요청 — deadline.ts 참고)
+  if (isDeadlinePassed(notice.deadline, ctx.now)) {
+    steps.push({ step: "마감", ok: false, detail: `이미 ${isBid ? "" : "의견 "}마감됨 (${notice.deadline})` });
   } else {
     steps.push({ step: "마감", ok: true, detail: notice.deadline ? `마감 ${notice.deadline}` : "마감일시 없음 — 통과" });
   }
