@@ -1693,15 +1693,50 @@ function deadlineInfo(n, sub) {
   };
 }
 
+/**
+ * 자격등록 마감 ⓘ 설명 박스 — 입찰 마감·제안서 제출은 여기로 옮겼다 (2026-10-14 요청: 칸은 자격등록 마감 하나만).
+ * 나라장터에 자격등록 마감이 없는 공고(방문 제출 협상 공고 등)는 입찰 마감 칸에 쓰던 값을 대신 적고 그렇다고 알린다.
+ */
+function registrationInfo(n, sub) {
+  const bid = deadlineInfo(n, sub);
+  if (!n.registrationDeadline) {
+    const what = n.deadlineIsOpening ? (sub ? "제안서 제출 마감" : "개찰 일시") : "입찰 마감";
+    return {
+      title: "자격등록 마감",
+      warn: bid?.warn,
+      body:
+        `<p class="lead">나라장터에 자격등록 마감이 없어 <b>${what}</b>을 적었습니다.</p>` +
+        (bid ? bid.body.replace(/^<p class="lead">.*?<\/p>/, "") : `<ul class="due-list"><li><span>나라장터 입찰 마감</span><b>${esc(String(n.deadline || "공고에 없음").slice(0, 16))}</b></li></ul>`),
+    };
+  }
+  const bidAt = n.deadlineIsOpening ? bidDeadline(n) : n.deadline;
+  const rows = [
+    ["나라장터 입찰 마감", n.deadlineIsOpening ? "공고에 없음" : String(n.deadline || "공고에 없음").slice(0, 16)],
+    n.deadlineIsOpening ? ["개찰", String(n.deadline).slice(0, 16)] : null,
+    sub ? [`제안서 제출 (${sub.source})`, sub.period || sub.at] : null,
+  ].filter(Boolean);
+  const subFirst = !!sub && deadlineAt(sub.at) < deadlineAt(n.registrationDeadline);
+  return {
+    title: "자격등록 마감",
+    warn: subFirst,
+    body:
+      (subFirst
+        ? `<p class="lead">제안서는 자격등록 마감보다 <b>이른 ${esc(String(sub.at).slice(5).replace("-", "/"))}까지</b> 따로 내야 합니다.</p>`
+        : `<p class="lead">입찰참가자격 등록은 이 시각까지입니다. 입찰은 <b>${esc(String(bidAt || "공고에 없음").slice(0, 16))}</b>까지입니다.</p>`) +
+      `<ul class="due-list">${rows.map(([k, v]) => `<li><span>${esc(k)}</span><b>${esc(v)}</b></li>`).join("")}</ul>`,
+  };
+}
+
 function factsBlock(n) {
   const demand = n.demandInstitution || n.institution || "기관 미상";
   const sub = submissionOf(n);
+  const bidShown = n.deadlineIsOpening ? bidDeadline(n) : n.deadline;
   const facts = [
-    // 칸 이름은 늘 "입찰 마감". 나라장터에 입찰마감이 없는 공고(deadlineIsOpening)는 공고문의 제출 마감(없으면 개찰 일시)을
-    // 적고, 제출 기간·개찰 일시·근거는 ⓘ 설명 박스로 (2026-10-02 요청: 칸을 둘로 나누니 오히려 헷갈렸다)
-    // 참가자격 등록 마감을 맨 앞에 — 보통 입찰 마감보다 하루 이르다 (2026-10-14 요청)
-    n.registrationDeadline ? ["자격등록 마감", dueCell(n, n.registrationDeadline)] : null,
-    [n.sourceType === "사전규격" ? "의견 마감" : "입찰 마감", dueCell(n, n.deadlineIsOpening ? bidDeadline(n) : n.deadline, deadlineInfo(n, sub))],
+    // 본공고는 칸 하나 — "자격등록 마감" (2026-10-14 요청). 입찰 마감·제안서 제출·개찰 일시는 ⓘ 설명 박스로.
+    // 나라장터에 자격등록 마감이 없으면 예전 입찰 마감 칸 값(입찰 마감, 없으면 공고문의 제출 마감·개찰 일시)을 적는다
+    n.sourceType === "사전규격"
+      ? ["의견 마감", dueCell(n, n.deadline, deadlineInfo(n, sub))]
+      : ["자격등록 마감", dueCell(n, n.registrationDeadline || bidShown, registrationInfo(n, sub))],
     ["수요기관", esc(demand)],
     n.demandInstitution && n.institution && n.demandInstitution !== n.institution ? ["공고기관", esc(n.institution)] : null,
     n.budgetAmount ? ["추정가격", won(n.budgetAmount)] : null,
