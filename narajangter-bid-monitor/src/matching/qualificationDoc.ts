@@ -5,6 +5,7 @@ import { downloadDocuments, listAttachments, type NoticeAttachment } from "../ap
 import { d2bAttachmentsFor } from "../api/d2bPreStandard.js";
 import { extractDocumentText } from "../corpus/extractText.js";
 import { logger } from "../logger.js";
+import { regionKey } from "./regionFilter.js";
 
 /**
  * 입찰공고문 첨부에서 참가자격을 읽는다.
@@ -289,16 +290,6 @@ function regionsIn(phrase: string | undefined): string | null {
     if (!seen.has(regionKey(name))) seen.set(regionKey(name), name);
   }
   return seen.size ? [...seen.values()].join(REGION_JOIN) : null;
-}
-
-/**
- * 시·도 이름을 두 글자 약칭으로 — "강원특별자치도"/"강원도"/"강원"을 같은 지역으로 본다.
- * 충청·전라·경상은 둘째 글자 대신 북/남을 붙인다 (충청북도 → 충북).
- */
-export function regionKey(name: string): string {
-  const s = name.replace(/\s/g, "");
-  const m = /^(충청|전라|경상)(북|남)/.exec(s);
-  return m ? `${m[1]!.charAt(0)}${m[2]}` : s.slice(0, 2);
 }
 
 /** 지역제한(여러 곳이면 그중 하나라도)을 본점이 충족하는지. 본점 소재지를 모르면 null (판단 안 함). */

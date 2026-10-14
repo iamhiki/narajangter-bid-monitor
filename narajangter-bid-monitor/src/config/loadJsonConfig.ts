@@ -36,6 +36,11 @@ const keywordsFileSchema = z.object({
   makeSignals: z.array(z.string().trim().min(1)).default([]),
   excludeKeywordExceptions: z.record(z.array(z.string().trim().min(1))).default({}),
   minBudgetAmount: z.number().nonnegative().nullable().default(null),
+  /** 최소 금액을 보지 않는 공고 — 업무구분이 맞고 제목에 이 말이 있으면 (설계용역은 금액이 작다) */
+  minBudgetExemption: z
+    .object({ businessTypes: z.array(businessTypeSchema).min(1), titleWords: z.array(z.string().trim().min(1)).min(1) })
+    .nullable()
+    .default(null),
   /** 참가자격에서 이 면허들을 필수로 요구하면(조경·토목 등) 제외한다 — qualificationFilter.ts requiredLicensesFrom */
   // businessTypes를 주면 그 업무구분 공고에만 적용한다 (조경식재·시설물공사업은 공사에만 — 물품 조형물 공고는 남긴다)
   excludeRequiredLicenses: z.array(codeEntrySchema.extend({ businessTypes: z.array(businessTypeSchema).optional() })).default([]),
@@ -126,6 +131,8 @@ export interface AppConfig {
   /** 제외 키워드가 이 말 안에만 들어 있으면 걸지 않는다 — 예: "건축"은 "실내건축"에서는 무시 */
   excludeKeywordExceptions?: Record<string, string[]>;
   minBudgetAmount: number | null;
+  /** 최소 금액을 보지 않는 공고 (설계용역 — matchEngine.isBelowMinBudget) */
+  minBudgetExemption?: { businessTypes: BusinessType[]; titleWords: string[] } | null;
   /** 참가자격이 이 면허들을 필수로 요구하는 본공고는 제외 (면허제한정보 기준) */
   excludeRequiredLicenses?: (CodeEntry & { businessTypes?: BusinessType[] })[];
   businessTypes: BusinessType[];
@@ -224,6 +231,7 @@ export function loadAppConfig(): AppConfig {
     makeSignals: keywordsData.makeSignals,
     excludeKeywordExceptions: keywordsData.excludeKeywordExceptions,
     minBudgetAmount: keywordsData.minBudgetAmount,
+    minBudgetExemption: keywordsData.minBudgetExemption,
     excludeRequiredLicenses: keywordsData.excludeRequiredLicenses,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,

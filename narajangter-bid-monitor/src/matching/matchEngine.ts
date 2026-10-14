@@ -30,6 +30,23 @@ export function linkedBidNoticeNo(notice: NormalizedNotice): string | null {
   return typeof v === "string" && v.trim() ? v.trim().split(/[,\s]+/)[0]! : null;
 }
 
+/**
+ * 최소 금액 미달인지. 금액을 모르면 미달이 아니다(fail-open).
+ * 설계용역은 금액 기준을 보지 않는다 (keywords.json minBudgetExemption) — 설계 뒤 시공을 따내기 위한
+ * 영업으로 참여하는데, 설계용역은 보통 2천만 원 안팎·커도 8천만 원이라 1억 기준에 다 걸린다 (2026-10-14 요청).
+ */
+export function isBelowMinBudget(notice: NormalizedNotice, config: AppConfig): boolean {
+  if (config.minBudgetAmount == null || notice.budgetAmount == null || notice.budgetAmount >= config.minBudgetAmount) return false;
+  return !isMinBudgetExempt(notice, config);
+}
+
+export function isMinBudgetExempt(notice: NormalizedNotice, config: AppConfig): boolean {
+  const ex = config.minBudgetExemption;
+  if (!ex || !ex.businessTypes.includes(notice.businessType)) return false;
+  const title = notice.title.replace(/s+/g, "");
+  return ex.titleWords.some((w) => title.includes(w.replace(/s+/g, "")));
+}
+
 export function evaluateNotice(
   notice: NormalizedNotice,
   config: AppConfig,
@@ -38,9 +55,7 @@ export function evaluateNotice(
   if (linkedBidNoticeNo(notice)) return null;
   if (matchExcludeKeyword(notice, config.excludeKeywords, config)) return null;
 
-  if (config.minBudgetAmount != null && notice.budgetAmount != null && notice.budgetAmount < config.minBudgetAmount) {
-    return null;
-  }
+  if (isBelowMinBudget(notice, config)) return null;
 
   // 허용한 낙찰방법 분류만 남긴다 (기본 설정은 수의계약만 제외) — fail-open이다. bidMethod가
   // null이면(사전규격은 이 단계에서 항상 그렇고, 본공고도 필드 인식이 빗나가면 null일 수 있음)

@@ -45,6 +45,11 @@ const ctx: DiagnoseContext = {
     ["N-OK", [{ groupNo: "1", allowedNames: ["실내건축공사업/0006"] }]],
     ["N-NO", [{ groupNo: "1", allowedNames: ["건축공사업/0002"] }]],
   ]),
+  participationRegions: new Map([
+    ["N-GN", ["경상남도"]],
+    ["N-GW", ["강원특별자치도 횡성군", "경기도"]],
+  ]),
+  headquartersRegion: "강원특별자치도",
 };
 
 describe("diagnoseNotice", () => {
@@ -74,11 +79,11 @@ describe("diagnoseNotice", () => {
   it("참가자격 미보유는 빼지 않고 표시만 한다 (공동수급으로 참가할 수 있어서)", () => {
     const no = diagnoseNotice(makeNotice({ noticeNo: "N-NO" }), ctx);
     expect(no.excludedAt).toBeNull();
-    expect(no.steps.at(-1)?.detail).toContain("자격 미보유");
-    expect(no.steps.at(-1)?.detail).toContain("건축공사업(0002)");
+    expect(no.steps.find((s) => s.step === "참가자격")?.detail).toContain("자격 미보유");
+    expect(no.steps.find((s) => s.step === "참가자격")?.detail).toContain("건축공사업(0002)");
     const ok = diagnoseNotice(makeNotice({ noticeNo: "N-OK" }), ctx);
     expect(ok.excludedAt).toBeNull();
-    expect(ok.steps.at(-1)?.detail).toContain("실내건축공사업(0006)");
+    expect(ok.steps.find((s) => s.step === "참가자격")?.detail).toContain("실내건축공사업(0006)");
   });
 
   it("품목과 제목 키워드를 출처별로 나눠 적는다 — 같은 말이 두 번 나와도 어디서 걸렸는지 보이게", () => {
@@ -96,6 +101,22 @@ describe("diagnoseNotice", () => {
     expect(d.steps.find((s) => s.step === "키워드·품목")?.detail).toBe(
       "[나라장터 물품분류] '조합놀이대' — 우리 등록 품목 · [세부품명 이름] '과학관' — 우리 키워드"
     );
+  });
+
+  it("다른 지역 업체만 참가할 수 있는 본공고는 참가지역에서 빠진다", () => {
+    const gn = diagnoseNotice(makeNotice({ noticeNo: "N-GN" }), ctx);
+    expect(gn.excludedAt).toBe("참가지역");
+    expect(gn.steps.find((s) => s.step === "참가지역")?.detail).toContain("경상남도");
+    expect(diagnoseNotice(makeNotice({ noticeNo: "N-GW" }), ctx).excludedAt).toBeNull();
+    expect(diagnoseNotice(makeNotice({ noticeNo: "N-GN" }), { ...ctx, headquartersRegion: null }).excludedAt).toBeNull();
+  });
+
+  it("설계용역은 최소 금액을 보지 않는다", () => {
+    const designConfig: AppConfig = { ...config, minBudgetExemption: { businessTypes: ["용역"], titleWords: ["설계"] } };
+    const dctx = { ...ctx, config: designConfig };
+    expect(diagnoseNotice(makeNotice({ title: "과학관 전시 실시설계 용역", budgetAmount: 20_000_000 }), dctx).excludedAt).toBeNull();
+    expect(diagnoseNotice(makeNotice({ title: "과학관 전시물 제작설치", budgetAmount: 20_000_000 }), dctx).excludedAt).toBe("최소예산");
+    expect(diagnoseNotice(makeNotice({ title: "과학관 설계 물품", businessType: "물품", budgetAmount: 20_000_000 }), dctx).excludedAt).toBe("최소예산");
   });
 
   it("마감 지난 본공고는 마감에서 빠지지만, 사전규격은 거르지 않는다", () => {

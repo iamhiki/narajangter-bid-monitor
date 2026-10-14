@@ -6,7 +6,8 @@ import { hasStandaloneProductMatch, matchCodes, matchServiceClasses } from "./co
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
-import { linkedBidNoticeNo } from "./matchEngine.js";
+import { isBelowMinBudget, isMinBudgetExempt, linkedBidNoticeNo } from "./matchEngine.js";
+import { isOutsideRegion } from "./regionFilter.js";
 import { evaluateQualifications, excludeLicenseCodes, missingLabels, requiredLicensesFrom, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
@@ -29,6 +30,7 @@ export const DIAGNOSE_STEPS = [
   "해외개최",
   "키워드·품목",
   "참가자격",
+  "참가지역",
 ] as const;
 export type DiagnoseStepName = (typeof DIAGNOSE_STEPS)[number];
 
@@ -58,6 +60,10 @@ export interface DiagnoseContext {
    * 판정하지 않는다.
    */
   licenseGroups: Map<string, LicenseLimitGroup[]> | null;
+  /** 참가가능지역 (본공고만, api/regionLimitApi.ts). 없거나 빈 Map이면 지역으로 판정하지 않는다 */
+  participationRegions?: Map<string, string[]> | null;
+  /** 본점 소재지 (company-profile.json) — 모르면 지역으로 판정하지 않는다 */
+  headquartersRegion?: string | null;
 }
 
 const won = (n: number): string => `${(n / 100_000_000).toFixed(2)}억`;
@@ -91,8 +97,10 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   );
 
   const budget = notice.budgetAmount;
-  if (config.minBudgetAmount != null && budget != null && budget < config.minBudgetAmount) {
-    steps.push({ step: "최소예산", ok: false, detail: `추정가격 ${won(budget)} < 기준 ${won(config.minBudgetAmount)}` });
+  if (isBelowMinBudget(notice, config)) {
+    steps.push({ step: "최소예산", ok: false, detail: `추정가격 ${won(budget!)} < 기준 ${won(config.minBudgetAmount!)}` });
+  } else if (budget != null && isMinBudgetExempt(notice, config)) {
+    steps.push({ step: "최소예산", ok: true, detail: `설계용역 — 금액 기준 없음 (추정가격 ${won(budget)})` });
   } else {
     steps.push({ step: "최소예산", ok: true, detail: budget == null ? "금액 정보 없음 — 통과" : `추정가격 ${won(budget)}` });
   }
@@ -155,9 +163,21 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   );
 
   steps.push(qualificationStep(notice, ctx));
+  steps.push(regionStep(notice, ctx));
 
   const excludedAt = steps.find((s) => !s.ok)?.step ?? null;
   return { steps, excludedAt, candidate };
+}
+
+/** 지역제한 — applyRegionFilter와 같은 판단 */
+function regionStep(notice: NormalizedNotice, ctx: DiagnoseContext): DiagnoseStep {
+  if (notice.sourceType !== "본공고") return { step: "참가지역", ok: true, detail: "사전규격은 지역 정보가 없어 판정하지 않음" };
+  const regions = ctx.participationRegions?.get(notice.noticeNo);
+  if (!regions?.length) return { step: "참가지역", ok: true, detail: "지역제한 없음" };
+  if (isOutsideRegion(regions, ctx.headquartersRegion ?? null)) {
+    return { step: "참가지역", ok: false, detail: `${regions.join(", ")} 업체만 참가 가능 — 본점(${ctx.headquartersRegion}) 지역 밖` };
+  }
+  return { step: "참가지역", ok: true, detail: ctx.headquartersRegion ? `${regions.join(", ")} 업체 참가 가능 — 본점 지역 포함` : `${regions.join(", ")} (본점 소재지 미설정 — 판정 안 함)` };
 }
 
 function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): DiagnoseStep {

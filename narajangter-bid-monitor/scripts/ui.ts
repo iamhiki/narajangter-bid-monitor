@@ -8,6 +8,7 @@ import { loadEnv } from "../src/config/env.js";
 import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
 import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
+import { loadHeadquartersRegion } from "../src/matching/regionFilter.js";
 import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody, fetchNoticeOutline } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
@@ -238,6 +239,16 @@ function deadlineIsOpening(n: NormalizedNotice): boolean {
   return n.sourceType === "본공고" && !!n.deadline && !String(raw.bidClseDt ?? raw.bidClseDate ?? "").trim();
 }
 
+/**
+ * 입찰참가자격 등록 마감 (본공고 bidQlfctRgstDt, 예: "2026-10-28 18:00"). 보통 입찰 마감 하루 전이라
+ * 화면의 마감 임박 정렬·D-day는 이 값과 입찰 마감 중 이른 쪽을 기준으로 한다 (2026-10-14 요청). 없으면 null.
+ */
+function registrationDeadlineOf(n: NormalizedNotice): string | null {
+  if (n.sourceType !== "본공고") return null;
+  const v = (n.raw ?? {})["bidQlfctRgstDt"];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
 function demandInstitutionOf(n: NormalizedNotice): string | null {
   const raw = (n.raw ?? {}) as Record<string, unknown>;
   for (const key of ["dminsttNm", "rlDminsttNm", "dmndInsttNm"]) {
@@ -325,6 +336,7 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     sourceType: n.sourceType,
     deadline: n.deadline,
     deadlineIsOpening: deadlineIsOpening(n),
+    registrationDeadline: registrationDeadlineOf(n),
     budgetAmount: n.budgetAmount,
     postedAt: n.postedAt,
     detailUrl: n.detailUrl,
@@ -425,16 +437,6 @@ interface Participation {
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
 
-/** 본점 소재지 (company-profile.json). 요청마다 읽어서 파일만 고치면 재시작 없이 반영된다. */
-function headquartersRegion(): string | null {
-  try {
-    const dir = process.env.APP_CONFIG_DIR ? resolve(process.env.APP_CONFIG_DIR) : resolve("config");
-    const profile = JSON.parse(readFileSync(resolve(dir, "company-profile.json"), "utf8")) as { headquartersRegion?: string | null };
-    return profile.headquartersRegion ?? null;
-  } catch {
-    return null;
-  }
-}
 let participation: Record<string, Participation> = (() => {
   try {
     return JSON.parse(readFileSync(PARTICIPATION_PATH, "utf8")) as Record<string, Participation>;
@@ -958,7 +960,7 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/api/enrich") {
-    const hq = headquartersRegion();
+    const hq = loadHeadquartersRegion();
     const byNo = Object.fromEntries(
       [...enrichment].map(([no, e]) => [no, { ...e, regionOk: e.qualDoc?.region ? meetsRegion(e.qualDoc.region, hq) : null }])
     );

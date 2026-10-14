@@ -63,6 +63,12 @@ git show origin/claude/automate-google-sheets-0jVhc:narajangter-bid-monitor/conf
    충족 못하는 그룹이 **2개 이상**이면 제외 (1개까지는 통과, 그룹 내 하나만 보유해도
    그 그룹은 충족). 조회 실패/정보없음이면 걸러내지 않고 통과(fail-open). 사전규격은
    대응 API가 없어 이 필터 대상이 아님
+   - **지역제한 (2026-10-14 추가)**: 참가가능지역정보조회 API(`src/api/regionLimitApi.ts`)로
+     공고별 참가 가능 지역을 받아, 본점 소재지(`config/company-profile.json`의
+     `headquartersRegion`)와 같은 시·도가 하나도 없으면 제외 (`src/matching/regionFilter.ts`).
+     시·군까지 좁힌 공고(예: 강원특별자치도 횡성군)는 남긴다. 조회 실패 시 통과(fail-open).
+   - 설계용역(용역 + 제목에 '설계')은 최소 예산 기준을 보지 않는다
+     (`keywords.json`의 `minBudgetExemption`). 수의계약 제외는 그대로.
 6. **리포트 생성 + 저장** (`output/` 폴더, GitHub Actions 아티팩트로도 백업)
 7. **이메일 발송** (`config/recipients.json`의 전체 수신자에게), 실패 시 실패 알림
    메일 별도 발송

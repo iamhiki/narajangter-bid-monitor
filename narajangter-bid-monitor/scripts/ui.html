@@ -1622,11 +1622,21 @@ const submissionEarlier = (n, sub) => !!sub && !n.deadlineIsOpening && !!n.deadl
  * 마감 임박·정렬에 쓸 일시. 나라장터 입찰마감이 없는 공고는 첨부의 제출 마감, 있는 공고는 제출 마감이 더 이를 때만 그것.
  * 칸에 보이는 값은 factsBlock이 따로 정한다 (입찰마감이 있으면 그대로 보여 주고 ⓘ로 알린다)
  */
-const effDeadline = (n) => {
+const bidDeadline = (n) => {
   const sub = submissionOf(n);
   if (n.deadlineIsOpening) return sub?.at || n.deadline;
   return submissionEarlier(n, sub) ? sub.at : n.deadline;
 };
+/**
+ * 참가자격 등록 마감이 입찰(제출) 마감보다 이르고 아직 안 지났는지 — 보통 하루 전이라 먼저 챙길 마감은 등록 쪽이다.
+ * 등록 마감만 지난 공고는 입찰 마감을 기준으로 둔다 (이미 등록된 자격으로는 아직 입찰할 수 있다)
+ */
+const registrationFirst = (n) => {
+  const at = n.registrationDeadline ? deadlineAt(n.registrationDeadline) : Infinity;
+  return at >= Date.now() && at < deadlineAt(bidDeadline(n));
+};
+/** 마감 임박 정렬·D-day 기준 — 참가자격 등록 마감과 입찰(제출) 마감 중 이른 쪽 (2026-10-14 요청) */
+const effDeadline = (n) => (registrationFirst(n) ? n.registrationDeadline : bidDeadline(n));
 
 /**
  * 마감 칸 한 줄 — 일시와 D-day. info가 있으면 일시에 ⓘ를 붙이고 커서를 올리면 설명 박스로 보여 준다
@@ -1689,7 +1699,9 @@ function factsBlock(n) {
   const facts = [
     // 칸 이름은 늘 "입찰 마감". 나라장터에 입찰마감이 없는 공고(deadlineIsOpening)는 공고문의 제출 마감(없으면 개찰 일시)을
     // 적고, 제출 기간·개찰 일시·근거는 ⓘ 설명 박스로 (2026-10-02 요청: 칸을 둘로 나누니 오히려 헷갈렸다)
-    [n.sourceType === "사전규격" ? "의견 마감" : "입찰 마감", dueCell(n, n.deadlineIsOpening ? effDeadline(n) : n.deadline, deadlineInfo(n, sub))],
+    // 참가자격 등록 마감을 맨 앞에 — 보통 입찰 마감보다 하루 이르다 (2026-10-14 요청)
+    n.registrationDeadline ? ["자격등록 마감", dueCell(n, n.registrationDeadline)] : null,
+    [n.sourceType === "사전규격" ? "의견 마감" : "입찰 마감", dueCell(n, n.deadlineIsOpening ? bidDeadline(n) : n.deadline, deadlineInfo(n, sub))],
     ["수요기관", esc(demand)],
     n.demandInstitution && n.institution && n.demandInstitution !== n.institution ? ["공고기관", esc(n.institution)] : null,
     n.budgetAmount ? ["추정가격", won(n.budgetAmount)] : null,
@@ -1724,8 +1736,9 @@ function dueBadge(n) {
   const d = daysLeft(effDeadline(n));
   if (d === null || d < 0 || d > 3) return "";
   // 임박했다는 사실만 — 정확한 일시는 제목 아래 마감 칸에 있다
-  const label =
-    sub && (n.deadlineIsOpening || submissionEarlier(n, sub))
+  const label = registrationFirst(n)
+    ? "참가자격 등록 마감"
+    : sub && (n.deadlineIsOpening || submissionEarlier(n, sub))
       ? `제안서 제출 마감(${sub.source})`
       : n.deadlineIsOpening
         ? "개찰 일시(입찰 마감일 미기재 — 실제 제출 마감은 더 이를 수 있음)"
@@ -2465,6 +2478,7 @@ const STAGE_LABEL = {
   "키워드·품목": "키워드 없음",
   // 참가자격 단계에서 빠지는 경우는 조경·토목 면허를 필수로 요구할 때뿐이다 (미보유는 빼지 않고 표시만)
   참가자격: "조경·토목 면허 필수",
+  참가지역: "다른 지역 업체만",
 };
 const stageLabel = (s) => STAGE_LABEL[s] || s;
 /** 빠진 이유 배지 팝업 — 그 조건이 무엇인지 (판정 규칙은 diagnose.ts) */
@@ -2477,6 +2491,7 @@ const STAGE_NOTE = {
   해외개최: "몽골이 아닌 해외 전시회의 한국관·단체관 공고입니다.",
   "키워드·품목": "제목·품명에 등록 키워드가 없고, 공고 품목도 지일 등록 품목이 아닙니다.",
   참가자격: "참가자격이 조경·토목처럼 지일 사업 분야가 아닌 면허를 꼭 갖추도록 요구합니다.",
+  참가지역: "다른 지역에 본사가 있는 업체만 참가할 수 있는 공고입니다.",
 };
 function excludedBadge(n) {
   if (!n.excludedAt) return tipBadge("hi", "목록에 있음", "목록에 있음", `<p>모든 조건을 통과해 공고 목록에 올라 있습니다.</p>`);
@@ -2502,6 +2517,7 @@ const STEP_NAME = {
   해외개최: "해외 개최",
   "키워드·품목": "우리 분야 해당",
   참가자격: "참가 자격",
+  참가지역: "참가 가능 지역",
 };
 async function loadExcluded() {
   $("exMeta").textContent = "불러오는 중…";

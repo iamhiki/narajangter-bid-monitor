@@ -14,6 +14,8 @@ import { loadMongoliaKeywords } from "./matching/overseasVenueFilter.js";
 import { excludeExpiredNotices } from "./matching/deadline.js";
 import { applyQualificationFilter } from "./matching/applyQualificationFilter.js";
 import { fetchAllLicenseLimitGroups } from "./api/licenseLimitApi.js";
+import { fetchAllParticipationRegions } from "./api/regionLimitApi.js";
+import { applyRegionFilter, loadHeadquartersRegion } from "./matching/regionFilter.js";
 import type { ReportInput } from "./report/buildReport.js";
 import { ApiError } from "./errors.js";
 import type { NormalizedNotice } from "./api/types.js";
@@ -102,6 +104,9 @@ export async function collectReportInput(
   // 이 함수는 내부에서 오류를 삼키고 빈 Map을 돌려주므로 거부(reject)되지 않는다 —
   // 매칭이 0건이라 아래에서 await하지 않게 되더라도 안전하다.
   const licenseGroupsPromise = fetchAllLicenseLimitGroups(env, window, { incremental: options.incremental });
+  // 참가가능지역도 같은 이유로 같이 출발시킨다. 실패하면 빈 Map — 지역으로 거르지 않는다.
+  const regionsPromise = fetchAllParticipationRegions(env, window, { incremental: options.incremental });
+  const headquartersRegion = loadHeadquartersRegion();
 
   const [bidResults, preStandardResults] = await Promise.all([
     fetchBidNotices(env, window, { incremental: options.incremental }),
@@ -144,12 +149,11 @@ export async function collectReportInput(
   await notify(
     `매칭 ${bidMatchesBeforeQualificationFilter.length + preStandardMatches.length}건 · 참가자격 확인 중…`
   );
-  const bidMatches = await applyQualificationFilter(
-    env,
-    appConfig,
-    bidMatchesBeforeQualificationFilter,
-    window,
-    licenseGroupsPromise
+  // 지역제한으로 참가할 수 없는 본공고(예: 경상남도 업체만)는 뺀다 (2026-10-14 요청)
+  const bidMatches = applyRegionFilter(
+    await applyQualificationFilter(env, appConfig, bidMatchesBeforeQualificationFilter, window, licenseGroupsPromise),
+    await regionsPromise,
+    headquartersRegion
   );
 
   logger.info("매칭 결과", {
@@ -210,12 +214,10 @@ export async function collectReportInput(
   if (options.withClosed) {
     const openNos = new Set(openBidNotices.map((n) => n.noticeNo));
     const expired = bidResults.flatMap((r) => r.notices).filter((n) => !openNos.has(n.noticeNo));
-    const closed = await applyQualificationFilter(
-      env,
-      appConfig,
-      evaluateNotices(expired, appConfig, mongoliaKeywords),
-      window,
-      licenseGroupsPromise
+    const closed = applyRegionFilter(
+      await applyQualificationFilter(env, appConfig, evaluateNotices(expired, appConfig, mongoliaKeywords), window, licenseGroupsPromise),
+      await regionsPromise,
+      headquartersRegion
     );
     attachSimilarity(closed, new Map());
     result.closed = closed;
@@ -227,7 +229,7 @@ export async function collectReportInput(
     const licenseGroups = await licenseGroupsPromise;
     result.diagnostics = {
       notices: [...bidResults.flatMap((r) => r.notices), ...preStandardResults.flatMap((r) => r.notices)],
-      context: { config: appConfig, mongoliaKeywords, now, licenseGroups },
+      context: { config: appConfig, mongoliaKeywords, now, licenseGroups, participationRegions: await regionsPromise, headquartersRegion },
     };
   }
   return result;
