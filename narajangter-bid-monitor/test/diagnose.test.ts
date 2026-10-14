@@ -44,6 +44,8 @@ const ctx: DiagnoseContext = {
   licenseGroups: new Map([
     ["N-OK", [{ groupNo: "1", allowedNames: ["실내건축공사업/0006"] }]],
     ["N-NO", [{ groupNo: "1", allowedNames: ["건축공사업/0002"] }]],
+    ["N-ARCH", [{ groupNo: "1", allowedNames: ["건축사사무소/4817"] }, { groupNo: "2", allowedNames: ["설계업(종합설계)/1105"] }]],
+    ["N-ARCH-OR", [{ groupNo: "1", allowedNames: ["건축사사무소/4817"] }, { groupNo: "2", allowedNames: ["실내건축공사업/0006"] }]],
   ]),
   participationRegions: new Map([
     ["N-GN", ["경상남도"]],
@@ -117,6 +119,16 @@ describe("diagnoseNotice", () => {
     expect(diagnoseNotice(makeNotice({ title: "과학관 전시 실시설계 용역", budgetAmount: 20_000_000 }), dctx).excludedAt).toBeNull();
     expect(diagnoseNotice(makeNotice({ title: "과학관 전시물 제작설치", budgetAmount: 20_000_000 }), dctx).excludedAt).toBe("최소예산");
     expect(diagnoseNotice(makeNotice({ title: "과학관 설계 물품", businessType: "물품", budgetAmount: 20_000_000 }), dctx).excludedAt).toBe("최소예산");
+  });
+
+  it("용역·공사가 요구한 업종을 하나도 보유하지 않으면 빠지고, 물품은 남는다", () => {
+    const c = { ...ctx, config: { ...config, excludeNoHeldQualificationTypes: ["용역", "공사"] as ("용역" | "공사")[] } };
+    const arch = diagnoseNotice(makeNotice({ noticeNo: "N-ARCH" }), c);
+    expect(arch.excludedAt).toBe("참가자격");
+    expect(arch.steps.find((s) => s.step === "참가자격")?.detail).toContain("건축사사무소(4817)");
+    expect(diagnoseNotice(makeNotice({ noticeNo: "N-ARCH-OR" }), c).excludedAt).toBeNull();
+    expect(diagnoseNotice(makeNotice({ noticeNo: "N-ARCH", businessType: "물품" }), c).excludedAt).toBeNull();
+    expect(diagnoseNotice(makeNotice({ noticeNo: "N-ARCH" }), ctx).excludedAt).toBeNull(); // 설정이 없으면 표시만
   });
 
   it("마감 지난 본공고는 마감에서 빠지지만, 사전규격은 거르지 않는다", () => {

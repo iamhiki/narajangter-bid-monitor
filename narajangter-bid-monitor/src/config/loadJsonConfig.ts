@@ -44,6 +44,8 @@ const keywordsFileSchema = z.object({
   /** 참가자격에서 이 면허들을 필수로 요구하면(조경·토목 등) 제외한다 — qualificationFilter.ts requiredLicensesFrom */
   // businessTypes를 주면 그 업무구분 공고에만 적용한다 (조경식재·시설물공사업은 공사에만 — 물품 조형물 공고는 남긴다)
   excludeRequiredLicenses: z.array(codeEntrySchema.extend({ businessTypes: z.array(businessTypeSchema).optional() })).default([]),
+  /** 참가자격 업종을 하나도 보유하지 않으면 제외할 업무구분 (qualificationFilter.ts holdsNoneOf) */
+  excludeNoHeldQualificationTypes: z.array(businessTypeSchema).default([]),
   businessTypes: z
     .array(businessTypeSchema)
     .min(1, "businessTypes 배열이 비어있습니다 (최소 1개 필요)")
@@ -135,6 +137,8 @@ export interface AppConfig {
   minBudgetExemption?: { businessTypes: BusinessType[]; titleWords: string[] } | null;
   /** 참가자격이 이 면허들을 필수로 요구하는 본공고는 제외 (면허제한정보 기준) */
   excludeRequiredLicenses?: (CodeEntry & { businessTypes?: BusinessType[] })[];
+  /** 이 업무구분의 본공고는 참가자격 업종을 하나도 보유하지 않으면 제외 (물품은 빼 둔다 — 조형물 공고) */
+  excludeNoHeldQualificationTypes?: BusinessType[];
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
   productCodes: CodeEntry[];
@@ -233,6 +237,7 @@ export function loadAppConfig(): AppConfig {
     minBudgetAmount: keywordsData.minBudgetAmount,
     minBudgetExemption: keywordsData.minBudgetExemption,
     excludeRequiredLicenses: keywordsData.excludeRequiredLicenses,
+    excludeNoHeldQualificationTypes: keywordsData.excludeNoHeldQualificationTypes,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,
     productCodes: codesData.productCodes,

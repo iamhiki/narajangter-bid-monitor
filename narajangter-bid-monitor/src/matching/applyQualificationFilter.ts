@@ -2,7 +2,7 @@ import type { Env } from "../config/env.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { fetchAllLicenseLimitGroups, type LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import { logger } from "../logger.js";
-import { evaluateQualifications, excludeLicenseCodes, missingLabels, qualificationLayout, requiredLicensesFrom } from "./qualificationFilter.js";
+import { evaluateQualifications, excludeLicenseCodes, holdsNoneOf, missingLabels, qualificationLayout, requiredLicensesFrom } from "./qualificationFilter.js";
 import type { MatchedNotice } from "./types.js";
 
 /**
@@ -11,8 +11,9 @@ import type { MatchedNotice } from "./types.js";
  *
  * **공고를 빼지 않는다.** 미보유 자격이 있어도 공동수급이 허용되면 그 자격을 가진 업체와 함께
  * 참가할 수 있어서, "미충족"으로 표시만 하고 판단은 담당자에게 맡긴다 (회사 방침, 2026-09-30).
- * 예외 하나: 조경·토목처럼 지일 사업 분야가 아닌 면허를 **필수로** 요구하는 공고는 뺀다
- * (keywords.json excludeRequiredLicenses, 회사 답변 2026-10-13).
+ * 예외 둘: 조경·토목처럼 지일 사업 분야가 아닌 면허를 **필수로** 요구하는 공고는 뺀다
+ * (keywords.json excludeRequiredLicenses, 회사 답변 2026-10-13). 용역·공사 공고가 요구한 업종을 지일이 하나도
+ * 갖고 있지 않아도 뺀다 — 공동수급 구성원으로도 들어갈 수 없다 (excludeNoHeldQualificationTypes, 2026-10-14).
  */
 export async function applyQualificationFilter(
   env: Env,
@@ -33,6 +34,7 @@ export async function applyQualificationFilter(
   let missingCount = 0;
   const heldCodes = new Set([...appConfig.heldProducts, ...appConfig.heldIndustries].map((c) => c.code.trim()));
   const excluded: string[] = [];
+  const noneHeld: string[] = [];
   const kept: MatchedNotice[] = [];
   // 조회가 실패하면 fetchAllLicenseLimitGroups가 빈 Map을 준다. 조회기간 전체에 면허제한
   // 공고가 한 건도 없을 리는 없으므로 빈 Map은 실패로 본다.
@@ -42,6 +44,10 @@ export async function applyQualificationFilter(
     const groups = groupsByNotice.get(match.notice.noticeNo) ?? [];
     if (requiredLicensesFrom(groups, excludeLicenseCodes(appConfig.excludeRequiredLicenses, match.notice.businessType), heldCodes)) {
       excluded.push(match.notice.noticeNo);
+      continue;
+    }
+    if (appConfig.excludeNoHeldQualificationTypes?.includes(match.notice.businessType) && holdsNoneOf(groups, heldCodes)) {
+      noneHeld.push(match.notice.noticeNo);
       continue;
     }
     kept.push(match);
@@ -62,6 +68,6 @@ export async function applyQualificationFilter(
     if (!result.passes) missingCount += 1;
   }
 
-  logger.info("자격조건 판정 완료", { 대상: matches.length, 미보유: missingCount, 조경토목필수제외: excluded.length });
+  logger.info("자격조건 판정 완료", { 대상: matches.length, 미보유: missingCount, 조경토목필수제외: excluded.length, 보유자격없음제외: noneHeld.length });
   return kept;
 }

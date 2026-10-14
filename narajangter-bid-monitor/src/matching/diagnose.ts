@@ -8,7 +8,7 @@ import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
 import { isBelowMinBudget, isMinBudgetExempt, linkedBidNoticeNo } from "./matchEngine.js";
 import { isOutsideRegion } from "./regionFilter.js";
-import { evaluateQualifications, excludeLicenseCodes, missingLabels, requiredLicensesFrom, uniqueSatisfied } from "./qualificationFilter.js";
+import { evaluateQualifications, excludeLicenseCodes, holdsNoneOf, missingLabels, requiredLicensesFrom, uniqueSatisfied } from "./qualificationFilter.js";
 
 /**
  * 공고 한 건이 수집 파이프라인의 각 단계를 통과했는지 하나씩 짚는다 (② 정제 · ③ 미수집 원인 파악용).
@@ -195,6 +195,10 @@ function qualificationStep(notice: NormalizedNotice, ctx: DiagnoseContext): Diag
   const required = requiredLicensesFrom(groups, excludeLicenseCodes(ctx.config.excludeRequiredLicenses, notice.businessType), heldCodes);
   if (required) {
     return { step: "참가자격", ok: false, detail: `참가자격이 ${required.join(", ")} 면허를 필수로 요구 — 지일 사업 분야 아님` };
+  }
+  const noneHeld = ctx.config.excludeNoHeldQualificationTypes?.includes(notice.businessType) ? holdsNoneOf(groups, heldCodes) : null;
+  if (noneHeld) {
+    return { step: "참가자격", ok: false, detail: `참가자격 업종(${noneHeld.join(", ")})을 하나도 보유하지 않음 — 공동수급으로도 참가 불가` };
   }
 
   const result = evaluateQualifications(groups, ctx.config.heldProducts, ctx.config.heldIndustries);

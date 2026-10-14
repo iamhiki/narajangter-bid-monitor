@@ -150,6 +150,22 @@ export function requiredLicensesFrom(
   return [...required];
 }
 
+/**
+ * 참가자격에 나온 업종 중 지일이 보유한 것이 **하나도 없는가** — 그러면 공동수급으로도 들어갈 수 없다
+ * (공동이행은 구성원 모두가, 분담이행은 맡는 부분의 자격을 갖춰야 하는데 공고 안에 지일 몫의 업종이 없다).
+ * 2026-10-14 회사 요청: "건축사사무소 같은 자격은 우리가 갖고 있지 않으니까 그런 것도 없애줘."
+ *
+ * 코드가 없는 업종이 하나라도 있으면 판단하지 않는다(null) — 이름으로는 보유 여부를 확신할 수 없다.
+ * @returns 공고가 요구한 업종 표기 목록, 아니면 null
+ */
+export function holdsNoneOf(groups: LicenseLimitGroup[], heldCodes: ReadonlySet<string>): string[] | null {
+  const names = groups.flatMap((g) => g.allowedNames);
+  if (names.length === 0) return null;
+  const codes = names.map(extractCode);
+  if (codes.some((c) => c === null || heldCodes.has(c))) return null;
+  return [...new Set(names.map(qualificationLabel))];
+}
+
 /** 이 업무구분 공고에 적용할 "필수 요구 시 제외" 면허 코드 (keywords.json excludeRequiredLicenses) */
 export function excludeLicenseCodes(entries: { code: string; businessTypes?: string[] }[] | undefined, businessType: string): Set<string> {
   return new Set((entries ?? []).filter((e) => !e.businessTypes || e.businessTypes.includes(businessType)).map((e) => e.code.trim()));
