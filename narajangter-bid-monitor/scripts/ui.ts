@@ -9,7 +9,6 @@ import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
 import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { loadHeadquartersRegion } from "../src/matching/regionFilter.js";
-import { isAiConfigured, judgeFit, type FitJudgment } from "../src/ai/fitJudge.js";
 import { fetchNoticeBody, fetchNoticeOutline } from "../src/api/noticeBody.js";
 import type { ScopeFlag } from "../src/matching/taskScopeFlags.js";
 import { announceName } from "../src/net/mdns.js";
@@ -21,7 +20,7 @@ import { lookupProductClass, type ProductClassInfo } from "../src/api/productCla
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
-import { uniqueSatisfied } from "../src/matching/qualificationFilter.js";
+import { matchKeywords } from "../src/matching/keywordMatcher.js";
 import { parseKstDateTime } from "../src/matching/deadline.js";
 import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
 import type { CollectionDiagnostics } from "../src/pipeline.js";
@@ -169,6 +168,8 @@ interface NoticeCache {
   closedItems: unknown[];
   /** 제목의 제외 키워드로만 빠진 후보 — 첨부를 읽어 본업 근거가 나온 것만 화면에 보인다 (rescue) */
   titleExcludedItems: unknown[];
+  /** 이번 조회에서 나라장터로부터 받은 공고 수 (걸러내기 전) — 화면 조회 정보 줄 */
+  collected?: { bid: number; pre: number };
   error: string | null;
 }
 
@@ -365,6 +366,8 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     detailUrl: n.detailUrl,
     bidMethod: n.bidMethod,
     bidMethodCategory: classifyBidMethod(n.bidMethod),
+    /** 재공고 — 나라장터 공고종류(ntceKindNm)나 제목에 '재공고'가 있으면 카드에 배지 */
+    reNotice: /재공고/.test(String(n.raw.ntceKindNm ?? "")) || /재공고/.test(n.title),
     confidence: m.confidence,
     reason: matchReason(m),
     // 등급 배지 팝업용 — 무엇이 맞아서 목록에 올랐는지 (강력추천 = 품목·업종 코드와 제목 키워드가 둘 다 맞음)
@@ -396,19 +399,38 @@ function allowedRegionsOf(n: NormalizedNotice): string[] | null {
   return map.get(n.noticeNo) ?? [];
 }
 
+/** 제외된 공고 카드의 싱크로율 — 제목 비교는 공고마다 한 번만 한다 */
+const excludedScoreCache = new Map<string, number>();
+function excludedScore(noticeNo: string, title: string): number {
+  const fromBody = enrichment.get(noticeNo)?.similarity?.maxScore;
+  if (fromBody != null) return fromBody;
+  let v = excludedScoreCache.get(noticeNo);
+  if (v === undefined) {
+    v = similarityView(title).maxScore;
+    excludedScoreCache.set(noticeNo, v);
+  }
+  return v;
+}
+
 function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
   const failed = d.steps.find((s) => s.step === d.excludedAt);
   return {
     noticeNo: n.noticeNo,
     title: n.title,
     institution: n.institution,
+    demandInstitution: demandInstitutionOf(n),
     businessType: n.businessType,
     sourceType: n.sourceType,
     deadline: n.deadline,
     deadlineIsOpening: deadlineIsOpening(n),
+    // '제외된 공고'·검색 카드도 실제 공고 목록과 같은 마감(자격등록 마감 우선)을 보여 준다
+    registrationDeadline: registrationDeadlineOf(n),
     budgetAmount: n.budgetAmount,
+    postedAt: n.postedAt,
     detailUrl: n.detailUrl,
     bidMethod: n.bidMethod,
+    bidMethodCategory: classifyBidMethod(n.bidMethod),
+    reNotice: /재공고/.test(String(n.raw.ntceKindNm ?? "")) || /재공고/.test(n.title),
     excludedAt: d.excludedAt,
     excludedDetail: failed?.detail ?? null,
     candidate: d.candidate,
@@ -486,6 +508,8 @@ function docExcluded(diag: CollectionDiagnostics): unknown[] {
   const hq = loadHeadquartersRegion();
   const out: unknown[] = [];
   for (const item of (noticeCache?.items ?? []) as ListItem[]) {
+    // 담당자가 올린 공고는 첨부로도 빼지 않는다
+    if (promoted[item.noticeNo]) continue;
     const why = docExclusion(item, hq);
     const notice = byNo.get(item.noticeNo);
     if (!why || !notice) continue;
@@ -526,10 +550,23 @@ function titleExcludedCandidates(diag: CollectionDiagnostics): { notice: Normali
 /**
  * 공고마다 참가여부·담당자·대화를 cache/participation.json에 둔다. 같은 링크로 들어온
  * 사람 모두가 같은 기록을 본다 — "A가 이미 보고 있다", "보류인데 왜?"를 바로 알 수 있게.
- * 상태를 바꾸면 대화에 시스템 기록을 한 줄 남긴다. 나중에 보는 사람이 경위를 따라갈 수 있어야 한다.
+ *
+ * 판단(참가·보류·불참)은 사유·판단자·시각과 함께 남기고 화면 '판단 기록' 탭에 모은다. 예전에는 버튼을 누를 때마다
+ * 대화에 시스템 기록("상태를 '참가'로 변경")을 쌓았는데, 대화가 로그로 덮여 지우고 대신 한 단계 되돌리기를 둔다
+ * (2026-10-15 요청). 판단할 때의 공고 정보(meta)를 같이 남겨 키워드 조정용 집계에 쓴다.
  */
 const PARTICIPATION_STATUSES = ["검토중", "참가", "보류", "불참"] as const;
 type ParticipationStatus = (typeof PARTICIPATION_STATUSES)[number];
+/** 되돌리기용 — 바로 앞 상태 */
+interface DecisionSnapshot {
+  status: ParticipationStatus | null;
+  reason: string;
+  tags: string[];
+  owner: string;
+  autoOwner: boolean;
+  decidedBy: string;
+  decidedAt: string | null;
+}
 interface Participation {
   noticeNo: string;
   title: string;
@@ -537,16 +574,42 @@ interface Participation {
   owner: string;
   updatedAt: string;
   comments: { by: string; text: string; at: string; system?: boolean }[];
+  /** 보류·불참의 주된 사유 버튼 (여러 개) — 화면 REASON_TAGS */
+  tags?: string[];
+  /** 판단 사유 (참가·보류·불참을 고를 때 적는다) */
+  reason?: string;
+  decidedBy?: string;
+  decidedAt?: string | null;
+  /** 판단할 때의 공고 정보 — 판단 기록 CSV·키워드 조정용 집계 */
+  meta?: Record<string, unknown>;
+  prev?: DecisionSnapshot | null;
+  /** 담당이 참가여부를 고르면서 자동으로 정해졌는지 — 선택을 해제하면 같이 지운다. '내가 맡기'로 직접 맡으면 false */
+  autoOwner?: boolean;
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
 
 let participation: Record<string, Participation> = (() => {
   try {
-    return JSON.parse(readFileSync(PARTICIPATION_PATH, "utf8")) as Record<string, Participation>;
+    const all = JSON.parse(readFileSync(PARTICIPATION_PATH, "utf8")) as Record<string, Participation>;
+    // 예전 시스템 기록("상태를 … 변경", "담당자: …", "목록에 올림")은 지운다 — 다음 저장 때 파일에서도 빠진다
+    for (const p of Object.values(all)) p.comments = (p.comments ?? []).filter((c) => !c.system);
+    return all;
   } catch {
     return {};
   }
 })();
+/** 사유 버튼 값 — 짧은 글자만, 많아야 12개 */
+const cleanTags = (v: unknown): string[] =>
+  Array.isArray(v) ? [...new Set(v.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))].slice(0, 12) : [];
+const snapshotOf = (p: Participation): DecisionSnapshot => ({
+  status: p.status,
+  reason: p.reason ?? "",
+  tags: p.tags ?? [],
+  owner: p.owner,
+  autoOwner: p.autoOwner ?? false,
+  decidedBy: p.decidedBy ?? "",
+  decidedAt: p.decidedAt ?? null,
+});
 function saveParticipation(): void {
   mkdirSync(dirname(PARTICIPATION_PATH), { recursive: true });
   writeFileSync(PARTICIPATION_PATH, JSON.stringify(participation, null, 2), "utf8");
@@ -564,6 +627,8 @@ interface Promotion {
   title: string;
   /** 목록에서 빠졌던 이유 (제목의 제외 키워드) */
   keyword: string;
+  /** 빠졌던 사유 (제외된 공고 탭에서 올린 경우 — "수의계약·설계공모" 등). 없으면 제목의 제외 키워드로 빠진 것 */
+  reason?: string;
 }
 const PROMOTED_PATH = resolve("cache/promoted.json");
 let promoted: Record<string, Promotion> = (() => {
@@ -577,15 +642,6 @@ function savePromoted(): void {
   mkdirSync(dirname(PROMOTED_PATH), { recursive: true });
   writeFileSync(PROMOTED_PATH, JSON.stringify(promoted, null, 2), "utf8");
 }
-/** 참가여부 대화에 경위를 한 줄 남긴다 — 나중에 "이 공고는 왜 목록에 있지?"를 따라갈 수 있게 */
-function logToParticipation(noticeNo: string, title: string, by: string, text: string): void {
-  const now = new Date().toISOString();
-  const p: Participation = participation[noticeNo] ?? { noticeNo, title: title.slice(0, 300), status: null, owner: "", updatedAt: now, comments: [] };
-  p.comments.push({ by, text, at: now, system: true });
-  p.updatedAt = now;
-  participation[noticeNo] = p;
-  saveParticipation();
-}
 
 // ── 부가 정보 (공고문 참가자격 · 공동수급) ──────────────────────
 /**
@@ -596,12 +652,6 @@ function logToParticipation(noticeNo: string, title: string, by: string, text: s
  * 결과는 공고번호로 프로세스가 떠 있는 동안 계속 쓴다 — 공고문과 공동수급 방식은 공고 후
  * 잘 바뀌지 않고, 정정공고는 첨부 URL이 바뀌어 첨부 캐시가 알아서 새로 받는다.
  */
-interface AiState {
-  judgment?: FitJudgment;
-  model?: string;
-  at?: string;
-  error?: string;
-}
 interface Enrichment {
   jointBid?: string | null;
   qualDoc?: QualificationDocResult | null;
@@ -626,76 +676,12 @@ interface Enrichment {
    */
   specSubmission?: SubmissionDeadline | null;
   rescue?: { status: "있음" | "없음" | "못읽음"; count: number; samples: { sentence: string; match: string }[]; sourceFile: string | null };
-  ai?: AiState;
 }
 const enrichment = new Map<string, Enrichment>();
-let enrichState = { running: false, done: 0, total: 0, aiDone: 0, aiTotal: 0, aiEnabled: isAiConfigured() };
-
-/**
- * AI 판단은 공고당 수십 원이 들고 결과가 잘 바뀌지 않으므로 cache/ai-judgments.json에 남겨
- * 재시작해도 다시 묻지 않는다. 실패는 저장하지 않는다 — 키를 넣거나 한도가 풀리면 다음 조회 때 다시 묻는다.
- * 회사 소개(company-profile.json)를 고친 뒤 다시 판단하게 하려면 이 파일을 지우면 된다.
- */
-const AI_CACHE_PATH = resolve("cache/ai-judgments.json");
-const aiCache: Record<string, AiState> = (() => {
-  try {
-    return JSON.parse(readFileSync(AI_CACHE_PATH, "utf8")) as Record<string, AiState>;
-  } catch {
-    return {};
-  }
-})();
-for (const [no, ai] of Object.entries(aiCache)) enrichment.set(no, { ...enrichment.get(no), ai });
-function saveAiCache(): void {
-  mkdirSync(dirname(AI_CACHE_PATH), { recursive: true });
-  writeFileSync(AI_CACHE_PATH, JSON.stringify(aiCache, null, 2), "utf8");
-}
+let enrichState = { running: false, done: 0, total: 0 };
 
 function heldOf(appConfig: AppConfig) {
   return { products: appConfig.heldProducts, industries: appConfig.heldIndustries };
-}
-
-/** 공고 하나에 대해 AI 판단을 돌리고 결과를 enrichment·캐시에 넣는다. */
-async function runAiJudgment(
-  n: NormalizedNotice,
-  facts: { matchReason: string; qualificationSummary: string | null },
-  appConfig: AppConfig
-): Promise<AiState> {
-  const e = enrichment.get(n.noticeNo) ?? {};
-  // 과업지시서는 싱크로율 계산 때 이미 받아둔 첨부 캐시를 그대로 쓴다 (다시 받지 않음).
-  const body = await fetchNoticeBody(n, { maxLength: 6000 }).catch(() => null);
-  const similar = index.findSimilar(n.title, 3, body ? { body: body.text, keywordText: body.fullText } : {});
-  const result = await judgeFit(
-    {
-      notice: n,
-      matchReason: facts.matchReason,
-      qualificationSummary: facts.qualificationSummary,
-      qualDoc: e.qualDoc ?? null,
-      productClasses: e.classes ?? {},
-      jointBid: e.jointBid ?? null,
-      taskText: body?.text ?? null,
-      similarPast: similar.top.filter((s) => s.score > 0.02).map((s) => ({ name: s.name, year: s.year, score: s.score })),
-    },
-    heldOf(appConfig)
-  );
-  const ai: AiState = result.ok
-    ? { judgment: result.judgment, model: result.model, at: new Date().toISOString() }
-    : { error: result.error };
-  enrichment.set(n.noticeNo, { ...enrichment.get(n.noticeNo), ai });
-  if (result.ok) {
-    aiCache[n.noticeNo] = ai;
-    saveAiCache();
-  }
-  return ai;
-}
-
-function qualificationSummary(m: MatchedNotice): string | null {
-  const q = m.qualification;
-  if (!q) return null;
-  if (q.status === "미충족") {
-    return `업종제한 미보유 (공동수급으로 채울 수 있는지 확인 필요) — 아래 참가 방법 중 하나 필요: ${q.missing.map((g) => g.text ?? g.names.join(" 또는 ")).join(" / 또는 ")}`;
-  }
-  if (q.status !== "충족") return q.status === "제한없음" ? "면허제한정보에 업종제한 없음" : "면허제한정보 조회 실패";
-  return `업종제한 충족 —${uniqueSatisfied(q.satisfiedBy).map((s) => (s.code ? `${s.name}(${s.code})` : s.name)).join(", ")}`;
 }
 
 /** 공고문 요건·공고 분류에 나온 세부품명번호마다 분류 경로를 조회한다 (캐시가 있어 대부분 즉시 끝난다). */
@@ -715,14 +701,12 @@ async function classesFor(doc: QualificationDocResult | null): Promise<Record<st
 }
 
 /**
- * docOnly: 첨부만 읽고 AI 판단은 하지 않는 공고 — 마감된 공고. 왜 놓쳤는지 첨부로 확인하려는 용도라
- * 첨부는 필요하지만, 이미 끝난 입찰에 AI 판단 비용을 쓸 이유는 없다 (화면에서 요청하면 받을 수 있다).
- * 진행 중인 공고를 먼저 읽고 마감된 공고는 그 뒤에 읽는다.
+ * docOnly: 마감된 공고. 왜 놓쳤는지 첨부로 확인하려는 용도라 진행 중인 공고를 먼저 읽고 그 뒤에 읽는다.
  * rescue: 제목의 제외 키워드로 빠진 후보 — 맨 마지막에 첨부만 읽어 본업 근거(findMakeEvidence)를 찾는다.
  */
-function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = [], rescue: NormalizedNotice[] = []): void {
+function startEnrichment(activeMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = [], rescue: NormalizedNotice[] = []): void {
   if (enrichState.running) return;
-  const matches = [...aiMatches, ...docOnly];
+  const matches = [...activeMatches, ...docOnly];
   // 공고문 참가자격은 본공고·사전규격 모두 읽는다 (사전규격은 면허제한 API가 없어 첨부가 유일한 근거).
   // 공동수급은 g2b 상세 API가 본공고에만 있다.
   const isBid = (n: NormalizedNotice) => n.sourceType === "본공고";
@@ -739,19 +723,14 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
       (isBid(n) && e.jointBid === undefined)
     );
   });
-  const aiEnabled = isAiConfigured();
-  const aiTodo = aiEnabled ? aiMatches.filter((m) => !enrichment.get(m.notice.noticeNo)?.ai?.judgment) : [];
-  if (!aiEnabled) {
-    for (const m of matches) enrichment.set(m.notice.noticeNo, { ...enrichment.get(m.notice.noticeNo), ai: { error: "AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다" } });
-  }
   const rescueTodo = rescue.filter((n) => enrichment.get(n.noticeNo)?.rescue === undefined);
-  if (docTodo.length === 0 && aiTodo.length === 0 && rescueTodo.length === 0) return;
-  enrichState = { running: true, done: 0, total: docTodo.length + rescueTodo.length, aiDone: 0, aiTotal: aiTodo.length, aiEnabled };
+  if (docTodo.length === 0 && rescueTodo.length === 0) return;
+  enrichState = { running: true, done: 0, total: docTodo.length + rescueTodo.length };
   const held = heldOf(appConfig);
 
   void (async () => {
     try {
-      // 1) 공고문·공동수급 — AI가 이 결과를 근거로 쓰므로 먼저 채운다.
+      // 1) 공고문·공동수급
       const cookie = await getSessionCookie();
       for (const n of docTodo) {
         const e = enrichment.get(n.noticeNo) ?? {};
@@ -776,7 +755,7 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
       }
 
-      // 1-1) 제목으로 빠진 후보 — 첨부만 읽어 본업 근거를 찾는다 (AI 판단은 하지 않는다)
+      // 2) 제목으로 빠진 후보 — 첨부만 읽어 본업 근거를 찾는다
       for (const n of rescueTodo) {
         const body = await fetchNoticeBody(n).catch(() => null);
         const ev = body ? findMakeEvidence(body.text) : { count: 0, samples: [] };
@@ -786,15 +765,6 @@ function startEnrichment(aiMatches: MatchedNotice[], appConfig: AppConfig, docOn
         await new Promise((r) => setTimeout(r, 300));
       }
 
-      // 2) AI 판단 — 세 건씩 동시에. 한 건에 10~30초라 순차로 하면 목록 하나에 몇 분이 걸린다.
-      const queue = [...aiTodo];
-      const worker = async () => {
-        for (let m = queue.shift(); m; m = queue.shift()) {
-          await runAiJudgment(m.notice, { matchReason: matchReason(m), qualificationSummary: qualificationSummary(m) }, appConfig);
-          enrichState.aiDone += 1;
-        }
-      };
-      await Promise.all([worker(), worker(), worker()]);
     } finally {
       enrichState.running = false;
     }
@@ -843,7 +813,7 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
-    // 마감된 공고는 첨부만 읽고 AI 판단은 하지 않는다 (startEnrichment docOnly)
+    // 마감된 공고는 진행 중인 공고 뒤에 첨부를 읽는다 (startEnrichment docOnly)
     const closedItems = (input.closed ?? [])
       .sort((a, b) => (parseKstDateTime(b.notice.deadline)?.getTime() ?? 0) - (parseKstDateTime(a.notice.deadline)?.getTime() ?? 0))
       .map((m) => decorate(m, appConfig));
@@ -859,8 +829,14 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       budgetAmount: notice.budgetAmount,
       detailUrl: notice.detailUrl,
       excludeKeyword: keyword,
+      // 제목·세부품명에 든 관심 키워드 — 제외 키워드와 함께 있으면 화면 '검토필요' 칸에 모은다 (2026-10-15 요청)
+      interestKeywords: matchKeywords(notice, appConfig.keywords),
     }));
-    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, error: null };
+    const collected = {
+      bid: lastDiagnostics?.notices.filter((n) => n.sourceType === "본공고").length ?? 0,
+      pre: lastDiagnostics?.notices.filter((n) => n.sourceType === "사전규격").length ?? 0,
+    };
+    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, collected, error: null };
   } catch (err) {
     return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], titleExcludedItems: [], error: String(err) };
   }
@@ -1034,10 +1010,15 @@ const server = createServer((req, res) => {
     }
     const base = excludedCandidates(lastDiagnostics);
     const fromDoc = docExcluded(lastDiagnostics) as { excludedAt: string }[];
-    const items = [...fromDoc, ...base.items];
-    const byStage = { ...base.byStage };
-    for (const n of fromDoc) byStage[n.excludedAt] = (byStage[n.excludedAt] ?? 0) + 1;
-    json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items });
+    // 담당자가 목록에 올린 공고는 실제 공고 목록에 있다 — 여기서는 뺀다
+    type ExItem = { noticeNo: string; title: string; excludedAt: string };
+    const baseKept = (base.items as ExItem[]).filter((n) => !promoted[n.noticeNo]);
+    // 카드 오른쪽 싱크로율 — 첨부를 읽은 공고는 그 값, 아니면 제목으로 (공고마다 한 번만 계산)
+    const items = [...(fromDoc as ExItem[]), ...baseKept].map((n) => ({ ...n, maxScore: excludedScore(n.noticeNo, n.title) }));
+    const byStage = Object.fromEntries(Object.keys(base.byStage).map((s) => [s, 0])) as Record<string, number>;
+    for (const n of items) byStage[n.excludedAt] = (byStage[n.excludedAt] ?? 0) + 1;
+    // keywords: 카드의 "관심 키워드 N개 보기"
+    json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items, keywords: lastDiagnostics.context.config.keywords });
     return;
   }
 
@@ -1098,7 +1079,18 @@ const server = createServer((req, res) => {
     }
     readBody(req)
       .then((raw) => {
-        const b = JSON.parse(raw) as { noticeNo?: string; title?: string; by?: string; status?: string; owner?: string; comment?: string };
+        const b = JSON.parse(raw) as {
+          noticeNo?: string;
+          title?: string;
+          by?: string;
+          status?: string;
+          reason?: string;
+          tags?: unknown;
+          owner?: string;
+          comment?: string;
+          undo?: boolean;
+          meta?: Record<string, unknown>;
+        };
         const noticeNo = String(b.noticeNo ?? "").trim();
         const by = String(b.by ?? "").trim().slice(0, 40);
         if (!noticeNo) throw new Error("공고번호가 없습니다");
@@ -1112,27 +1104,45 @@ const server = createServer((req, res) => {
           updatedAt: now,
           comments: [],
         };
-        const log = (text: string) => p.comments.push({ by, text, at: now, system: true });
 
+        // 되돌리기 — 바로 앞 판단·담당으로 (한 단계)
+        if (b.undo) {
+          if (!p.prev) throw new Error("되돌릴 판단이 없습니다");
+          Object.assign(p, p.prev, { prev: null });
+        }
         if (b.status !== undefined) {
           const status = b.status === "" ? null : (b.status as ParticipationStatus);
           if (status !== null && !PARTICIPATION_STATUSES.includes(status)) throw new Error("알 수 없는 상태입니다");
           if (status !== p.status) {
-            log(status ? `상태를 '${status}'(으)로 변경` : "상태를 지움");
+            p.prev = snapshotOf(p);
             p.status = status;
+            p.reason = String(b.reason ?? "").trim().slice(0, 500);
+            p.tags = cleanTags(b.tags);
+            p.decidedBy = status ? by : "";
+            p.decidedAt = status ? now : null;
+            if (b.meta && typeof b.meta === "object" && JSON.stringify(b.meta).length <= 4000) p.meta = b.meta;
           }
-          // 처음 상태를 정한 사람이 담당자가 된다 (따로 지정하지 않았다면)
+          // 처음 상태를 정한 사람이 담당자가 된다 (따로 지정하지 않았다면). 선택을 해제하면 자동으로 정한 담당도 지운다 —
+          // 판단이 없는데 담당 이름만 남아 있으면 누가 맡은 것처럼 보인다 (2026-10-15 요청). 예전 기록(표시 없음)도 자동으로 본다
           if (status && !p.owner) {
             p.owner = by;
-            log(`담당자: ${by}`);
+            p.autoOwner = true;
+          } else if (!status && p.owner && p.autoOwner !== false) {
+            p.owner = "";
+            p.autoOwner = false;
           }
+        } else {
+          // 사유·사유 버튼만 고치기 — 되돌리기 대상이 아니다
+          if (b.reason !== undefined) p.reason = String(b.reason).trim().slice(0, 500);
+          if (b.tags !== undefined) p.tags = cleanTags(b.tags);
         }
         if (b.owner !== undefined) {
           const owner = String(b.owner).trim().slice(0, 40);
           if (owner !== p.owner) {
-            log(owner ? `담당자를 '${owner}'(으)로 지정` : "담당자를 비움");
+            p.prev = snapshotOf(p);
             p.owner = owner;
           }
+          p.autoOwner = false;
         }
         const comment = String(b.comment ?? "").trim().slice(0, 1000);
         if (comment) p.comments.push({ by, text: comment, at: now });
@@ -1149,52 +1159,7 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (url.pathname === "/api/ai-judge" && req.method === "POST") {
-    // 제외된 공고·추적한 공고처럼 자동 판단 대상이 아닌 공고를 한 건씩 AI에게 묻는다.
-    // application/json만 받는다 — 다른 사이트의 폼이 이 서버로 몰래 POST해 API 비용을 쓰지 못하게.
-    if (!(req.headers["content-type"] ?? "").includes("application/json")) {
-      res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "application/json만 받습니다." }));
-      return;
-    }
-    readBody(req)
-      .then(async (raw) => {
-        const noticeNo = String((JSON.parse(raw) as { noticeNo?: string }).noticeNo ?? "").trim();
-        const diag = lastDiagnostics;
-        const n = diag?.notices.find((x) => x.noticeNo === noticeNo);
-        if (!n || !diag) throw new Error("먼저 '실제 공고' 탭에서 공고를 불러오세요.");
-        const cached = enrichment.get(noticeNo)?.ai;
-        if (cached?.judgment) return json(res, { ai: cached });
-        if (!isAiConfigured()) throw new Error("AI 판단 꺼짐 — .env에 ANTHROPIC_API_KEY가 없습니다");
-
-        const appConfig = diag.context.config;
-        const e = enrichment.get(noticeNo) ?? {};
-        if (n.sourceType === "본공고") {
-          if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
-          if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
-          if (e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, await getSessionCookie()).catch(() => null);
-          enrichment.set(noticeNo, e);
-        }
-        const d = diagnoseNotice(n, diag.context);
-        const step = (name: string) => d.steps.find((x) => x.step === name)?.detail ?? null;
-        const failed = d.steps.find((x) => x.step === d.excludedAt);
-        const ai = await runAiJudgment(
-          n,
-          {
-            matchReason: `${step("키워드·품목")}` + (failed ? ` (규칙 필터에서 '${failed.step}' 단계로 제외됨: ${failed.detail})` : ""),
-            qualificationSummary: step("참가자격"),
-          },
-          appConfig
-        );
-        json(res, { ai });
-      })
-      .catch((err: unknown) => {
-        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ error: String(err instanceof Error ? err.message : err) }));
-      });
-    return;
-  }
-
+  // 담당자가 빠진 공고를 목록에 올리기·다시 빼기 ('검토필요'·'첨부로 다시 볼 공고'·'제외된 공고' 탭의 버튼)
   if (url.pathname === "/api/promote" && req.method === "POST") {
     if (!(req.headers["content-type"] ?? "").includes("application/json")) {
       res.writeHead(415, { "content-type": "application/json; charset=utf-8" });
@@ -1203,7 +1168,7 @@ const server = createServer((req, res) => {
     }
     readBody(req)
       .then((raw) => {
-        const b = JSON.parse(raw) as { noticeNo?: string; title?: string; keyword?: string; by?: string; on?: boolean };
+        const b = JSON.parse(raw) as { noticeNo?: string; title?: string; keyword?: string; reason?: string; by?: string; on?: boolean };
         const noticeNo = String(b.noticeNo ?? "").trim();
         const by = String(b.by ?? "").trim().slice(0, 40);
         if (!noticeNo) throw new Error("공고번호가 없습니다");
@@ -1211,10 +1176,9 @@ const server = createServer((req, res) => {
         if (b.on) {
           const keyword = String(b.keyword ?? "").slice(0, 60);
           const title = String(b.title ?? "").slice(0, 300);
-          promoted[noticeNo] = { by, at: new Date().toISOString(), title, keyword };
-          logToParticipation(noticeNo, title, by, `목록에 올림 (제목의 '${keyword}' 때문에 빠졌던 공고 — 첨부에 제작 내용 있음)`);
+          const reason = String(b.reason ?? "").slice(0, 200);
+          promoted[noticeNo] = { by, at: new Date().toISOString(), title, keyword, ...(reason ? { reason } : {}) };
         } else if (promoted[noticeNo]) {
-          logToParticipation(noticeNo, promoted[noticeNo]!.title, by, "목록에서 다시 뺌");
           delete promoted[noticeNo];
         }
         savePromoted();

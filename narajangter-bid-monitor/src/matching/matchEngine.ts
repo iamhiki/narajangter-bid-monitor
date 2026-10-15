@@ -105,6 +105,27 @@ export function evaluateNotice(
   };
 }
 
+/**
+ * 담당자가 화면에서 "실제 공고로 올리기"한 공고 — 조건(제외 키워드·금액·낙찰방법·해외 개최·키워드 유무)을 보지 않고
+ * 매칭 결과로 만든다 (2026-10-15 요청: 수의계약 등 어떤 사유로 빠졌든 올릴 수 있게). 등급·근거는 평소와 같이 계산한다.
+ */
+export function forceMatch(notice: NormalizedNotice, config: AppConfig, mongoliaKeywords: string[] = []): MatchedNotice {
+  const { matchedProductCodes, matchedIndustryCodes } = matchCodes(notice, config.productCodes, config.industryCodes);
+  const matchedKeywords = matchKeywords(notice, config.keywords);
+  const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
+  const overseasVenue = detectOverseasVenue(notice.title, mongoliaKeywords);
+  const codeMatched = matchedProductCodes.length > 0 || matchedIndustryCodes.length > 0;
+  return {
+    notice,
+    matchedProductCodes,
+    matchedIndustryCodes,
+    matchedKeywords,
+    ...(matchedServiceClasses.length > 0 ? { matchedServiceClasses } : {}),
+    confidence: codeMatched && matchedKeywords.length > 0 ? "강력추천" : "참고용",
+    overseasVenueFlag: overseasVenue.isMongolia ? { matchedMongoliaKeyword: overseasVenue.matchedMongoliaKeyword! } : null,
+  };
+}
+
 export function evaluateNotices(
   notices: NormalizedNotice[],
   config: AppConfig,

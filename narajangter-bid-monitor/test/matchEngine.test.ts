@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { matchCodes } from "../src/matching/codeMatcher.js";
 import { matchExcludeKeyword, matchKeywords } from "../src/matching/keywordMatcher.js";
-import { evaluateNotice, evaluateNotices, sortMatches } from "../src/matching/matchEngine.js";
+import { evaluateNotice, evaluateNotices, forceMatch, sortMatches } from "../src/matching/matchEngine.js";
 import type { NormalizedNotice } from "../src/api/types.js";
 import type { AppConfig } from "../src/config/loadJsonConfig.js";
 
@@ -445,5 +445,24 @@ describe("requiresKeyword 품목 — 쓰임새가 넓은 품목은 키워드가 
   it("표시가 없는 품목(안내전광판)은 지금처럼 품목만으로도 수집한다", () => {
     const notice = makeNotice({ title: "강의실 LED 스크린 설치", productClsfcNo: "5512190301" });
     expect(evaluateNotice(notice, displayConfig)?.confidence).toBe("참고용");
+  });
+});
+
+describe("forceMatch — 담당자가 '실제 공고로 올리기'한 공고 (2026-10-15)", () => {
+  const strict: AppConfig = { ...config, allowedBidMethods: ["협상", "규격가격동시", "입찰"], minBudgetAmount: 100_000_000 };
+
+  it("수의계약·금액 미달·제외 키워드로 빠지는 공고도 매칭 결과로 만든다", () => {
+    const notice = makeNotice({ title: "도서관 전시 서가 구입", bidMethod: "소액수의견적-소액수의견적", budgetAmount: 5_000_000 });
+    expect(evaluateNotice(notice, strict)).toBeNull();
+    const m = forceMatch(notice, strict);
+    expect(m.notice).toBe(notice);
+    expect(m.matchedKeywords).toEqual(["도서관", "전시"]);
+    expect(m.confidence).toBe("참고용");
+  });
+
+  it("키워드가 하나도 없어도 만들고, 품목 코드와 키워드가 함께 맞으면 강력추천이다", () => {
+    expect(forceMatch(makeNotice({ title: "청사 청소 용역" }), strict).matchedKeywords).toEqual([]);
+    const strong = forceMatch(makeNotice({ title: "도서관 안내전광판", productClsfcNo: "5512190301" }), strict);
+    expect(strong.confidence).toBe("강력추천");
   });
 });

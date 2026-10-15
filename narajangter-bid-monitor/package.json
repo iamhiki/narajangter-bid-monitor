@@ -29,7 +29,6 @@
     "corpus:decrypt": "tsx scripts/corpusCrypto.ts decrypt"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.129.0",
     "cfb": "^1.2.2",
     "dotenv": "^16.4.5",
     "fast-xml-parser": "^5.10.1",

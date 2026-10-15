@@ -4,7 +4,7 @@ import { fetchBidNotices } from "./api/bidNoticeApi.js";
 import { fetchPreStandardNotices } from "./api/preStandardApi.js";
 import { lookbackWindow } from "./api/dateUtil.js";
 import type { FetchResult, FetchWindow } from "./api/types.js";
-import { evaluateNotices } from "./matching/matchEngine.js";
+import { evaluateNotices, forceMatch } from "./matching/matchEngine.js";
 import type { MatchedNotice } from "./matching/types.js";
 import { loadSimilarityIndex } from "./similarity/loadCorpus.js";
 import { calibrate } from "./similarity/calibrate.js";
@@ -126,13 +126,13 @@ export async function collectReportInput(
   await notify(`공고 ${fetchedCount.toLocaleString("ko-KR")}건 수집 완료 · 조건 매칭 중…`);
 
   const mongoliaKeywords = loadMongoliaKeywords();
-  // 담당자가 "목록에 올리기"한 공고 — 제목의 제외 키워드만 건너뛰고 나머지 조건(키워드·품목·금액·낙찰방법)은 그대로 본다
+  // 담당자가 "실제 공고로 올리기"한 공고 — 마감 말고는 어떤 조건(제외 키워드·금액·낙찰방법·자격·지역 등)으로도 빼지 않는다
+  // (2026-10-15 요청: 수의계약 공고도 올릴 수 있게). 마감이 지난 공고는 아래 excludeExpiredNotices에서 그대로 빠진다.
   const forced = options.forceInclude ?? new Set<string>();
-  const noExclude = { ...appConfig, excludeKeywords: [], softExcludeKeywords: [] };
   const withForced = (matches: MatchedNotice[], notices: NormalizedNotice[]): MatchedNotice[] => {
     if (forced.size === 0) return matches;
     const have = new Set(matches.map((m) => m.notice.noticeNo));
-    const extra = evaluateNotices(notices.filter((n) => forced.has(n.noticeNo) && !have.has(n.noticeNo)), noExclude, mongoliaKeywords);
+    const extra = notices.filter((n) => forced.has(n.noticeNo) && !have.has(n.noticeNo)).map((n) => forceMatch(n, appConfig, mongoliaKeywords));
     return [...matches, ...extra];
   };
   const { open: openBidNotices, expiredCount } = excludeExpiredNotices(
@@ -155,11 +155,17 @@ export async function collectReportInput(
     `매칭 ${bidMatchesBeforeQualificationFilter.length + preStandardMatches.length}건 · 참가자격 확인 중…`
   );
   // 지역제한으로 참가할 수 없는 본공고(예: 경상남도 업체만)는 뺀다 (2026-10-14 요청)
-  const bidMatches = applyRegionFilter(
+  const bidFiltered = applyRegionFilter(
     await applyQualificationFilter(env, appConfig, bidMatchesBeforeQualificationFilter, window, licenseGroupsPromise),
     await regionsPromise,
     headquartersRegion
   );
+  // 담당자가 올린 공고는 자격·지역으로 빠졌어도 되살린다
+  const keptNos = new Set(bidFiltered.map((m) => m.notice.noticeNo));
+  const bidMatches = [
+    ...bidFiltered,
+    ...bidMatchesBeforeQualificationFilter.filter((m) => forced.has(m.notice.noticeNo) && !keptNos.has(m.notice.noticeNo)),
+  ];
 
   logger.info("매칭 결과", {
     본공고: bidMatches.length,
