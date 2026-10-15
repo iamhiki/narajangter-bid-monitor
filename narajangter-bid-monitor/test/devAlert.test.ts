@@ -20,7 +20,7 @@ describe("buildDevAlertText", () => {
 
   it("아침 실행 실패는 예비 실행이 다시 시도한다고 적고, 원문과 실행 기록 링크를 싣는다", () => {
     const text = buildDevAlertText({ ...base, backupRun: false, runUrl: "https://github.com/x/y/actions/runs/1" });
-    expect(text).toContain("매일 새 입찰 공고 알림 실패");
+    expect(text).toContain("매일 입찰 공고 보고 실패");
     expect(text).toContain("예비 실행이 다시 시도합니다");
     expect(text).toContain("https://github.com/x/y/actions/runs/1");
     expect(text).toContain("pipeline.ts:115:11");
@@ -55,5 +55,21 @@ describe("buildDevAlertTelegram", () => {
     expect(text).toContain("주간 보고 실패");
     expect(text).toContain("<pre>&lt;script&gt;");
     expect(text).not.toContain("<script>");
+  });
+});
+
+describe("일부 대화방 발송 실패 알림", () => {
+  it("실패가 아니라 일부 발송 실패로 적고, 무엇을 확인할지 알려 준다", () => {
+    const text = buildDevAlertText({
+      runMode: "daily",
+      errorMessage: "텔레그램 발송 최종 실패 (chat_id=-5330, 3회 시도): Forbidden: bot was kicked from the group chat",
+      occurredAt: new Date("2026-10-16T00:00:00Z"),
+      backupRun: false,
+      partial: true,
+    });
+    expect(text).toContain("매일 입찰 공고 보고 일부 대화방 발송 실패");
+    expect(text).toContain("다른 대화방에는 보냈습니다");
+    expect(text).not.toContain("예비 실행이 다시 시도");
+    expect(text).toContain("bot was kicked");
   });
 });

@@ -125,8 +125,11 @@ async function sendWithRetry(
   );
 }
 
-/** 여러 메시지를 여러 채팅에 순차 발송한다. 한 채팅이 실패해도 나머지 채팅은 계속 시도한다. */
-async function sendMessages(messages: string[], options: TelegramSendOptions): Promise<void> {
+/**
+ * 여러 메시지를 여러 채팅에 순차 발송한다. 한 채팅이 실패해도 나머지 채팅은 계속 시도한다.
+ * 모두 실패하면 예외, 일부만 실패하면 실패 내용을 돌려준다 — 호출부가 개발자에게 알린다 (실행 자체는 성공이라 묻히기 쉽다).
+ */
+async function sendMessages(messages: string[], options: TelegramSendOptions): Promise<string[]> {
   const {
     botToken,
     chatIds,
@@ -159,6 +162,7 @@ async function sendMessages(messages: string[], options: TelegramSendOptions): P
   if (failures.length > 0) {
     logger.warn("일부 텔레그램 수신자에게 발송 실패", { 실패수: failures.length, 전체: chatIds.length });
   }
+  return failures;
 }
 
 /**
@@ -211,10 +215,13 @@ export async function sendTelegramReport(
 
   // 첨부는 본문이 이미 나간 뒤에 시도한다. 파일이 실패해도 요약은 이미 도착해 있어야 한다.
   const attachedTo = options.attachHtml
-    ? await sendDocumentToAll(
-        { filename: buildDocumentFilename(input), content: options.attachHtml, caption: buildDocumentCaption(input) },
-        options
-      )
+    ? options.chatIds.length -
+      (
+        await sendDocumentToAll(
+          { filename: buildDocumentFilename(input), content: options.attachHtml, caption: buildDocumentCaption(input) },
+          options
+        )
+      ).length
     : 0;
 
   logger.info("텔레그램 리포트 발송 완료", {
@@ -224,35 +231,42 @@ export async function sendTelegramReport(
   });
 }
 
-/** 모든 채팅에 첨부를 보낸다. 실패는 경고만 남긴다 (요약 메시지는 이미 나갔다). 보낸 채팅 수를 돌려준다. */
+/** 모든 채팅에 첨부를 보낸다. 실패는 경고만 남긴다 (요약 메시지는 이미 나갔다). 실패 내용을 돌려준다. */
 async function sendDocumentToAll(
   doc: { filename: string; content: string; caption?: string },
   options: TelegramSendOptions
-): Promise<number> {
-  let attachedTo = 0;
+): Promise<string[]> {
+  const failures: string[] = [];
   for (const chatId of options.chatIds) {
     try {
       await sendDocument(chatId, doc, options.botToken, options.timeoutMs ?? 30000);
-      attachedTo += 1;
     } catch (err) {
-      logger.warn("첨부 HTML 발송 실패 (요약 메시지는 이미 발송됨)", {
-        chatId,
-        error: redactSecrets(toErrorMessage(err), [options.botToken]),
-      });
+      const error = redactSecrets(toErrorMessage(err), [options.botToken]);
+      logger.warn("첨부 HTML 발송 실패 (요약 메시지는 이미 발송됨)", { chatId, error });
+      failures.push(error);
     }
   }
-  return attachedTo;
+  return failures;
 }
 
-/** 매일·주간 정기 보고 — 이미 만든 메시지를 보내고, 첨부 리포트가 있으면 뒤이어 보낸다. */
+/**
+ * 매일·주간 정기 보고 — 이미 만든 메시지를 보내고, 첨부 리포트가 있으면 뒤이어 보낸다.
+ * 모든 수신자에게 실패하면 예외. 일부 수신자만 실패했으면(본문·첨부) 그 내용을 돌려준다.
+ */
 export async function sendPeriodReport(
   messages: string[],
   attachment: { filename: string; content: string; caption?: string } | null,
   options: TelegramSendOptions
-): Promise<void> {
-  await sendMessages(messages, options);
-  const attachedTo = attachment ? await sendDocumentToAll(attachment, options) : 0;
-  logger.info("텔레그램 정기 보고 발송 완료", { chatIds: options.chatIds, 메시지수: messages.length, 첨부발송: attachedTo });
+): Promise<string[]> {
+  const failures = await sendMessages(messages, options);
+  const attachFailures = attachment ? await sendDocumentToAll(attachment, options) : [];
+  logger.info("텔레그램 정기 보고 발송 완료", {
+    chatIds: options.chatIds,
+    메시지수: messages.length,
+    본문실패: failures.length,
+    첨부실패: attachFailures.length,
+  });
+  return [...failures, ...attachFailures.map((e) => `[첨부] ${e}`)];
 }
 
 /** 이미 만든 메시지들을 그대로 보낸다 (매일 마감 임박 보고처럼 보고서 모양이 다른 경우) */

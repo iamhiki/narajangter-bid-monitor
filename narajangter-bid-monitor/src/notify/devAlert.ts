@@ -37,10 +37,15 @@ export interface DevAlertInput {
   backupRun: boolean;
   /** GitHub Actions 실행 기록 주소 (로컬 실행이면 없음) */
   runUrl?: string;
+  /**
+   * 보고는 나갔는데 일부 대화방에만 못 간 경우. 실행은 성공으로 끝나 GitHub 화면에서는 안 보이므로 여기서 알린다.
+   * 다시 시도하지 않는다 — 받은 대화방에 같은 보고가 두 번 가게 된다.
+   */
+  partial?: boolean;
 }
 
 const RUN_NAME: Record<DevAlertInput["runMode"], string> = {
-  daily: "매일 새 입찰 공고 알림",
+  daily: "매일 입찰 공고 보고",
   weekly: "주간 보고",
   hourly: "매시간 새 공고 알림",
 };
@@ -50,14 +55,15 @@ const MAX_CHARS = 1900;
 
 /** 알림 머리(무엇이·왜·그래서)와 오류 원문. 받는 곳마다 감싸는 모양만 다르다. */
 function buildDevAlertParts(input: DevAlertInput): { head: string; error: string } {
-  const consequence =
-    input.runMode === "hourly"
+  const consequence = input.partial
+    ? "다른 대화방에는 보냈습니다. 실패한 대화방에서 봇이 내보내졌거나 글쓰기 권한이 없는지 확인하세요."
+    : input.runMode === "hourly"
       ? "다음 정시 실행이 다시 시도합니다."
       : input.backupRun
         ? "예비 실행도 실패 — 이번 보고가 빠졌습니다. 필요하면 workflow_dispatch(force=true)로 다시 보내세요."
         : "아침 실행 실패 — GitHub 예비 실행이 다시 시도합니다.";
   const head = [
-    `[나라장터 모니터링] ${RUN_NAME[input.runMode]} 실패 · ${describeFailure(input.errorMessage)}`,
+    `[나라장터 모니터링] ${RUN_NAME[input.runMode]} ${input.partial ? "일부 대화방 발송 실패" : `실패 · ${describeFailure(input.errorMessage)}`}`,
     input.occurredAt.toLocaleString("ko-KR"),
     consequence,
     ...(input.runUrl ? [input.runUrl] : []),

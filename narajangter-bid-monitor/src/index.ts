@@ -171,10 +171,11 @@ async function sendWeeklyTelegram(env: Env, input: ReportInput, options: PeriodR
     return false;
   }
   try {
-    await sendPeriodReport(buildPeriodReportMessages(input, options), periodAttachment(input, options), {
+    const failures = await sendPeriodReport(buildPeriodReportMessages(input, options), periodAttachment(input, options), {
       botToken: env.telegramBotToken,
       chatIds: env.telegramChatIds,
     });
+    await alertPartialFailure(env, failures);
     return false;
   } catch (err) {
     logger.error("주간 텔레그램 보고 실패 - 이메일 발송은 그대로 진행합니다.", {
@@ -266,10 +267,11 @@ async function runDaily(env: Env, collected: CollectedInput, now: Date): Promise
     return fetchFailed ? 2 : 0;
   }
   // 보내다 실패하면 예외로 빠져 발송 기록이 남지 않는다 — 예비 실행이 다시 보낸다.
-  await sendPeriodReport(messages, periodAttachment(input, options), {
+  const failures = await sendPeriodReport(messages, periodAttachment(input, options), {
     botToken: env.telegramBotToken,
     chatIds: env.telegramChatIds,
   });
+  await alertPartialFailure(env, failures);
   return fetchFailed ? 2 : 0;
 }
 
@@ -304,6 +306,44 @@ async function appendToSheet(env: Env, matches: MatchedNotice[], now: Date): Pro
  * 2026-10-12 담당자 요청: 실패는 4~5번에 한 번꼴(대부분 GitHub→나라장터 접속 끊김)이고 보고가 빠져도
  * 사내 화면에서 공고를 볼 수 있어, 담당자가 실패 알림을 받을 이유가 없다. 개발자는 따로 받는다 (src/notify/devAlert.ts).
  */
+function devAlertTargets(env: Env): DevAlertTargets {
+  return {
+    webhookUrl: env.devAlertWebhookUrl,
+    telegram:
+      env.devAlertTelegramChatId && env.telegramBotToken
+        ? { botToken: env.telegramBotToken, chatId: env.devAlertTelegramChatId }
+        : undefined,
+  };
+}
+
+function githubRunUrl(): string | undefined {
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  return GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
+    ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
+    : undefined;
+}
+
+/**
+ * 보고는 나갔는데 일부 대화방(예: 담당자 그룹방)에만 못 갔을 때 개발자에게 알린다.
+ * 모두 실패하면 예외로 빠져 handleFailure가 알리지만, 일부 실패는 실행이 성공으로 끝나 묻힌다.
+ */
+async function alertPartialFailure(env: Env, failures: string[]): Promise<void> {
+  if (failures.length === 0) return;
+  const targets = devAlertTargets(env);
+  if (!hasDevAlertTarget(targets)) {
+    logger.info("DEV_ALERT_TELEGRAM_CHAT_ID·DEV_ALERT_WEBHOOK_URL이 없어 일부 발송 실패 알림을 건너뜁니다.");
+    return;
+  }
+  await sendDevAlert(targets, {
+    runMode: env.runMode,
+    errorMessage: failures.join("\n"),
+    occurredAt: new Date(),
+    backupRun: env.backupRun,
+    runUrl: githubRunUrl(),
+    partial: true,
+  });
+}
+
 async function handleFailure(err: unknown, env: Env | undefined): Promise<number> {
   const secrets = env
     ? [env.naraBidServiceKey, env.naraPrestdServiceKey, env.smtpPass, env.telegramBotToken, env.googleServiceAccountJson]
@@ -312,27 +352,17 @@ async function handleFailure(err: unknown, env: Env | undefined): Promise<number
   logger.error("실행 실패", { error: message });
   if (!env || env.dryRun) return 1;
 
-  const targets: DevAlertTargets = {
-    webhookUrl: env.devAlertWebhookUrl,
-    telegram:
-      env.devAlertTelegramChatId && env.telegramBotToken
-        ? { botToken: env.telegramBotToken, chatId: env.devAlertTelegramChatId }
-        : undefined,
-  };
+  const targets = devAlertTargets(env);
   if (!hasDevAlertTarget(targets)) {
     logger.info("DEV_ALERT_TELEGRAM_CHAT_ID·DEV_ALERT_WEBHOOK_URL이 없어 개발자 실패 알림을 건너뜁니다.");
     return 1;
   }
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
   await sendDevAlert(targets, {
     runMode: env.runMode,
     errorMessage: message,
     occurredAt: new Date(),
     backupRun: env.backupRun,
-    runUrl:
-      GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
-        ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
-        : undefined,
+    runUrl: githubRunUrl(),
   });
   return 1;
 }
