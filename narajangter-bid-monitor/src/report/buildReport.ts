@@ -211,7 +211,9 @@ function renderSectionText(sectionTitle: string, source: ReportSource): string {
   return lines.join("\n\n");
 }
 
-export function buildReport(input: ReportInput): ReportOutput {
+/** title: 리포트 제목 (기본은 이메일 주간 리포트 제목). 텔레그램 정기 보고 첨부는 보고 이름을 넣는다. */
+export function buildReport(input: ReportInput, options: { title?: string } = {}): ReportOutput {
+  const title = options.title ?? "나라장터 입찰 모니터링 주간 리포트";
   const totalMatchCount = input.bid.matches.length + input.preStandard.matches.length;
   const hasFailures = input.bid.failures.length > 0 || input.preStandard.failures.length > 0;
 
@@ -222,7 +224,7 @@ export function buildReport(input: ReportInput): ReportOutput {
 
   const html = `
   <div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:680px;margin:0 auto;color:#111827;">
-    <h1 style="font-size:20px;margin-bottom:4px;">나라장터 입찰 모니터링 주간 리포트</h1>
+    <h1 style="font-size:20px;margin-bottom:4px;">${escapeHtml(title)}</h1>
     <div style="font-size:13px;color:#6b7280;margin-bottom:16px;">조회 기간: ${periodLabel} · 생성 시각: ${input.generatedAt.toLocaleString("ko-KR")}</div>
     ${renderSectionHtml("본공고", input.bid)}
     ${renderSectionHtml("사전규격", input.preStandard)}
@@ -232,7 +234,7 @@ export function buildReport(input: ReportInput): ReportOutput {
   </div>`;
 
   const text = [
-    `나라장터 입찰 모니터링 주간 리포트`,
+    title,
     `조회 기간: ${periodLabel} / 생성 시각: ${input.generatedAt.toLocaleString("ko-KR")}`,
     "",
     renderSectionText("본공고", input.bid),

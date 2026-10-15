@@ -24,3 +24,46 @@ export function isPostedWithin(postedAt: string | null, now: Date, hours = NEW_N
   const at = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, (m[4] === undefined ? 0 : +m[4]) - 9, m[5] === undefined ? 0 : +m[5]);
   return now.getTime() - at <= hours * 60 * 60 * 1000;
 }
+
+/**
+ * 정기 보고가 다루는 게시일 범위 (한국 날짜, 양끝 포함, "YYYY-MM-DD").
+ *
+ * 2026-10-15 담당자 정리: 매일 09:00 보고는 "전날 게시분", 매주 월 09:10 보고는 "지난 7일 게시분".
+ * 날짜로 끊으므로 하루 단위로 겹치거나 비는 날이 없다 — 이미 알린 공고 기록(notified.json)이 필요 없다.
+ */
+export interface PostedPeriod {
+  from: string;
+  to: string;
+}
+
+const KST_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** now 기준 한국 날짜에서 offsetDays만큼 옮긴 날짜 ("YYYY-MM-DD"). 실행 환경 시간대와 무관하다. */
+export function kstDateKey(now: Date, offsetDays = 0): string {
+  return new Date(now.getTime() + KST_MS + offsetDays * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** 오늘(한국 날짜) 직전 days일. days=1이면 전날, days=7이면 지난 7일. */
+export function previousDays(now: Date, days: number): PostedPeriod {
+  return { from: kstDateKey(now, -days), to: kstDateKey(now, -1) };
+}
+
+/**
+ * 게시일이 기간 안인지. 나라장터 게시일시는 한국 시각 "2026-10-14 10:00:00" 형태다.
+ * 형식을 모르거나 비어 있으면 true — 모르면 보내는 쪽이 놓치는 쪽보다 낫다.
+ */
+export function isPostedIn(postedAt: string | null, period: PostedPeriod): boolean {
+  const m = /^(\d{4})[-./]?(\d{2})[-./]?(\d{2})/.exec(String(postedAt ?? "").trim());
+  if (!m) return true;
+  const key = `${m[1]}-${m[2]}-${m[3]}`;
+  return key >= period.from && key <= period.to;
+}
+
+/** 첨부 리포트의 조회 기간 표시용 — 기간 첫날 00:00 ~ 마지막 날 23:59 (한국 시각) */
+export function periodWindow(period: PostedPeriod): { begin: Date; end: Date } {
+  return {
+    begin: new Date(Date.parse(`${period.from}T00:00:00+09:00`)),
+    end: new Date(Date.parse(`${period.to}T23:59:59+09:00`)),
+  };
+}

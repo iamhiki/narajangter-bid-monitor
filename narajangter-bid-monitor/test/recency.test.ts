@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPostedWithin } from "../src/state/recency.js";
+import { isPostedIn, isPostedWithin, kstDateKey, previousDays } from "../src/state/recency.js";
 import { buildTelegramMessages } from "../src/notify/telegramMessage.js";
 import type { ReportInput } from "../src/report/buildReport.js";
 
@@ -38,5 +38,28 @@ describe("새 공고 알림 머리말", () => {
   it("전체 개수를 안 주면 적지 않는다", () => {
     const [head] = buildTelegramMessages(input, { kind: "new" });
     expect(head).not.toContain("최근 7일 전체");
+  });
+});
+
+describe("정기 보고 게시일 범위 (한국 날짜)", () => {
+  // 2026-10-15(목) 09:00 한국 = 00:00 UTC
+  const now = new Date("2026-10-15T00:00:00Z");
+
+  it("매일 보고는 전날, 주간 보고는 지난 7일", () => {
+    expect(previousDays(now, 1)).toEqual({ from: "2026-10-14", to: "2026-10-14" });
+    expect(previousDays(now, 7)).toEqual({ from: "2026-10-08", to: "2026-10-14" });
+  });
+
+  it("UTC로는 전날이어도 한국 날짜로 계산한다", () => {
+    expect(kstDateKey(new Date("2026-10-14T15:30:00Z"))).toBe("2026-10-15");
+  });
+
+  it("게시일이 범위 안인지 날짜로 본다 (양끝 포함)", () => {
+    const period = { from: "2026-10-08", to: "2026-10-14" };
+    expect(isPostedIn("2026-10-08 00:01:00", period)).toBe(true);
+    expect(isPostedIn("2026-10-14 23:59:00", period)).toBe(true);
+    expect(isPostedIn("2026-10-15 00:00:00", period)).toBe(false);
+    expect(isPostedIn("2026-10-07 23:59:00", period)).toBe(false);
+    expect(isPostedIn(null, period)).toBe(true);
   });
 });

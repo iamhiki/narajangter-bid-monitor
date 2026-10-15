@@ -20,8 +20,13 @@ import { loadAppConfig } from "../src/config/loadJsonConfig.js";
 import { collectReportInput } from "../src/pipeline.js";
 import { buildReport, type ReportInput } from "../src/report/buildReport.js";
 import { formatAge, loadReportInput, saveReportInput } from "../src/cache/reportCache.js";
-import { buildTelegramMessages } from "../src/notify/telegramMessage.js";
-import { sendTelegramReport } from "../src/notify/telegram.js";
+import {
+  buildPeriodReportFilename,
+  buildPeriodReportMessages,
+  type PeriodReportOptions,
+} from "../src/notify/telegramMessage.js";
+import { sendPeriodReport } from "../src/notify/telegram.js";
+import { kstDateKey } from "../src/state/recency.js";
 import { toErrorMessage } from "../src/errors.js";
 import { redactSecrets } from "../src/redact.js";
 import { logger } from "../src/logger.js";
@@ -151,15 +156,27 @@ function collectAndCache(
   return task;
 }
 
+/** 정기 보고와 같은 모양으로 보낸다 — 모든 종류, 조회 기간 게시분 (2026-10-15 담당자 요청으로 통일) */
 async function deliverReport(chatId: string, input: ReportInput, note: string): Promise<void> {
-  const report = buildReport(input);
+  const options: PeriodReportOptions = {
+    kind: "manual",
+    period: { from: kstDateKey(input.window.begin), to: kstDateKey(input.window.end) },
+    closedCount: 0,
+  };
+  const count = input.bid.matches.length + input.preStandard.matches.length;
   await reply(chatId, note);
   // 요청한 대화로만 보낸다 — 테스트하려고 친 명령이 팀 전체에 울리면 안 된다.
-  await sendTelegramReport(input, {
-    botToken,
-    chatIds: [chatId],
-    attachHtml: report.totalMatchCount > 0 ? report.html : undefined,
-  });
+  await sendPeriodReport(
+    buildPeriodReportMessages(input, options),
+    count > 0
+      ? {
+          filename: buildPeriodReportFilename(options),
+          content: buildReport(input, { title: "전체 공고 상세 리포트" }).html,
+          caption: `📄 상세 리포트 (${count}건)`,
+        }
+      : null,
+    { botToken, chatIds: [chatId] }
+  );
 }
 
 /**

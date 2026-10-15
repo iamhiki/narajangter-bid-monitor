@@ -1,7 +1,7 @@
 import type { ReportInput, ReportSource } from "../report/buildReport.js";
 import type { MatchedNotice } from "../matching/types.js";
 import { sortMatches } from "../matching/matchEngine.js";
-import { daysUntilDeadline } from "../matching/deadline.js";
+import { daysUntilDeadline, parseKstDateTime } from "../matching/deadline.js";
 import { formatBudget, formatDateForSubject, formatDisplayValue } from "../report/format.js";
 
 /**
@@ -382,6 +382,136 @@ export function buildClosingSoonMessages(
     ...items,
     "<i>※ 실제 참가 자격·요건은 원문 공고를 반드시 확인하세요.</i>",
   ]);
+}
+
+/**
+ * 매일·주간 정기 보고 (2026-10-15 담당자 정리 — 두 보고를 한 모양으로).
+ *
+ *   매일 09:00   입찰 공고 · 전날 게시분
+ *   매주 월 09:10 협상·규격가격·사전규격 · 지난 7일 게시분
+ *
+ * 공고마다 두 줄 — 공고명(링크) / 금액 · D-N · 자격 충족·미달. 마감 10일 이내는 빨간 원,
+ * 자세한 내용은 첨부 HTML 리포트로 본다. 맞는 새 공고가 없어도 "새 공고 없음"을 보낸다 — 안 오면 고장인지 모른다.
+ * 검토필요 공고(제외 키워드에 걸렸지만 관심 키워드도 있는 공고)는 목록에 들지 않아 여기 오지 않는다 — 웹 화면에서만 본다.
+ * 봇 수동 조회(/report)도 같은 모양으로 보낸다 (kind "manual" — 모든 종류, 요청한 기간).
+ */
+export interface PeriodReportOptions {
+  kind: "daily" | "weekly" | "manual";
+  /** 게시일 범위 (한국 날짜 "YYYY-MM-DD", 양끝 포함) */
+  period: { from: string; to: string };
+  /** 같은 기간·같은 종류인데 마감이 이미 지나 뺀 공고 수 */
+  closedCount: number;
+}
+
+/** 마감이 이만큼 안으로 들어오면 빨간 원을 붙인다 */
+export const URGENT_DEADLINE_DAYS = 10;
+
+const PERIOD_REPORT_TITLE: Record<PeriodReportOptions["kind"], string> = {
+  daily: "입찰 공고 보고",
+  weekly: "협상·규격가격·사전규격 공고 보고",
+  manual: "전체 공고 조회",
+};
+
+/** "2026-10-14" → "10/14" */
+function monthDay(key: string): string {
+  const [, mo, d] = key.split("-");
+  return `${Number(mo)}/${Number(d)}`;
+}
+
+/** 금액을 억·만 단위로 짧게 — 3.6억, 8,500만 */
+export function shortBudget(amount: number | null): string {
+  if (amount === null || !Number.isFinite(amount) || amount <= 0) return "금액 미상";
+  if (amount >= 100_000_000) return `${(amount / 100_000_000).toFixed(1)}억`;
+  return `${Math.round(amount / 10_000).toLocaleString("ko-KR")}만`;
+}
+
+/** 공고 앞머리 꼬리표 — 낙찰방법 분류. 사전규격은 구역 제목으로 이미 구분돼 붙이지 않는다. */
+function methodTag(m: MatchedNotice): string {
+  if (m.notice.sourceType === "사전규격") return "";
+  const s = (m.notice.bidMethod ?? "").replace(/[\s·ㆍ.,]/g, "");
+  if (!s) return "";
+  if (s.includes("협상에의한")) return "[협상] ";
+  if (s.includes("규격가격동시")) return "[규격가격] ";
+  return "[입찰] ";
+}
+
+/** 공동수급 원문 "(없음)공동수급불허" · "(전자)분담이행" → "공동수급 불허" · "공동수급 분담이행" */
+function jointBidShort(status: string | undefined): string | null {
+  if (!status) return null;
+  const s = status.replace(/^\([^)]*\)/, "").replace(/\s+/g, "");
+  if (s.includes("불허")) return "공동수급 불허";
+  return `공동수급 ${s.replace(/^공동수급/, "") || "확인 필요"}`;
+}
+
+/** 자격 충족 · 미달(공동수급 여부) · 미확인 */
+export function qualificationShort(m: MatchedNotice): string {
+  const status = m.qualification?.status;
+  if (status === "충족" || status === "제한없음") return "자격 충족";
+  if (status === "미충족") {
+    const joint = jointBidShort(m.jointBidStatus);
+    return joint ? `자격 미달(${joint})` : "자격 미달";
+  }
+  return "자격 미확인";
+}
+
+function ddayLabel(m: MatchedNotice, now: Date): string {
+  const left = daysUntilDeadline(m.notice.deadline, now);
+  if (left === null) return "마감 미상";
+  const label = `<b>D-${Math.max(left, 0)}</b>`;
+  return left <= URGENT_DEADLINE_DAYS ? `🔴 ${label}` : label;
+}
+
+function renderPeriodItem(m: MatchedNotice, index: number, now: Date): string {
+  return [
+    `${index}. ${escapeTelegramHtml(methodTag(m))}${titleLink(m)}`,
+    `    ${escapeTelegramHtml(shortBudget(m.notice.budgetAmount))} · ${ddayLabel(m, now)} · ${escapeTelegramHtml(qualificationShort(m))}`,
+  ].join("\n");
+}
+
+/** 마감 빠른 순. 마감을 모르는 공고는 맨 뒤 */
+function byDeadline(a: MatchedNotice, b: MatchedNotice): number {
+  const at = (m: MatchedNotice) => parseKstDateTime(m.notice.deadline)?.getTime() ?? Number.POSITIVE_INFINITY;
+  return at(a) - at(b);
+}
+
+export function buildPeriodReportMessages(input: ReportInput, options: PeriodReportOptions): string[] {
+  const { kind, period, closedCount } = options;
+  const bids = [...input.bid.matches].sort(byDeadline);
+  const pres = [...input.preStandard.matches].sort(byDeadline);
+  const total = bids.length + pres.length;
+  const range = period.from === period.to ? monthDay(period.from) : `${monthDay(period.from)}~${monthDay(period.to)}`;
+
+  const head = [`<b>지일 입찰 알림</b>`, `<b>${PERIOD_REPORT_TITLE[kind]} (${range} 게시분)</b>`];
+  if (total === 0) {
+    head.push("새 공고 없음");
+  } else {
+    const parts = [`후보 <b>${total}건</b>`];
+    if (kind !== "daily") parts.push(`(본공고 ${bids.length} · 사전규격 ${pres.length})`);
+    if (closedCount > 0) parts.push(`(마감 지난 ${closedCount}건 제외)`);
+    head.push(parts.join(" "));
+  }
+  if (collectFailures(input).length > 0) {
+    head.push("", "⚠️ 나라장터 조회가 일부 실패해 빠진 공고가 있을 수 있습니다.");
+  }
+
+  const blocks = [head.join("\n")];
+  const section = (title: string, matches: MatchedNotice[]): void => {
+    if (matches.length === 0) return;
+    if (kind !== "daily") blocks.push(`── ${title} ${matches.length}건 ──`);
+    blocks.push(...matches.map((m, i) => renderPeriodItem(m, i + 1, input.generatedAt)));
+  };
+  section("본공고", bids);
+  section("사전규격", pres);
+  if (total > 0) blocks.push("<i>상세 내용은 첨부 HTML 리포트에서 확인하세요.</i>");
+
+  return packIntoMessages(blocks);
+}
+
+/** 정기 보고 첨부 파일명 — 날짜가 들어가야 대화방에 여러 개 쌓였을 때 구분된다. */
+export function buildPeriodReportFilename(options: PeriodReportOptions): string {
+  const label = { daily: "입찰공고", weekly: "주간공고", manual: "공고조회" }[options.kind];
+  const range = options.period.from === options.period.to ? options.period.from : `${options.period.from}_${options.period.to}`;
+  return `${label}_${range.replace(/-/g, "")}.html`;
 }
 
 /** 첨부 HTML에 붙일 한 줄 설명 */

@@ -4,6 +4,8 @@ import {
   buildClosingSoonMessages,
   buildDocumentCaption,
   buildDocumentFilename,
+  buildPeriodReportFilename,
+  buildPeriodReportMessages,
   buildTelegramMessages,
   escapeTelegramHtml,
   missingQualificationLine,
@@ -332,5 +334,55 @@ describe("missingQualificationLine", () => {
     expect(
       missingQualificationLine(makeMatch({ qualification: { status: "충족", totalGroups: 1, satisfiedBy: [], missing: [] } }))
     ).toBeNull();
+  });
+});
+
+describe("buildPeriodReportMessages (매일·주간 정기 보고)", () => {
+  // 2026-09-17 09:00 한국 시각 기준. makeNotice 마감은 2026-10-01 → D-14
+  const daily = { kind: "daily" as const, period: { from: "2026-09-16", to: "2026-09-16" }, closedCount: 0 };
+  const weekly = { kind: "weekly" as const, period: { from: "2026-09-08", to: "2026-09-14" }, closedCount: 2 };
+
+  it("머리말에 보고 이름과 게시일 범위를 적는다", () => {
+    expect(buildPeriodReportMessages(makeInput(), daily)[0]).toContain("입찰 공고 보고 (9/16 게시분)");
+    const head = buildPeriodReportMessages(makeInput(), weekly)[0]!;
+    expect(head).toContain("협상·규격가격·사전규격 공고 보고 (9/8~9/14 게시분)");
+    expect(head).toContain("후보 <b>1건</b> (본공고 1 · 사전규격 0) (마감 지난 2건 제외)");
+  });
+
+  it("공고마다 두 줄 — 공고명 링크 / 금액 · D-N · 자격", () => {
+    const joined = buildPeriodReportMessages(makeInput(), daily).join("\n");
+    expect(joined).toContain('1. [협상] <a href="https://www.g2b.go.kr/detail?no=1&amp;type=a">');
+    expect(joined).toContain("3.5억 · <b>D-14</b> · 자격 미확인");
+    expect(joined).toContain("첨부 HTML 리포트");
+  });
+
+  it("마감 10일 이내는 빨간 원, 자격 미달이면 공동수급 여부를 붙인다", () => {
+    const m = makeMatch({
+      notice: makeNotice({ deadline: "2026-09-20 10:00:00", bidMethod: "적격심사", budgetAmount: 85_000_000 }),
+      qualification: { status: "미충족", totalGroups: 1, satisfiedBy: [], missing: [] },
+      jointBidStatus: "(없음)공동수급불허",
+    });
+    const joined = buildPeriodReportMessages(makeInput({ bid: { matches: [m], failures: [] } }), daily).join("\n");
+    expect(joined).toContain("[입찰]");
+    expect(joined).toContain("8,500만 · 🔴 <b>D-3</b> · 자격 미달(공동수급 불허)");
+  });
+
+  it("새 공고가 없으면 '새 공고 없음'만 보낸다", () => {
+    const messages = buildPeriodReportMessages(makeInput({ bid: { matches: [], failures: [] } }), daily);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("새 공고 없음");
+    expect(messages[0]).not.toContain("첨부");
+  });
+
+  it("주간 보고는 본공고·사전규격 구역을 나눈다", () => {
+    const pre = makeMatch({ notice: makeNotice({ sourceType: "사전규격", bidMethod: null, noticeNo: "P1" }) });
+    const joined = buildPeriodReportMessages(makeInput({ preStandard: { matches: [pre], failures: [] } }), weekly).join("\n");
+    expect(joined).toContain("── 본공고 1건 ──");
+    expect(joined).toContain("── 사전규격 1건 ──");
+  });
+
+  it("첨부 파일명에 게시일 범위가 들어간다", () => {
+    expect(buildPeriodReportFilename(daily)).toBe("입찰공고_20260916.html");
+    expect(buildPeriodReportFilename(weekly)).toBe("주간공고_20260908_20260914.html");
   });
 });

@@ -167,6 +167,13 @@ async function sendMessages(messages: string[], options: TelegramSendOptions): P
  * 텍스트 메시지는 4096자 제한 때문에 요약일 수밖에 없어서, 전체 내용은 파일로 보낸다.
  * 봇의 파일 업로드 상한은 50MB라 우리 리포트(수십 KB)는 여유가 많다.
  */
+function asHtmlDocument(content: string): string {
+  // 리포트 HTML은 이메일 본문용 조각이라 문자셋 선언이 없다. 파일로 열면 브라우저가 한글을 깨뜨리므로 문서로 감싼다.
+  if (/^s*<!doctype/i.test(content)) return content;
+  return `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${content}</body></html>`;
+}
+
 async function sendDocument(
   chatId: string,
   doc: { filename: string; content: string; caption?: string },
@@ -175,7 +182,7 @@ async function sendDocument(
 ): Promise<void> {
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("document", new Blob([doc.content], { type: "text/html" }), doc.filename);
+  form.append("document", new Blob([asHtmlDocument(doc.content)], { type: "text/html" }), doc.filename);
   if (doc.caption) {
     form.append("caption", doc.caption);
     form.append("parse_mode", "HTML");
@@ -203,33 +210,49 @@ export async function sendTelegramReport(
   await sendMessages(messages, options);
 
   // 첨부는 본문이 이미 나간 뒤에 시도한다. 파일이 실패해도 요약은 이미 도착해 있어야 한다.
-  let attachedTo = 0;
-  if (options.attachHtml) {
-    const filename = buildDocumentFilename(input);
-    const caption = buildDocumentCaption(input);
-    for (const chatId of options.chatIds) {
-      try {
-        await sendDocument(
-          chatId,
-          { filename, content: options.attachHtml, caption },
-          options.botToken,
-          options.timeoutMs ?? 30000
-        );
-        attachedTo += 1;
-      } catch (err) {
-        logger.warn("첨부 HTML 발송 실패 (요약 메시지는 이미 발송됨)", {
-          chatId,
-          error: redactSecrets(toErrorMessage(err), [options.botToken]),
-        });
-      }
-    }
-  }
+  const attachedTo = options.attachHtml
+    ? await sendDocumentToAll(
+        { filename: buildDocumentFilename(input), content: options.attachHtml, caption: buildDocumentCaption(input) },
+        options
+      )
+    : 0;
 
   logger.info("텔레그램 리포트 발송 완료", {
     chatIds: options.chatIds,
     메시지수: messages.length,
     첨부발송: attachedTo,
   });
+}
+
+/** 모든 채팅에 첨부를 보낸다. 실패는 경고만 남긴다 (요약 메시지는 이미 나갔다). 보낸 채팅 수를 돌려준다. */
+async function sendDocumentToAll(
+  doc: { filename: string; content: string; caption?: string },
+  options: TelegramSendOptions
+): Promise<number> {
+  let attachedTo = 0;
+  for (const chatId of options.chatIds) {
+    try {
+      await sendDocument(chatId, doc, options.botToken, options.timeoutMs ?? 30000);
+      attachedTo += 1;
+    } catch (err) {
+      logger.warn("첨부 HTML 발송 실패 (요약 메시지는 이미 발송됨)", {
+        chatId,
+        error: redactSecrets(toErrorMessage(err), [options.botToken]),
+      });
+    }
+  }
+  return attachedTo;
+}
+
+/** 매일·주간 정기 보고 — 이미 만든 메시지를 보내고, 첨부 리포트가 있으면 뒤이어 보낸다. */
+export async function sendPeriodReport(
+  messages: string[],
+  attachment: { filename: string; content: string; caption?: string } | null,
+  options: TelegramSendOptions
+): Promise<void> {
+  await sendMessages(messages, options);
+  const attachedTo = attachment ? await sendDocumentToAll(attachment, options) : 0;
+  logger.info("텔레그램 정기 보고 발송 완료", { chatIds: options.chatIds, 메시지수: messages.length, 첨부발송: attachedTo });
 }
 
 /** 이미 만든 메시지들을 그대로 보낸다 (매일 마감 임박 보고처럼 보고서 모양이 다른 경우) */
