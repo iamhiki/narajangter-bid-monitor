@@ -168,6 +168,10 @@ interface NoticeCache {
   closedItems: unknown[];
   /** 제목의 제외 키워드로만 빠진 후보 — 첨부를 읽어 본업 근거가 나온 것만 화면에 보인다 (rescue) */
   titleExcludedItems: unknown[];
+  /** 보유 세부품명과 일치하지만 목록에 없던 공고 — 화면 '보유 품목 공고' 칸 */
+  heldItems?: unknown[];
+  /** 보유 세부품명 목록 (held-qualifications.json — 읽기만) */
+  heldProducts?: { code: string; name: string }[];
   /** 이번 조회에서 나라장터로부터 받은 공고 수 (걸러내기 전) — 화면 조회 정보 줄 */
   collected?: { bid: number; pre: number };
   error: string | null;
@@ -364,6 +368,9 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     budgetAmount: n.budgetAmount,
     postedAt: n.postedAt,
     detailUrl: n.detailUrl,
+    /** 공고에 분류된 세부품명 — 화면의 '세부품명' 드롭다운 (보유 품목별 분류) */
+    productCode: n.productClsfcNo?.trim() || null,
+    productName: n.productClsfcName ?? null,
     bidMethod: n.bidMethod,
     bidMethodCategory: classifyBidMethod(n.bidMethod),
     /** 재공고 — 나라장터 공고종류(ntceKindNm)나 제목에 '재공고'가 있으면 카드에 배지 */
@@ -467,7 +474,17 @@ function docQualBlocked(qualificationStatus: string | null, doc: QualificationDo
   if (!doc || doc.sectionFound === false) return null;
   const keep = keepQualifications();
   const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered && !isKeptQualification(r, keep));
-  return missing.length > 0 ? missing.map((r) => r.name ?? r.docName ?? r.code ?? "업종") : null;
+  if (missing.length === 0) return null;
+  // 요구 업종 중 보유한 것이 학술.연구용역뿐이면 빼지 않는다 — 나머지 자격을 가진 업체와 컨소시엄으로 들어갈 만한지
+  // 담당자가 본다 (2026-10-15 회의: 대표님). 화면 ui.html consortiumCase와 같은 기준
+  const heldNeed = doc.requirements.filter((r) => r.kind === "업종" && r.held);
+  if (heldNeed.length > 0 && heldNeed.every((r) => isAcademicQualification(r))) return null;
+  return missing.map((r) => r.name ?? r.docName ?? r.code ?? "업종");
+}
+
+/** 학술.연구용역(업종코드 1169) — 보유 자격 중 이것만 맞는 공고는 컨소시엄 검토 대상 */
+function isAcademicQualification(r: { code: string | null; name: string | null; docName?: string | null }): boolean {
+  return r.code === "1169" || /학술.?연구/.test(`${r.name ?? ""} ${r.docName ?? ""}`);
 }
 
 /**
@@ -787,6 +804,48 @@ function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
 }
 
 
+/**
+ * 보유 세부품명 공고 — 공고에 분류된 세부품명이 지일 보유 품목(held-qualifications.json heldProducts)과 같은데
+ * 키워드·금액 등으로 목록에 없던 공고 (2026-10-15 회의: 대표님 — 품목 제한 공고는 경쟁률이 20:1 수준이라 찾아서 추천).
+ * 수집 기준 파일(codes.json)에 없는 보유 품목(수족관·스튜디오용카메라 등)도 여기서 잡힌다. 본 목록에 섞지 않고 따로 보여 준다 —
+ * 책상·소프트웨어처럼 범위가 넓은 품목은 무관한 구매 공고도 많아서다. 마감 지난 공고와 본공고가 따로 나온 사전규격은 뺀다.
+ */
+function heldProductCandidates(appConfig: AppConfig, listed: Set<string>): unknown[] {
+  const diag = lastDiagnostics;
+  if (!diag) return [];
+  const held = new Map(appConfig.heldProducts.map((c) => [c.code.trim(), c.name]));
+  const out: unknown[] = [];
+  for (const n of diag.notices) {
+    const code = n.productClsfcNo?.trim();
+    if (!code || !held.has(code) || listed.has(n.noticeNo) || promoted[n.noticeNo]) continue;
+    const d = diagnoseNotice(n, diag.context);
+    if (d.excludedAt === "마감" || d.excludedAt === "본공고 게시") continue;
+    const failed = d.steps.find((s) => s.step === d.excludedAt);
+    out.push({
+      noticeNo: n.noticeNo,
+      title: n.title,
+      institution: n.institution,
+      demandInstitution: demandInstitutionOf(n),
+      sourceType: n.sourceType,
+      businessType: n.businessType,
+      deadline: n.deadline,
+      deadlineIsOpening: deadlineIsOpening(n),
+      registrationDeadline: registrationDeadlineOf(n),
+      budgetAmount: n.budgetAmount,
+      detailUrl: n.detailUrl,
+      bidMethod: n.bidMethod,
+      bidMethodCategory: classifyBidMethod(n.bidMethod),
+      productCode: code,
+      productName: held.get(code),
+      reNotice: /재공고/.test(String(n.raw.ntceKindNm ?? "")) || /재공고/.test(n.title),
+      maxScore: excludedScore(n.noticeNo, n.title),
+      excludedAt: d.excludedAt,
+      excludedDetail: failed?.detail ?? null,
+    });
+  }
+  return out;
+}
+
 async function fetchNotices(period: string): Promise<NoticeCache> {
   const { lookbackDays, preStandardLookbackDays, incremental, label: periodLabel } = periodOptions(period);
   try {
@@ -826,8 +885,14 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       businessType: notice.businessType,
       deadline: notice.deadline,
       deadlineIsOpening: deadlineIsOpening(notice),
+      // 검토필요 카드 — 본공고 카드처럼 마감·낙찰방법·싱크로율을 함께 보여 준다
+      registrationDeadline: registrationDeadlineOf(notice),
       budgetAmount: notice.budgetAmount,
       detailUrl: notice.detailUrl,
+      bidMethod: notice.bidMethod,
+      bidMethodCategory: classifyBidMethod(notice.bidMethod),
+      reNotice: /재공고/.test(String(notice.raw.ntceKindNm ?? "")) || /재공고/.test(notice.title),
+      maxScore: excludedScore(notice.noticeNo, notice.title),
       excludeKeyword: keyword,
       // 제목·세부품명에 든 관심 키워드 — 제외 키워드와 함께 있으면 화면 '검토필요' 칸에 모은다 (2026-10-15 요청)
       interestKeywords: matchKeywords(notice, appConfig.keywords),
@@ -836,7 +901,9 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       bid: lastDiagnostics?.notices.filter((n) => n.sourceType === "본공고").length ?? 0,
       pre: lastDiagnostics?.notices.filter((n) => n.sourceType === "사전규격").length ?? 0,
     };
-    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, collected, error: null };
+    const heldItems = heldProductCandidates(appConfig, new Set([...all.map((m) => m.notice.noticeNo), ...titleExcluded.map((x) => x.notice.noticeNo)]));
+    const heldProducts = appConfig.heldProducts.map((c) => ({ code: c.code.trim(), name: c.name }));
+    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, heldItems, heldProducts, collected, error: null };
   } catch (err) {
     return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], titleExcludedItems: [], error: String(err) };
   }
