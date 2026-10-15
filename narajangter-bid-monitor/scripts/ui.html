@@ -3272,7 +3272,13 @@ function partBlock(n) {
       ${p?.updatedAt ? `<p class="talk-when">마지막 변경 ${esc(when(p.updatedAt))}</p>` : ""}
       <ul class="talk-list">${comments
         .filter((c) => !c.system)
-        .map((c) => `<li><b>${esc(c.by)}</b> ${esc(c.text)} <time>${esc(when(c.at))}</time></li>`)
+        .map((c) => {
+          // 내가 쓴 대화만 고치거나 지울 수 있다 (2026-10-15 요청)
+          const mine = myName() && c.by === myName()
+            ? `<button type="button" class="linkish" data-cedit="${esc(c.at)}">수정</button><button type="button" class="linkish" data-cdel="${esc(c.at)}">삭제</button>`
+            : "";
+          return `<li><b>${esc(c.by)}</b> ${esc(c.text)} <time>${esc(when(c.at))}${c.editedAt ? " · 수정됨" : ""}</time>${mine}</li>`;
+        })
         .join("") || '<li class="sys">아직 대화가 없습니다.</li>'}</ul>
       <form class="talk-form"><input maxlength="1000" placeholder="예: 공동수급 불허라 단독 수행 어려워 보류 — 규모 확인 중" autocomplete="off"><button type="submit">남기기</button></form>
     </details>
@@ -3995,7 +4001,11 @@ $("tab-excluded").addEventListener("click", (ev) => {
   }
 });
 try { $("judge").value = localStorage.getItem("ui-judge") || ""; } catch (e) { /* 무시 */ }
-$("judge").onchange = () => { try { localStorage.setItem("ui-judge", $("judge").value.trim()); } catch (e) { /* 무시 */ } };
+$("judge").onchange = () => {
+  try { localStorage.setItem("ui-judge", $("judge").value.trim()); } catch (e) { /* 무시 */ }
+  // 내가 쓴 대화의 수정·삭제 버튼, '내가 맡기/넘기기'가 이름에 따라 달라진다
+  refreshCards("part", true);
+};
 /** 싱크로율 % 숫자를 누르면 근거 패널을 열고 닫는다. 패널 안을 누를 때는 닫지 않고, 바깥을 누르면 닫는다 */
 function toggleScoreWhy(box) {
   const open = !box.classList.contains("open");
@@ -4077,6 +4087,30 @@ document.addEventListener("click", (ev) => {
     const det = talkBtn.closest("[data-part]").querySelector("details.talk");
     det.open = !det.open;
     if (det.open) det.querySelector(".talk-form input")?.focus();
+  }
+
+  // 대화 고치기·지우기 — 내가 쓴 대화에만 버튼이 있다. 고친 뒤에도 대화창은 열어 둔다
+  const cedit = ev.target.closest("[data-cedit]");
+  const cdel = ev.target.closest("[data-cdel]");
+  if (cedit || cdel) {
+    const box = (cedit || cdel).closest("[data-part]");
+    const noticeNo = box.dataset.part;
+    const at = (cedit || cdel).dataset[cedit ? "cedit" : "cdel"];
+    const c = (participation[noticeNo]?.comments || []).find((x) => x.at === at);
+    if (!c) return;
+    let payload;
+    if (cedit) {
+      const text = prompt("대화를 고쳐 주세요", c.text);
+      if (text === null || !text.trim() || text.trim() === c.text) return;
+      payload = { editComment: { at, text: text.trim() } };
+    } else {
+      if (!confirm(`이 대화를 지울까요?\n\n${c.text}`)) return;
+      payload = { deleteComment: { at } };
+    }
+    postParticipation(box, payload).then((ok) => {
+      const fresh = ok && document.querySelector(`.part[data-part="${CSS.escape(noticeNo)}"]`);
+      if (fresh) fresh.querySelector("details").open = true;
+    });
   }
 
   const own = ev.target.closest("[data-powner]");

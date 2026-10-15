@@ -590,7 +590,7 @@ interface Participation {
   status: ParticipationStatus | null;
   owner: string;
   updatedAt: string;
-  comments: { by: string; text: string; at: string; system?: boolean }[];
+  comments: { by: string; text: string; at: string; system?: boolean; editedAt?: string }[];
   /** 보류·불참의 주된 사유 버튼 (여러 개) — 화면 REASON_TAGS */
   tags?: string[];
   /** 판단 사유 (참가·보류·불참을 고를 때 적는다) */
@@ -600,7 +600,7 @@ interface Participation {
   /** 판단할 때의 공고 정보 — 판단 기록 CSV·키워드 조정용 집계 */
   meta?: Record<string, unknown>;
   prev?: DecisionSnapshot | null;
-  /** 담당이 참가여부를 고르면서 자동으로 정해졌는지 — 선택을 해제하면 같이 지운다. '내가 맡기'로 직접 맡으면 false */
+  /** 담당이 참가여부를 고르면서 정해졌는지 ('내가 맡기'로 직접 맡으면 false). 참가여부를 다시 고르면 어느 쪽이든 그 사람으로 바뀐다 */
   autoOwner?: boolean;
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
@@ -1155,6 +1155,9 @@ const server = createServer((req, res) => {
           tags?: unknown;
           owner?: string;
           comment?: string;
+          /** 대화 고치기·지우기 — 쓴 시각(at)으로 찾는다 */
+          editComment?: { at?: string; text?: string };
+          deleteComment?: { at?: string };
           undo?: boolean;
           meta?: Record<string, unknown>;
         };
@@ -1188,15 +1191,10 @@ const server = createServer((req, res) => {
             p.decidedBy = status ? by : "";
             p.decidedAt = status ? now : null;
             if (b.meta && typeof b.meta === "object" && JSON.stringify(b.meta).length <= 4000) p.meta = b.meta;
-          }
-          // 처음 상태를 정한 사람이 담당자가 된다 (따로 지정하지 않았다면). 선택을 해제하면 자동으로 정한 담당도 지운다 —
-          // 판단이 없는데 담당 이름만 남아 있으면 누가 맡은 것처럼 보인다 (2026-10-15 요청). 예전 기록(표시 없음)도 자동으로 본다
-          if (status && !p.owner) {
-            p.owner = by;
-            p.autoOwner = true;
-          } else if (!status && p.owner && p.autoOwner !== false) {
-            p.owner = "";
-            p.autoOwner = false;
+            // 담당은 마지막으로 참가여부를 고른 사람이다. 선택을 해제하면 담당도 지운다 — '내가 맡기'로 먼저 맡았어도 같다.
+            // 처음 누른 사람 이름이 계속 남거나, 판단이 없는데 담당 이름만 남아 있으면 누가 맡은 것처럼 보인다 (2026-10-15 요청)
+            p.owner = status ? by : "";
+            p.autoOwner = !!status;
           }
         } else {
           // 사유·사유 버튼만 고치기 — 되돌리기 대상이 아니다
@@ -1213,6 +1211,20 @@ const server = createServer((req, res) => {
         }
         const comment = String(b.comment ?? "").trim().slice(0, 1000);
         if (comment) p.comments.push({ by, text: comment, at: now });
+        // 대화 고치기·지우기 — 쓴 사람(이름이 같은 사람)만
+        const target = b.editComment ?? b.deleteComment;
+        if (target) {
+          const found = p.comments.find((c) => c.at === target.at && !c.system);
+          if (!found) throw new Error("대화를 찾을 수 없습니다. 화면을 새로고침해 주세요");
+          if (found.by !== by) throw new Error("내가 쓴 대화만 고치거나 지울 수 있습니다");
+          if (b.deleteComment) p.comments = p.comments.filter((c) => c !== found);
+          else {
+            const text = String(b.editComment?.text ?? "").trim().slice(0, 1000);
+            if (!text) throw new Error("내용이 비어 있습니다. 지우려면 '삭제'를 누르세요");
+            found.text = text;
+            found.editedAt = now;
+          }
+        }
 
         p.updatedAt = now;
         participation[noticeNo] = p;
