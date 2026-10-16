@@ -596,7 +596,7 @@ interface Participation {
   owner: string;
   updatedAt: string;
   comments: { by: string; text: string; at: string; system?: boolean; editedAt?: string }[];
-  /** 보류·불참의 주된 사유 버튼 (여러 개) — 화면 REASON_TAGS */
+  /** 주된 사유 버튼 (여러 개) — 화면 JOIN_TAGS(참가)·REASON_TAGS(보류·불참) */
   tags?: string[];
   /** 판단 사유 (참가·보류·불참을 고를 때 적는다) */
   reason?: string;
