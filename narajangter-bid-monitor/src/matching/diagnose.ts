@@ -98,11 +98,11 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
 
   const budget = notice.budgetAmount;
   if (isBelowMinBudget(notice, config)) {
-    steps.push({ step: "최소예산", ok: false, detail: `추정가격 ${won(budget!)} < 기준 ${won(config.minBudgetAmount!)}` });
+    steps.push({ step: "최소예산", ok: false, detail: `사업금액 ${won(budget!)} < 기준 ${won(config.minBudgetAmount!)}` });
   } else if (budget != null && isMinBudgetExempt(notice, config)) {
-    steps.push({ step: "최소예산", ok: true, detail: `설계용역 — 금액 기준 없음 (추정가격 ${won(budget)})` });
+    steps.push({ step: "최소예산", ok: true, detail: `설계용역 — 금액 기준 없음 (사업금액 ${won(budget)})` });
   } else {
-    steps.push({ step: "최소예산", ok: true, detail: budget == null ? "금액 정보 없음 — 통과" : `추정가격 ${won(budget)}` });
+    steps.push({ step: "최소예산", ok: true, detail: budget == null ? "금액 정보 없음 — 통과" : `사업금액 ${won(budget)}` });
   }
 
   const category = classifyBidMethod(notice.bidMethod);

@@ -18,15 +18,15 @@ function pickPositive(raw: RawItem, candidates: string[]): number | null {
 }
 
 /**
- * 추정가격(부가세 제외). 추정가격 필드가 없으면 부가세 포함 금액을 1.1로 나눠 환산한다.
- * 금액 기준을 추정가격 하나로 통일한다(2026-09-30 담당자 결정) — 예전에는 물품·용역은 배정예산(부가세 포함),
- * 공사는 추정가격(부가세 제외)이 섞여 쓰여 같은 "1억 이상"이 종류마다 다르게 적용됐다.
+ * 사업금액. 추정가격(부가세 제외)이 있으면 그것을, 없으면 배정예산·기초금액을 **그대로** 쓴다.
+ * 본공고는 물품·용역·공사 모두 추정가격이 온다(2026-09-30 담당자 결정으로 기준을 추정가격으로 통일).
+ * 사전규격은 추정가격이 없어 배정예산(부가세 포함)이다. 예전에는 1.1로 나눠 추정가격으로 환산했는데,
+ * 면세 용역은 배정예산 = 추정가격이라 9% 작게 잡혀 1억 기준에서 잘못 빠질 수 있어 그대로 쓴다 (2026-10-16 요청).
  */
 export function estimatedPrice(raw: RawItem, fields: FieldCandidates): number | null {
   const price = pickPositive(raw, fields.budgetAmount);
   if (price !== null) return price;
-  const withVat = pickPositive(raw, fields.budgetVatIncluded);
-  return withVat === null ? null : Math.round(withVat / 1.1);
+  return pickPositive(raw, fields.budgetVatIncluded);
 }
 
 /** 나라장터 업무구분 코드 — 사전규격 상세 화면 주소에 쓴다 */

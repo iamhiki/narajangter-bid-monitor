@@ -73,7 +73,7 @@ function renderPriorityItem(m: MatchedNotice, index: number): string {
   const lines = [
     `<b>${index}.</b> ${titleLink(m)}${overseasTag(m)}`,
     escapeTelegramHtml(
-      `${formatDisplayValue(n.institution)} · 추정 ${formatBudget(n.budgetAmount)} · ${deadlineLabel(n)} ${formatDisplayValue(n.deadline)}`
+      `${formatDisplayValue(n.institution)} · 사업금액 ${formatBudget(n.budgetAmount)} · ${deadlineLabel(n)} ${formatDisplayValue(n.deadline)}`
     ),
   ];
   if (n.bidMethod) {
@@ -136,7 +136,7 @@ function renderBriefItem(m: MatchedNotice, index: number): string {
   return [
     `<b>${index}.</b> ${titleLink(m)}${overseasTag(m)}`,
     escapeTelegramHtml(
-      `${formatDisplayValue(n.institution)} · 추정 ${formatBudget(n.budgetAmount)} · ${n.sourceType === "사전규격" ? "의견 " : ""}~${shortDeadline(n.deadline)}`
+      `${formatDisplayValue(n.institution)} · 사업금액 ${formatBudget(n.budgetAmount)} · ${n.sourceType === "사전규격" ? "의견 " : ""}~${shortDeadline(n.deadline)}`
     ),
   ].join("\n");
 }
@@ -366,7 +366,7 @@ export function buildClosingSoonMessages(
     const lines = [
       `${dday}<b>${i + 1}.</b> ${titleLink(m)}`,
       escapeTelegramHtml(
-        `${formatDisplayValue(n.institution)} · 추정 ${formatBudget(n.budgetAmount)} · 마감 ${formatDisplayValue(n.deadline)}`
+        `${formatDisplayValue(n.institution)} · 사업금액 ${formatBudget(n.budgetAmount)} · 마감 ${formatDisplayValue(n.deadline)}`
       ),
     ];
     if (n.bidMethod) lines.push(escapeTelegramHtml(`낙찰방법 ${truncate(n.bidMethod, MAX_BID_METHOD_CHARS)}`));

@@ -70,14 +70,14 @@ describe("normalizeRawItem", () => {
     expect(normalizeRawItem(raw, "용역", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBe(100_000_000);
   });
 
-  it("사전규격은 추정가격이 없어 배정예산을 1.1로 나눠 환산한다", () => {
+  it("사전규격은 추정가격이 없어 배정예산을 그대로 쓴다", () => {
     const raw = { bfSpecRgstNo: "R1", prdctClsfcNoNm: "t", asignBdgtAmt: "385000000" };
-    expect(normalizeRawItem(raw, "물품", "사전규격", PRE_STANDARD_FIELD_CANDIDATES).budgetAmount).toBe(350_000_000);
+    expect(normalizeRawItem(raw, "물품", "사전규격", PRE_STANDARD_FIELD_CANDIDATES).budgetAmount).toBe(385_000_000);
   });
 
   it("금액이 0으로 오면 정보 없음으로 보고 다음 필드를 쓴다", () => {
     const zeroPrice = { bidNtceNm: "t", presmptPrce: "0", asignBdgtAmt: "220000000" };
-    expect(normalizeRawItem(zeroPrice, "물품", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBe(200_000_000);
+    expect(normalizeRawItem(zeroPrice, "물품", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBe(220_000_000);
     const allZero = { bidNtceNm: "t", presmptPrce: "0", asignBdgtAmt: "0" };
     expect(normalizeRawItem(allZero, "물품", "본공고", BID_NOTICE_FIELD_CANDIDATES).budgetAmount).toBeNull();
   });

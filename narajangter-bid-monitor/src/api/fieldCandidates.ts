@@ -16,7 +16,7 @@ export interface FieldCandidates {
    */
   budgetAmount: string[];
   /**
-   * 추정가격이 없을 때 쓰는 부가세 포함 금액(배정예산·기초금액). 1.1로 나눠 추정가격으로 환산한다.
+   * 추정가격이 없을 때 쓰는 부가세 포함 금액(배정예산·기초금액). 환산하지 않고 그대로 쓴다 (2026-10-16 요청).
    * 사전규격은 presmptPrce가 아예 없고 asignBdgtAmt만 온다. 같은 공고의 배정예산/추정가격 비율은 1.1(면세 용역은 1.0)이었다.
    */
   budgetVatIncluded: string[];
