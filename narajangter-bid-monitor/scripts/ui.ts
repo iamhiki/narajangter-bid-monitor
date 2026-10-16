@@ -20,6 +20,7 @@ import { lookupProductClass, type ProductClassInfo } from "../src/api/productCla
 import { collectReportInput } from "../src/pipeline.js";
 import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
+import { forceMatch, isBelowMinBudget } from "../src/matching/matchEngine.js";
 import { matchKeywords } from "../src/matching/keywordMatcher.js";
 import { parseKstDateTime } from "../src/matching/deadline.js";
 import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
@@ -168,10 +169,10 @@ interface NoticeCache {
   closedItems: unknown[];
   /** 제목의 제외 키워드로만 빠진 후보 — 첨부를 읽어 본업 근거가 나온 것만 화면에 보인다 (rescue) */
   titleExcludedItems: unknown[];
-  /** 보유 세부품명과 일치하지만 목록에 없던 공고 — 화면 '보유 품목 공고' 칸 */
+  /** 수집 세부품명과 일치하지만 목록에 없던 공고 — 화면 '목록 밖 세부품명 공고' 칸 */
   heldItems?: unknown[];
-  /** 보유 세부품명 목록 (held-qualifications.json — 읽기만) */
-  heldProducts?: { code: string; name: string }[];
+  /** 수집 세부품명 목록 — 등록 품목 + 추가 관심 품목(held: false). 화면 세부품명 드롭다운 */
+  heldProducts?: { code: string; name: string; held: boolean }[];
   /** 이번 조회에서 나라장터로부터 받은 공고 수 (걸러내기 전) — 화면 조회 정보 줄 */
   collected?: { bid: number; pre: number };
   error: string | null;
@@ -379,7 +380,8 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     reason: matchReason(m),
     // 등급 배지 팝업용 — 무엇이 맞아서 목록에 올랐는지 (강력추천 = 품목·업종 코드와 제목 키워드가 둘 다 맞음)
     matchedBy: {
-      products: m.matchedProductCodes.map((c) => ({ code: c.code, name: c.name })),
+      // held: false = 등록증에 없는 추가 관심 품목(codes.json extraProductCodes) — 카드에 미등록으로 표시
+      products: m.matchedProductCodes.map((c) => ({ code: c.code, name: c.name, held: c.held !== false })),
       industries: m.matchedIndustryCodes.map((c) => ({ code: c.code, name: c.name })),
       keywords: m.matchedKeywords,
       classes: (m.matchedServiceClasses ?? []).map((c) => ({ code: c.code, name: c.name })),
@@ -808,44 +810,29 @@ function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
 
 
 /**
- * 보유 세부품명 공고 — 공고에 분류된 세부품명이 지일 보유 품목(held-qualifications.json heldProducts)과 같은데
- * 키워드·금액 등으로 목록에 없던 공고 (2026-10-15 회의: 대표님 — 품목 제한 공고는 경쟁률이 20:1 수준이라 찾아서 추천).
- * 수집 기준 파일(codes.json)에 없는 보유 품목(수족관·스튜디오용카메라 등)도 여기서 잡힌다. 본 목록에 섞지 않고 따로 보여 준다 —
- * 책상·소프트웨어처럼 범위가 넓은 품목은 무관한 구매 공고도 많아서다. 마감 지난 공고와 본공고가 따로 나온 사전규격은 뺀다.
+ * 목록 밖 세부품명 공고 — 공고에 분류된 세부품명이 수집 세부품명(등록 품목 + 추가 관심 품목)과 같은데
+ * 목록에 없던 공고 (2026-10-15 회의: 대표님 — 품목 제한 공고는 경쟁률이 20:1 수준이라 찾아서 추천).
+ * 제외 키워드에 걸렸거나, 책상·소프트웨어처럼 키워드가 같이 있어야 하는 넓은 품목(codes.json keywordRequiredProducts)인데
+ * 키워드가 없던 공고다. 금액 기준과 낙찰방법(수의계약 제외)은 목록과 똑같이 건다 (2026-10-16 요청).
+ * 화면 '세부품명 공고' 탭에서 목록 공고와 같은 카드로 보여 준다(2026-10-16) — 그래서 매칭 결과(forceMatch)를 그대로 돌려준다.
+ * 전체 목록·텔레그램 보고에는 넣지 않는다. 마감 지난 공고와 본공고가 따로 나온 사전규격은 뺀다.
  */
-function heldProductCandidates(appConfig: AppConfig, listed: Set<string>): unknown[] {
+function heldProductCandidates(appConfig: AppConfig, listed: Set<string>): { match: MatchedNotice; excludedAt: string | null; excludedDetail: string | null }[] {
   const diag = lastDiagnostics;
   if (!diag) return [];
-  const held = new Map(appConfig.heldProducts.map((c) => [c.code.trim(), c.name]));
-  const out: unknown[] = [];
+  const codes = new Set(appConfig.productCodes.map((c) => c.code.trim()));
+  const out: { match: MatchedNotice; excludedAt: string | null; excludedDetail: string | null }[] = [];
   for (const n of diag.notices) {
     const code = n.productClsfcNo?.trim();
-    if (!code || !held.has(code) || listed.has(n.noticeNo) || promoted[n.noticeNo]) continue;
+    if (!code || !codes.has(code) || listed.has(n.noticeNo) || promoted[n.noticeNo]) continue;
+    // 금액을 모르는 공고, 낙찰방법을 모르는 공고는 목록과 같이 통과시킨다
+    if (isBelowMinBudget(n, appConfig)) continue;
+    const method = classifyBidMethod(n.bidMethod);
+    if (method !== null && !appConfig.allowedBidMethods.includes(method)) continue;
     const d = diagnoseNotice(n, diag.context);
     if (d.excludedAt === "마감" || d.excludedAt === "본공고 게시") continue;
     const failed = d.steps.find((s) => s.step === d.excludedAt);
-    out.push({
-      noticeNo: n.noticeNo,
-      title: n.title,
-      institution: n.institution,
-      demandInstitution: demandInstitutionOf(n),
-      sourceType: n.sourceType,
-      businessType: n.businessType,
-      deadline: n.deadline,
-      deadlineIsOpening: deadlineIsOpening(n),
-      registrationDeadline: registrationDeadlineOf(n),
-      budgetAmount: n.budgetAmount,
-      detailUrl: n.detailUrl,
-      bidMethod: n.bidMethod,
-      bidMethodCategory: classifyBidMethod(n.bidMethod),
-      productCode: code,
-      productName: held.get(code),
-      reNotice: /재공고/.test(String(n.raw.ntceKindNm ?? "")) || /재공고/.test(n.title),
-      // 싱크로율과 근거(눌러서 보는 패널) — 본공고 카드와 같은 내용
-      ...excludedSimilarity(n.noticeNo, n.title),
-      excludedAt: d.excludedAt,
-      excludedDetail: failed?.detail ?? null,
-    });
+    out.push({ match: forceMatch(n, appConfig), excludedAt: d.excludedAt, excludedDetail: failed?.detail ?? null });
   }
   return out;
 }
@@ -866,13 +853,15 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
     lastDiagnostics = input.diagnostics ?? null;
     // 이미 목록에 올린 공고는 "첨부로 다시 볼 공고"에서 뺀다 (본 목록에 있다)
     const titleExcluded = (lastDiagnostics ? titleExcludedCandidates(lastDiagnostics) : []).filter((x) => !promoted[x.notice.noticeNo]);
+    const all = [...input.bid.matches, ...input.preStandard.matches];
+    const held = heldProductCandidates(appConfig, new Set([...all.map((m) => m.notice.noticeNo), ...titleExcluded.map((x) => x.notice.noticeNo)]));
+    // 목록 밖 세부품명 공고도 목록 공고와 같은 카드로 보여 주므로 첨부(자격·싱크로율)를 함께 읽는다 — 목록 공고 다음 순서
     startEnrichment(
-      [...input.bid.matches, ...input.preStandard.matches],
+      all,
       appConfig,
-      input.closed ?? [],
+      [...held.map((h) => h.match), ...(input.closed ?? [])],
       titleExcluded.map((x) => x.notice)
     );
-    const all = [...input.bid.matches, ...input.preStandard.matches];
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
@@ -905,8 +894,13 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       bid: lastDiagnostics?.notices.filter((n) => n.sourceType === "본공고").length ?? 0,
       pre: lastDiagnostics?.notices.filter((n) => n.sourceType === "사전규격").length ?? 0,
     };
-    const heldItems = heldProductCandidates(appConfig, new Set([...all.map((m) => m.notice.noticeNo), ...titleExcluded.map((x) => x.notice.noticeNo)]));
-    const heldProducts = appConfig.heldProducts.map((c) => ({ code: c.code.trim(), name: c.name }));
+    const heldItems = held.map(({ match, excludedAt, excludedDetail }) => ({
+      ...(decorate(match, appConfig) as object),
+      outside: true,
+      excludedAt,
+      excludedDetail,
+    }));
+    const heldProducts = appConfig.productCodes.map((c) => ({ code: c.code.trim(), name: c.name, held: c.held !== false }));
     return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, heldItems, heldProducts, collected, error: null };
   } catch (err) {
     return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], titleExcludedItems: [], error: String(err) };

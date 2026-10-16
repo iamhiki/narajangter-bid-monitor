@@ -1021,11 +1021,6 @@ footer b { color: var(--muted); }
     <p class="sub enrich-meta" id="enrichMeta" role="status"></p>
     <div id="liveResults"></div>
     <div class="empty" id="kindEmpty" hidden></div>
-    <details class="group off-group rescue-group" id="heldGroup" hidden>
-      <summary><h2>보유 품목 공고 <span class="group-n" id="heldN"></span></h2></summary>
-      <p class="group-note">공고의 세부품명이 <b>지일 보유 품목</b>(경쟁입찰참가자격 등록 품목)과 같은데, 키워드·금액 등으로 목록에 없던 공고입니다. 보유 품목으로 제한된 공고는 들어올 수 있는 업체가 적어 경쟁률이 낮습니다. 우리 공고라고 판단되면 <b>목록에 올리기</b>를 누르세요.</p>
-      <div id="heldList"></div>
-    </details>
     <details class="group off-group rescue-group" id="reviewGroup" hidden>
       <summary><h2>검토필요 <span class="group-n" id="reviewN"></span></h2></summary>
       <p class="group-note">제목에 <b>관심 키워드</b>와 <b>제외 키워드</b>가 함께 있어 목록에서 뺀 공고입니다. 다른 조건(마감·금액·자격·지역 등)은 모두 통과했습니다. 우리 공고라고 판단되면 <b>목록에 올리기</b>를 누르세요 — 본공고·사전규격 목록에 들어가고 팀원 모두에게 보입니다.</p>
@@ -1466,8 +1461,9 @@ const checkPass = (n, v) => v === "all" || checkKinds(n).has(v);
  * 칸 자체의 hidden은 각 render 함수가 정하므로 여기서는 kind-off 클래스로만 숨긴다.
  */
 function applyKindView() {
-  const k = filters.kind;
-  const SECTIONS = { held: "heldGroup", review: "reviewGroup", rescue: "rescueGroup", closed: "closedGroup" };
+  const SECTIONS = { review: "reviewGroup", rescue: "rescueGroup", closed: "closedGroup" };
+  // '세부품명 공고' 탭은 목록 안·밖 공고를 위 목록 자리에 한 목록으로 보여 주므로 아래 칸은 모두 숨긴다 (renderProductView)
+  const k = filters.cat === "product" ? "product" : filters.kind in SECTIONS ? filters.kind : "all";
   $("liveResults").classList.toggle("kind-off", k in SECTIONS);
   for (const [key, id] of Object.entries(SECTIONS)) {
     $(id).classList.toggle("kind-off", k !== "all" && k !== key);
@@ -1477,7 +1473,6 @@ function applyKindView() {
   $("kindEmpty").hidden = !empty;
   if (empty) {
     $("kindEmpty").textContent = {
-      held: "보유 품목 공고가 없습니다.",
       review: "관심 키워드와 제외 키워드가 함께 있는 공고가 없습니다.",
       rescue: "첨부로 다시 볼 공고가 없습니다.",
       closed: "이 기간에 마감된 공고가 없습니다.",
@@ -1619,16 +1614,25 @@ function renderReview() {
   renderJumpNav();
 }
 
-/** 보유 품목 공고 칸 — 세부품명 드롭다운과 위 검색칸을 함께 따른다 */
-function renderHeld() {
-  const box = $("heldGroup");
-  const past = (n) => deadlineAt(n.deadline) < Date.now();
-  const list = lastHeld
-    .filter((n) => (filters.prod === "all" || n.productCode === filters.prod) && matchesLiveQuery(n))
-    .sort((a, b) => past(a) - past(b) || byDeadline(a, b));
-  box.hidden = list.length === 0;
-  $("heldN").textContent = list.length + "건";
-  $("heldList").innerHTML = list.map(renderHeldRow).join("");
+/**
+ * '세부품명 공고' 탭 — 제목 키워드 없이 세부품명으로 걸린 공고를 목록 안·밖 가리지 않고 같은 카드로 한 목록에 (2026-10-16 요청).
+ * 목록 밖 공고(lastHeld — 제외 키워드에 걸렸거나 키워드가 필요한 넓은 품목)도 서버가 목록 공고와 같은 모양으로 보낸다.
+ * 목록 밖이라는 것은 '세부품명으로만 수집' 배지 설명에만 적는다. 전체 목록·텔레그램 보고에는 들어가지 않는다.
+ */
+const outsideShown = () => lastHeld.filter((n) => !docOut(n) && (includePre() || n.sourceType !== "사전규격"));
+function renderProductView(shown) {
+  const sort = LIVE_SORTS[$("liveSort").value] || LIVE_SORTS.deadline;
+  const list = [...shown, ...outsideShown().filter(listFilterPass)].sort(sort);
+  if (!list.length) {
+    $("liveResults").innerHTML = '<div class="empty">세부품명으로 걸린 공고가 없습니다. 위의 찾기 글자나 필터를 바꿔 보세요.</div>';
+    return;
+  }
+  $("liveResults").innerHTML = `
+    <div class="group" id="grpProduct">
+      <div class="group-head"><h2>세부품명 공고 <span class="group-n">${list.length}건</span></h2></div>
+      <p class="group-note">제목에 관심 키워드 없이, 공고의 세부품명이 지일 등록 품목이나 관심 품목과 같아 걸린 공고입니다. 과업 내용이 맞는지 공고 원문을 확인하세요.</p>
+      ${list.map(renderNotice).join("")}
+    </div>`;
 }
 
 /** 검토필요·보유 품목 카드의 공통 윗부분 — 배지, 제목(강조할 낱말), 마감·수요기관·사업금액 */
@@ -1657,28 +1661,6 @@ function bigCardHead(n, markWord) {
         <h3>${title}${noticeNoTag(n.noticeNo)}</h3>
         <dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
 }
-/** 보유 품목 공고 카드 — 본공고 카드처럼 크게 (2026-10-15 요청) */
-function renderHeldRow(n) {
-  const past = daysLeft(n.sourceType === "본공고" ? effDeadline(n) : n.deadline);
-  const why = n.excludedAt ? `<b>${esc(stageLabel(n.excludedAt))}</b>${n.excludedDetail ? ` — ${esc(n.excludedDetail)}` : ""}` : "첨부 확인(자격·지역 등)으로 빠짐";
-  return `<div class="notice live ${past !== null && past < 0 ? "is-closed" : ""}">
-    <div class="card-top">
-      <div class="card-main">
-        ${bigCardHead(n, "")}
-        <div class="ex-reason">
-          <div class="er-label">보유 품목 공고</div>
-          <div class="er-main">세부품명 <span class="rs-kw in">${esc(n.productName)}(${esc(n.productCode)})</span> — 지일 보유 품목입니다</div>
-          <dl class="er-rows"><div><dt>목록에 없던 이유</dt><dd>${why}</dd></div></dl>
-        </div>
-      </div>
-      ${scoreBoxHtml(n)}
-    </div>
-    <div class="ex-foot">
-      <span class="promote-ask">우리 공고라고 판단되면 <button type="button" class="rs-promote" data-promote="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-keyword=""data-reason="${esc(n.excludedAt ? stageLabel(n.excludedAt) : "첨부 확인")}">목록에 올리기</button></span>
-    </div>
-  </div>`;
-}
-
 
 /**
  * 검토필요 카드 — 본공고 카드와 같은 모양으로 크게 (2026-10-15 요청: 한 줄 목록은 보기 불편했다).
@@ -1935,24 +1917,33 @@ let lastOffKey = "";
 /** 목록에서 뺄 공고가 바뀌었는지 보는 열쇠 */
 const offKeyOf = () => lastItems.filter(docOut).map((n) => n.noticeNo).join(",");
 
+/** 찾기 글자·드롭다운 필터 (대분류 탭은 뺀 것) — 목록 공고와 '세부품명 공고' 탭의 목록 밖 공고에 똑같이 건다 */
+function listFilterPass(n) {
+  return (
+    matchesLiveQuery(n) &&
+    (filters.kind !== "본공고" && filters.kind !== "사전규격" || n.sourceType === filters.kind) &&
+    (filters.prod === "all" || n.productCode === filters.prod) &&
+    (filters.grade === "all" || n.confidence === filters.grade) &&
+    (filters.method === "all" || n.bidMethodCategory === filters.method) &&
+    (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part) &&
+    checkPass(n, filters.check)
+  );
+}
+
 function applyFilters() {
   // 첨부로 뺀 공고는 '제외된 공고' 탭으로 간다 — 탭을 다시 열 때 새로 받게 비운다
   if (offKeyOf() !== lastOffKey) exData = null;
   lastOffKey = offKeyOf();
   // '사전규격 포함'을 끄면 사전규격은 목록·건수에서 모두 뺀다
   if (!includePre() && filters.kind === "사전규격") filters.kind = "all";
-  const items = lastItems.filter((n) => !docOut(n) && (includePre() || n.sourceType !== "사전규격"));
-  const shown = items.filter(
-    (n) =>
-      matchesLiveQuery(n) &&
-      (filters.kind !== "본공고" && filters.kind !== "사전규격" || n.sourceType === filters.kind) &&
-      (filters.cat === "all" || (filters.cat === "product" ? productOnly(n) : categoryOf(n) === filters.cat)) &&
-      (filters.prod === "all" || n.productCode === filters.prod) &&
-      (filters.grade === "all" || n.confidence === filters.grade) &&
-      (filters.method === "all" || n.bidMethodCategory === filters.method) &&
-      (filters.part === "all" || (participation[n.noticeNo]?.status || "미지정") === filters.part) &&
-      checkPass(n, filters.check)
-  );
+  const listed = lastItems.filter((n) => !docOut(n) && (includePre() || n.sourceType !== "사전규격"));
+  // 본공고·사전규격 목록에는 제목 키워드가 있는 공고만 둔다. 세부품명으로만 걸린 공고는 '세부품명 공고' 탭으로 (2026-10-16 요청).
+  // 화면에서만 나눈다 — 텔레그램 보고에는 지금처럼 나간다
+  const productIn = listed.filter(productOnly);
+  const items = listed.filter((n) => !productOnly(n));
+  const shown = filters.cat === "product"
+    ? productIn.filter(listFilterPass)
+    : items.filter((n) => listFilterPass(n) && (filters.cat === "all" || categoryOf(n) === filters.cat));
 
   // 드롭다운 항목 옆 개수는 **전체 기준**으로 보여준다. 필터를 걸 때마다 숫자가 바뀌면
   // "지금 뭘 숨기고 있는지"를 알 수 없다.
@@ -1960,10 +1951,11 @@ function applyFilters() {
   const rescueN = rescuedOf().length;
   const closedN = closedKept().length;
   // 대분류 탭 — 건수는 다른 조건과 상관없이 전체 기준 (드롭다운과 같은 셈)
-  // 맨 끝 '세부품명으로만 수집'은 대분류와 겹쳐 보는 칸이라 구분선을 두고 붙인다 (2026-10-15 요청 — 드롭다운에서 옮김)
-  $("catTabs").innerHTML = [["all", "전체", null], ...CATEGORIES.map(([v, note]) => [v, v, note]), ["product", "세부품명으로만 수집", "제목에 관심 키워드 없이 세부품명 코드로만 걸린 공고"]]
+  // 맨 끝 '세부품명 공고'는 대분류와 따로 보는 칸이라 구분선을 두고 붙인다 — 제목 키워드 없이 세부품명으로 걸린 공고 전부
+  // (2026-10-16 — '세부품명으로만 수집' 탭과 '보유 품목 공고' 칸을 합침)
+  $("catTabs").innerHTML = [["all", "전체", null], ...CATEGORIES.map(([v, note]) => [v, v, note]), ["product", "세부품명 공고", "제목 키워드 없이 세부품명으로 걸린 공고"]]
     .map(([v, label, note]) => {
-      const n = v === "all" ? items.length : v === "product" ? count(productOnly) : count((x) => categoryOf(x) === v);
+      const n = v === "all" ? items.length : v === "product" ? productIn.length + outsideShown().length : count((x) => categoryOf(x) === v);
       return `<button type="button" role="tab" class="cat-tab ${v === "product" ? "cat-extra" : ""} ${filters.cat === v ? "on" : ""}" aria-selected="${filters.cat === v}" data-cat="${v}" ${note ? `title="${esc(note)}"` : ""}>${esc(label)} <span class="n">${n}</span></button>`;
     })
     .join("");
@@ -1972,16 +1964,16 @@ function applyFilters() {
       ["all", "본공고+사전규격", items.length],
       ["본공고", "본공고", count((n) => n.sourceType === "본공고")],
       ["사전규격", "사전규격", includePre() ? count((n) => n.sourceType === "사전규격") : null, includePre() ? null : "'사전규격 포함'을 켜면 볼 수 있습니다", !includePre()],
-      ["held", "보유 품목 공고", lastHeld.length, "보유 세부품명과 같지만 키워드·금액 등으로 목록에 없던 공고"],
       ["review", "검토필요", reviewOf().length, "제목에 관심 키워드와 제외 키워드가 함께 있는 공고"],
       ["rescue", "첨부로 다시 볼 공고", rescueN, "제목 때문에 빠졌지만 첨부에 제작 내용이 있는 공고"],
       ["closed", "마감 공고", closedN, "조회 기간 안에 올라와 이미 마감된 본공고"],
     ]),
-    // 보유 세부품명별 — 목록과 '보유 품목 공고' 칸을 함께 센다. 0건 품목은 흐리게 (어떤 품목이 안 나오는지 보이게)
+    // 수집 세부품명별 — 목록과 '목록 밖 세부품명 공고' 칸을 함께 센다. 0건 품목은 흐리게 (어떤 품목이 안 나오는지 보이게)
+    // 등록증에 없는 관심 품목은 이름 뒤에 (미등록)
     dropdown("prod", "세부품명", [
       ["all", "전체", null],
       ...heldProductList
-        .map((h) => [h.code, h.name, count((n) => n.productCode === h.code) + lastHeld.filter((n) => n.productCode === h.code).length])
+        .map((h) => [h.code, h.held === false ? `${h.name} (미등록)` : h.name, [...listed, ...lastHeld].filter((n) => n.productCode === h.code).length])
         .sort((a, b) => b[2] - a[2])
         .map(([code, name, c]) => [code, name, c, null, c === 0]),
     ]),
@@ -2003,8 +1995,12 @@ function applyFilters() {
       ...CHECK_OPTS.map(([v, label, note]) => [v, label, count((n) => checkPass(n, v)), note]),
     ]),
   ].join("");
-  renderHeld();
   applyKindView();
+  if (filters.cat === "product") {
+    renderProductView(shown);
+    renderJumpNav();
+    return;
+  }
 
   if (!items.length) {
     $("liveResults").innerHTML = '<div class="empty">이 기간에 우리 키워드·품목에 맞는 공고가 없습니다.</div>';
@@ -2052,7 +2048,6 @@ const JUMPS = [
   { id: "grpMain", label: "본공고" },
   { id: "grpPre", label: "사전규격" },
   // 화면에 놓인 순서와 같아야 한다 — markJump가 이 순서로 '지금 보는 칸'을 고른다
-  { id: "heldGroup", label: "보유 품목 공고" },
   { id: "reviewGroup", label: "검토필요" },
   { id: "rescueGroup", label: "첨부로 다시 볼 공고" },
   { id: "closedGroup", label: "마감된 공고" },
@@ -2209,7 +2204,7 @@ function scoreWhyHtml(n) {
  * 쓰던 대화가 날아가므로 점수 칸과 카드 테두리 색만 고친다.
  */
 function applyBodyScores() {
-  // 검토필요·보유 품목 카드도 같은 점수 칸(눌러서 근거 보기)을 쓴다
+  // 검토필요 카드와 세부품명 공고 탭의 목록 밖 공고도 같은 점수 칸(눌러서 근거 보기)을 쓴다
   for (const n of [...lastItems, ...lastClosed, ...lastTitleExcluded, ...lastHeld]) {
     const s = enrich.byNo[n.noticeNo]?.similarity;
     // 점수가 그대로여도 공고문·내역서로 근거 키워드를 새로 찾았으면(textSource) 근거 칸을 다시 그린다
@@ -2247,6 +2242,7 @@ function renderNotice(n) {
           ${businessTypeBadge(n)}
           ${n.reNotice ? reNoticeBadge() : ""}
           ${productOnly(n) ? productOnlyBadge(n) : ""}
+          ${unregisteredOnly(n) ? unregisteredBadge(n) : ""}
           ${n.overseas ? overseasBadge(n) : ""}
         </div>
         <h3>${title}${n.detailUrl ? `<span class="ext" aria-hidden="true">↗</span>` : ""}${noticeNoTag(n.noticeNo)}</h3>
@@ -2260,14 +2256,30 @@ function renderNotice(n) {
 }
 
 /**
- * 세부품명으로만 수집한 공고 — 제목·세부품명 이름에 관심 키워드가 없고, 공고에 분류된 세부품명 코드가 지일 등록 품목과 맞아 들어온 것.
- * 목록에서 빼지 않고 배지와 '공고' 드롭다운으로 바로 구분해 보게 한다 (2026-10-15 요청).
+ * 세부품명으로만 수집한 공고 — 제목·세부품명 이름에 관심 키워드가 없고, 공고에 분류된 세부품명 코드가 수집 세부품명(등록 품목·관심 품목)과 맞아 들어온 것.
+ * 화면에서는 본공고·사전규격 목록이 아니라 '세부품명 공고' 탭에 모은다 (2026-10-16 요청). 매일 보고에 나가는지는 배지 설명에 적는다.
  */
 const productOnly = (n) => !!n.matchedBy?.products?.length && !n.matchedBy?.keywords?.length;
 function productOnlyBadge(n) {
   const names = n.matchedBy.products.map((x) => `${esc(x.name)}(${esc(x.code)})`).join(", ");
+  const why = n.matchedBy.products.some((x) => x.held !== false) ? "지일 등록 품목" : "관심 품목";
   return tipBadge("warn", "세부품명으로만 수집", "세부품명으로만 수집한 공고",
-    `<p>제목에 관심 키워드가 없고, 세부품명 <b>${names}</b>이(가) 지일 등록 품목이라 들어온 공고입니다.</p><p>과업 내용이 맞는지 공고 원문을 확인하세요.</p>`);
+    `<p>제목에 관심 키워드가 없고, 세부품명 <b>${names}</b>이(가) ${why}이라 들어온 공고입니다.</p>` +
+      (n.outside
+        ? `<p>매일 텔레그램 보고에는 나가지 않는 공고입니다${n.excludedDetail ? `<br>(${esc(n.excludedDetail)})` : ""}.</p>`
+        : `<p>매일 텔레그램 보고에는 나가는 공고입니다.</p>`) +
+      `<p>과업 내용이 맞는지 공고 원문을 확인하세요.</p>`);
+}
+
+/**
+ * 미등록 품목 — 세부품명이 등록증에 없는 관심 품목(조합놀이대 등)으로만 맞은 공고 (2026-10-16).
+ * 목록에서는 빼지 않고(강력추천도 유지) 품목 등록이 필요하다는 것만 보여 준다.
+ */
+const unregisteredOnly = (n) => !!n.matchedBy?.products?.length && n.matchedBy.products.every((x) => x.held === false);
+function unregisteredBadge(n) {
+  const names = n.matchedBy.products.map((x) => `${esc(x.name)}(${esc(x.code)})`).join(", ");
+  return tipBadge("warn", "미등록 품목", "지일 미등록 품목",
+    `<p>세부품명 <b>${names}</b>은(는) 관심 품목이지만<br>지일 경쟁입찰참가자격에 등록돼 있지 않습니다.</p><p>참가하려면 품목 추가 등록이 필요한지 확인하세요.</p>`);
 }
 
 /**
@@ -2630,7 +2642,7 @@ function sizeBadge(doc) {
 }
 
 /**
- * 추천등급. 강력추천 = 공고의 품목(물품분류번호)·업종이 지일 보유 코드와 맞고, 제목·품명에 우리 키워드도 있을 때
+ * 추천등급. 강력추천 = 공고의 품목(물품분류번호)·업종이 수집 코드(등록 품목·관심 품목·업종)와 맞고, 제목·품명에 우리 키워드도 있을 때
  * (matchEngine.ts). 그 밖은 참고용. 무엇이 맞았는지 matchedBy로 보여 준다.
  */
 function gradeBadge(n) {
@@ -2639,8 +2651,12 @@ function gradeBadge(n) {
   const by = n.matchedBy;
   if (!by) return `<span class="${cls}">${esc(n.confidence)}</span>`;
   const names = (xs) => xs.map((x) => `${esc(x.name)}(${esc(x.code)})`).join(", ");
+  // 등록증에 없는 추가 관심 품목(조합놀이대 등)은 보유 품목과 나눠 미등록으로 보여 준다 (2026-10-16)
+  const heldProds = by.products.filter((x) => x.held !== false);
+  const extraProds = by.products.filter((x) => x.held === false);
   const rows = [
-    by.products.length ? `<li class="lay-ok">✓ 지일 보유 품목: ${names(by.products)}</li>` : "",
+    heldProds.length ? `<li class="lay-ok">✓ 지일 보유 품목: ${names(heldProds)}</li>` : "",
+    extraProds.length ? `<li class="lay-ok">✓ 관심 품목: ${names(extraProds)} <span class="warnline">(지일 미등록 품목)</span></li>` : "",
     by.industries.length ? `<li class="lay-ok">✓ 지일 보유 업종: ${names(by.industries)}</li>` : "",
     by.keywords.length ? `<li class="lay-ok">✓ 제목·품명의 키워드: ${by.keywords.map(esc).join(", ")}</li>` : "",
     by.classes.length ? `<li class="lay-ok">✓ 나라장터 조달분류: ${names(by.classes)}</li>` : "",
@@ -2648,8 +2664,8 @@ function gradeBadge(n) {
   ].join("");
   // 팝업 폭에서 한 줄씩 끝나게 짧게 끊는다
   const rule = strong
-    ? `<p>보유 품목·업종과 제목 키워드가 모두 맞았습니다.</p>`
-    : `<p>강력추천: 보유 품목·업종과 제목 키워드가 모두 맞을 때</p><p>이 공고는 위 항목만 맞았습니다.</p>`;
+    ? `<p>품목·업종과 제목 키워드가 모두 맞았습니다.</p>`
+    : `<p>강력추천: 품목·업종과 제목 키워드가 모두 맞을 때</p><p>이 공고는 위 항목만 맞았습니다.</p>`;
   return `<span class="${cls} qual" tabindex="0">${esc(n.confidence)}${qtip(`${esc(n.confidence)}인 이유`, `<ul>${rows}</ul>${rule}`)}</span>`;
 }
 
@@ -3226,7 +3242,7 @@ function pastHint(n) {
 
 /** 판단할 때의 공고 정보 — 판단 기록 CSV와 키워드 조정용 집계에 쓴다 */
 function decisionMeta(noticeNo) {
-  const n = [...lastItems, ...lastClosed].find((x) => x.noticeNo === noticeNo);
+  const n = [...lastItems, ...lastClosed, ...lastHeld].find((x) => x.noticeNo === noticeNo);
   if (!n) return undefined;
   return {
     sourceType: n.sourceType,
@@ -3895,9 +3911,10 @@ $("filters").onclick = (ev) => {
   const btn = ev.target.closest("[data-group]");
   if (!btn || btn.disabled) return;
   filters[btn.dataset.group] = btn.dataset.value;
+  // 아래 칸(검토필요·마감 공고)을 고르면 '세부품명 공고' 탭에서 나와 그 칸만 본다
+  const section = { review: "reviewGroup", rescue: "rescueGroup", closed: "closedGroup" }[btn.dataset.value];
+  if (btn.dataset.group === "kind" && section && filters.cat === "product") filters.cat = "all";
   applyFilters();
-  // 아래 칸(검토필요·마감 공고)을 고르면 그 칸으로 간다
-  const section = { held: "heldGroup", review: "reviewGroup", rescue: "rescueGroup", closed: "closedGroup" }[btn.dataset.value];
   if (btn.dataset.group === "kind" && section && !$(section).hidden) $(section).scrollIntoView({ block: "start" });
 };
 // 드롭다운 바깥을 누르거나 Esc를 누르면 닫는다
@@ -3907,6 +3924,8 @@ $("catTabs").onclick = (ev) => {
   const btn = ev.target.closest("[data-cat]");
   if (!btn) return;
   filters.cat = btn.dataset.cat;
+  // '세부품명 공고' 탭은 목록 + 목록 밖 칸을 보는 화면이라, 아래 칸만 보던 상태(검토필요 등)는 풀어 준다
+  if (filters.cat === "product" && !["all", "본공고", "사전규격"].includes(filters.kind)) filters.kind = "all";
   applyFilters();
 };
 $("incPre").onchange = () => { saveLiveOpts(); applyFilters(); };

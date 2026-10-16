@@ -17,7 +17,6 @@ function writeConfigDir(files: {
     path.join(dir, "codes.json"),
     JSON.stringify(
       files.codes ?? {
-        productCodes: [{ code: "1", name: "a" }],
         industryCodes: [{ code: "2", name: "b" }],
       }
     )
@@ -95,7 +94,7 @@ describe("loadAppConfig", () => {
   it("중복된 코드가 있으면 ConfigError를 던진다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
       codes: {
-        productCodes: [
+        extraProductCodes: [
           { code: "1", name: "a" },
           { code: "1", name: "dup" },
         ],
@@ -103,6 +102,26 @@ describe("loadAppConfig", () => {
       },
     });
     expect(() => loadAppConfig()).toThrow(ConfigError);
+  });
+
+  it("수집 세부품명은 등록 품목 + 추가 관심 품목이고, 키워드 필요 품목에 표시가 붙는다", () => {
+    process.env.APP_CONFIG_DIR = writeConfigDir({
+      codes: {
+        // "9"는 어느 목록에도 없는 코드 — 등록증에서 빠진 품목처럼 무시돼야 한다
+        keywordRequiredProducts: [{ code: "11", name: "안내판" }, { code: "9", name: "없음" }],
+        extraProductCodes: [{ code: "20", name: "조합놀이대" }, { code: "10", name: "조형물" }],
+        industryCodes: [{ code: "2", name: "b" }],
+      },
+      heldQualifications: {
+        heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판" }],
+        heldIndustries: [{ code: "2", name: "b" }],
+      },
+    });
+    expect(loadAppConfig().productCodes).toEqual([
+      { code: "10", name: "조형물", held: true },
+      { code: "11", name: "안내판", held: true, requiresKeyword: true },
+      { code: "20", name: "조합놀이대", held: false },
+    ]);
   });
 
   it("held-qualifications.json에 중복된 코드가 있으면 ConfigError를 던진다", () => {

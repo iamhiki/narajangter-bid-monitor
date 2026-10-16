@@ -21,8 +21,8 @@
 | 파일 | 내용 |
 |---|---|
 | `config/keywords.json` | 제목 키워드 목록(`keywords`) + 제외 키워드 목록(`excludeKeywords`) + 최소 예산금액(`minBudgetAmount`). 자유롭게 추가/삭제 가능 |
-| `config/codes.json` | 세부품명코드(`productCodes`, 물품 공고용) / 업종코드(`industryCodes`, 용역·공사 공고용) — **관심 분야** 매칭용 |
-| `config/held-qualifications.json` | 우리 회사가 실제 보유한 등록물품/등록업종 — **입찰 참가자격 충족 여부** 판정용 (아래 "자격조건 필터" 참고) |
+| `config/codes.json` | 등록 품목과 다르게 다룰 세부품명 — 등록증에 없는 추가 관심 품목(`extraProductCodes`), 키워드가 같이 있어야 하는 넓은 품목(`keywordRequiredProducts`) / 업종코드(`industryCodes`, 용역·공사 공고용) |
+| `config/held-qualifications.json` | 우리 회사가 실제 보유한 등록물품/등록업종 — **입찰 참가자격 충족 여부** 판정용 (아래 "자격조건 필터" 참고). 등록물품은 물품 공고 **수집 기준**으로도 쓰인다 |
 | `config/recipients.json` | 리포트를 받을 이메일 목록 (여러 명 추가 가능) |
 
 코드/키워드/수신자를 바꿀 때는 코드 수정이 필요 없고, 해당 JSON 파일만 수정하면 다음 실행부터 반영됩니다.
