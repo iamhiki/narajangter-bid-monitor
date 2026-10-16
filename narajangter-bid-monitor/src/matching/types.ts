@@ -10,7 +10,7 @@ export interface MatchedNotice {
   matchedProductCodes: CodeEntry[];
   matchedIndustryCodes: CodeEntry[];
   matchedKeywords: string[];
-  /** 조달분류로 걸린 경우 (codes.json serviceClasses). 제목 키워드 없이 이것만으로 들어온 공고는 첨부 과업으로 다시 확인한다 */
+  /** 조달분류로 걸린 경우 (keywords.json serviceClasses). 제목 키워드 없이 이것만으로 들어온 공고는 첨부 과업으로 다시 확인한다 */
   matchedServiceClasses?: CodeEntry[];
   confidence: Confidence;
   /**

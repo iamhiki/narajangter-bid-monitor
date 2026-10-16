@@ -22,7 +22,6 @@ import type { MatchedNotice } from "../src/matching/types.js";
 import { classifyBidMethod } from "../src/matching/bidMethod.js";
 import { forceMatch, isBelowMinBudget } from "../src/matching/matchEngine.js";
 import { matchKeywords } from "../src/matching/keywordMatcher.js";
-import { parseKstDateTime } from "../src/matching/deadline.js";
 import { diagnoseNotice, DIAGNOSE_STEPS, type Diagnosis } from "../src/matching/diagnose.js";
 import type { CollectionDiagnostics } from "../src/pipeline.js";
 import type { NormalizedNotice } from "../src/api/types.js";
@@ -165,14 +164,12 @@ interface NoticeCache {
   /** 화면에 찍을 기간 이름 ("최근 7일", "마감 전 공고 전체") */
   periodLabel: string;
   items: unknown[];
-  /** 마감 지난 본공고 중 조건에 맞는 것 — 화면 맨 아래 "마감된 공고" 칸 (최근 마감 순) */
-  closedItems: unknown[];
   /** 제목의 제외 키워드로만 빠진 후보 — 첨부를 읽어 본업 근거가 나온 것만 화면에 보인다 (rescue) */
   titleExcludedItems: unknown[];
   /** 수집 세부품명과 일치하지만 목록에 없던 공고 — 화면 '목록 밖 세부품명 공고' 칸 */
   heldItems?: unknown[];
-  /** 수집 세부품명 목록 — 등록 품목 + 추가 관심 품목(held: false). 화면 세부품명 드롭다운 */
-  heldProducts?: { code: string; name: string; held: boolean }[];
+  /** 수집 세부품명 목록 — 지일 등록 품목. 화면 세부품명 드롭다운 */
+  heldProducts?: { code: string; name: string }[];
   /** 이번 조회에서 나라장터로부터 받은 공고 수 (걸러내기 전) — 화면 조회 정보 줄 */
   collected?: { bid: number; pre: number };
   error: string | null;
@@ -380,8 +377,7 @@ function decorate(m: MatchedNotice, appConfig: AppConfig): unknown {
     reason: matchReason(m),
     // 등급 배지 팝업용 — 무엇이 맞아서 목록에 올랐는지 (강력추천 = 품목·업종 코드와 제목 키워드가 둘 다 맞음)
     matchedBy: {
-      // held: false = 등록증에 없는 추가 관심 품목(codes.json extraProductCodes) — 카드에 미등록으로 표시
-      products: m.matchedProductCodes.map((c) => ({ code: c.code, name: c.name, held: c.held !== false })),
+      products: m.matchedProductCodes.map((c) => ({ code: c.code, name: c.name })),
       industries: m.matchedIndustryCodes.map((c) => ({ code: c.code, name: c.name })),
       keywords: m.matchedKeywords,
       classes: (m.matchedServiceClasses ?? []).map((c) => ({ code: c.code, name: c.name })),
@@ -723,7 +719,7 @@ async function classesFor(doc: QualificationDocResult | null): Promise<Record<st
 }
 
 /**
- * docOnly: 마감된 공고. 왜 놓쳤는지 첨부로 확인하려는 용도라 진행 중인 공고를 먼저 읽고 그 뒤에 읽는다.
+ * docOnly: 목록 밖 세부품명 공고. 목록 공고를 먼저 읽고 그 뒤에 읽는다.
  * rescue: 제목의 제외 키워드로 빠진 후보 — 맨 마지막에 첨부만 읽어 본업 근거(findMakeEvidence)를 찾는다.
  */
 function startEnrichment(activeMatches: MatchedNotice[], appConfig: AppConfig, docOnly: MatchedNotice[] = [], rescue: NormalizedNotice[] = []): void {
@@ -810,9 +806,9 @@ function readBody(req: IncomingMessage, limit = 16_000): Promise<string> {
 
 
 /**
- * 목록 밖 세부품명 공고 — 공고에 분류된 세부품명이 수집 세부품명(등록 품목 + 추가 관심 품목)과 같은데
+ * 목록 밖 세부품명 공고 — 공고에 분류된 세부품명이 수집 세부품명(지일 등록 품목)과 같은데
  * 목록에 없던 공고 (2026-10-15 회의: 대표님 — 품목 제한 공고는 경쟁률이 20:1 수준이라 찾아서 추천).
- * 제외 키워드에 걸렸거나, 책상·소프트웨어처럼 키워드가 같이 있어야 하는 넓은 품목(codes.json keywordRequiredProducts)인데
+ * 제외 키워드에 걸렸거나, 책상·소프트웨어처럼 키워드가 같이 있어야 하는 넓은 품목(held-qualifications.json requiresKeyword)인데
  * 키워드가 없던 공고다. 금액 기준과 낙찰방법(수의계약 제외)은 목록과 똑같이 건다 (2026-10-16 요청).
  * 화면 '세부품명 공고' 탭에서 목록 공고와 같은 카드로 보여 준다(2026-10-16) — 그래서 매칭 결과(forceMatch)를 그대로 돌려준다.
  * 전체 목록·텔레그램 보고에는 넣지 않는다. 마감 지난 공고와 본공고가 따로 나온 사전규격은 뺀다.
@@ -847,7 +843,6 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       preStandardLookbackDays,
       incremental,
       withDiagnostics: true,
-      withClosed: true,
       forceInclude: new Set(Object.keys(promoted)),
     });
     lastDiagnostics = input.diagnostics ?? null;
@@ -860,16 +855,12 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
     startEnrichment(
       all,
       appConfig,
-      [...held.map((h) => h.match), ...(input.closed ?? [])],
+      held.map((h) => h.match),
       titleExcluded.map((x) => x.notice)
     );
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
-    // 마감된 공고는 진행 중인 공고 뒤에 첨부를 읽는다 (startEnrichment docOnly)
-    const closedItems = (input.closed ?? [])
-      .sort((a, b) => (parseKstDateTime(b.notice.deadline)?.getTime() ?? 0) - (parseKstDateTime(a.notice.deadline)?.getTime() ?? 0))
-      .map((m) => decorate(m, appConfig));
     const titleExcludedItems = titleExcluded.map(({ notice, keyword }) => ({
       noticeNo: notice.noticeNo,
       title: notice.title,
@@ -901,10 +892,10 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       excludedAt,
       excludedDetail,
     }));
-    const heldProducts = appConfig.productCodes.map((c) => ({ code: c.code.trim(), name: c.name, held: c.held !== false }));
-    return { fetchedAt: new Date(), period, periodLabel, items, closedItems, titleExcludedItems, heldItems, heldProducts, collected, error: null };
+    const heldProducts = appConfig.productCodes.map((c) => ({ code: c.code.trim(), name: c.name }));
+    return { fetchedAt: new Date(), period, periodLabel, items, titleExcludedItems, heldItems, heldProducts, collected, error: null };
   } catch (err) {
-    return { fetchedAt: new Date(), period, periodLabel, items: [], closedItems: [], titleExcludedItems: [], error: String(err) };
+    return { fetchedAt: new Date(), period, periodLabel, items: [], titleExcludedItems: [], error: String(err) };
   }
 }
 
@@ -1076,12 +1067,13 @@ const server = createServer((req, res) => {
     }
     const base = excludedCandidates(lastDiagnostics);
     const fromDoc = docExcluded(lastDiagnostics) as { excludedAt: string }[];
-    // 담당자가 목록에 올린 공고는 실제 공고 목록에 있다 — 여기서는 뺀다
+    // 담당자가 목록에 올린 공고는 실제 공고 목록에 있다 — 여기서는 뺀다.
+    // 마감 지난 공고는 볼 일이 없어 싣지 않는다 (2026-10-16 요청)
     type ExItem = { noticeNo: string; title: string; excludedAt: string };
-    const baseKept = (base.items as ExItem[]).filter((n) => !promoted[n.noticeNo]);
+    const baseKept = (base.items as ExItem[]).filter((n) => !promoted[n.noticeNo] && n.excludedAt !== "마감");
     // 카드 오른쪽 싱크로율 — 첨부를 읽은 공고는 그 값, 아니면 제목으로 (공고마다 한 번만 계산)
     const items = [...(fromDoc as ExItem[]), ...baseKept].map((n) => ({ ...n, maxScore: excludedScore(n.noticeNo, n.title) }));
-    const byStage = Object.fromEntries(Object.keys(base.byStage).map((s) => [s, 0])) as Record<string, number>;
+    const byStage = Object.fromEntries(Object.keys(base.byStage).filter((s) => s !== "마감").map((s) => [s, 0])) as Record<string, number>;
     for (const n of items) byStage[n.excludedAt] = (byStage[n.excludedAt] ?? 0) + 1;
     // keywords: 카드의 "관심 키워드 N개 보기"
     json(res, { periodLabel: noticeCache?.periodLabel ?? null, fetchedAt: noticeCache?.fetchedAt ?? null, total: lastDiagnostics.notices.length, byStage, items, keywords: lastDiagnostics.context.config.keywords });
@@ -1296,7 +1288,7 @@ const server = createServer((req, res) => {
       .then((result) => json(res, { ...result, cached: false }))
       .catch((err: unknown) => {
         inFlight.delete(period);
-        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], closedItems: [], titleExcludedItems: [], error: String(err), cached: false });
+        json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], titleExcludedItems: [], error: String(err), cached: false });
       });
     return;
   }

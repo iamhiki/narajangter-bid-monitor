@@ -7,20 +7,11 @@ import { _resetAppConfigCacheForTests, loadAppConfig } from "../src/config/loadJ
 
 function writeConfigDir(files: {
   keywords?: unknown;
-  codes?: unknown;
   recipients?: unknown;
   heldQualifications?: unknown;
 }): string {
   const dir = mkdtempSync(path.join(tmpdir(), "narajangter-test-"));
   writeFileSync(path.join(dir, "keywords.json"), JSON.stringify(files.keywords ?? { keywords: ["도서관"] }));
-  writeFileSync(
-    path.join(dir, "codes.json"),
-    JSON.stringify(
-      files.codes ?? {
-        industryCodes: [{ code: "2", name: "b" }],
-      }
-    )
-  );
   writeFileSync(
     path.join(dir, "recipients.json"),
     JSON.stringify(files.recipients ?? { recipients: ["a@example.com"] })
@@ -30,7 +21,7 @@ function writeConfigDir(files: {
     JSON.stringify(
       files.heldQualifications ?? {
         heldProducts: [{ code: "1", name: "a" }],
-        heldIndustries: [{ code: "2", name: "b" }],
+        heldIndustries: [{ code: "2", name: "b", strongMatchName: "b" }],
       }
     )
   );
@@ -91,37 +82,34 @@ describe("loadAppConfig", () => {
     expect(() => loadAppConfig()).toThrow(ConfigError);
   });
 
-  it("중복된 코드가 있으면 ConfigError를 던진다", () => {
+  it("수집 세부품명은 등록 품목 그대로이고, 강력추천 업종은 strongMatchName이 있는 보유 업종의 나라장터 표기다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
-      codes: {
-        extraProductCodes: [
-          { code: "1", name: "a" },
-          { code: "1", name: "dup" },
+      heldQualifications: {
+        heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판", requiresKeyword: true }],
+        heldIndustries: [
+          { code: "1426", name: "소프트웨어사업자(패키지소프트웨어개발.공급사업)", strongMatchName: "소프트웨어사업자" },
+          { code: "1517", name: "출판사" },
         ],
-        industryCodes: [{ code: "2", name: "b" }],
       },
     });
-    expect(() => loadAppConfig()).toThrow(ConfigError);
+    const config = loadAppConfig();
+    expect(config.productCodes).toEqual([
+      { code: "10", name: "조형물" },
+      { code: "11", name: "안내판", requiresKeyword: true },
+    ]);
+    expect(config.industryCodes).toEqual([{ code: "1426", name: "소프트웨어사업자" }]);
+    // 자격 대조용 보유 업종은 등록증 이름 그대로, 전부
+    expect(config.heldIndustries).toEqual([
+      { code: "1426", name: "소프트웨어사업자(패키지소프트웨어개발.공급사업)" },
+      { code: "1517", name: "출판사" },
+    ]);
   });
 
-  it("수집 세부품명은 등록 품목 + 추가 관심 품목이고, 키워드 필요 품목에 표시가 붙는다", () => {
+  it("강력추천 업종(strongMatchName)이 하나도 없으면 ConfigError를 던진다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
-      codes: {
-        // "9"는 어느 목록에도 없는 코드 — 등록증에서 빠진 품목처럼 무시돼야 한다
-        keywordRequiredProducts: [{ code: "11", name: "안내판" }, { code: "9", name: "없음" }],
-        extraProductCodes: [{ code: "20", name: "조합놀이대" }, { code: "10", name: "조형물" }],
-        industryCodes: [{ code: "2", name: "b" }],
-      },
-      heldQualifications: {
-        heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판" }],
-        heldIndustries: [{ code: "2", name: "b" }],
-      },
+      heldQualifications: { heldProducts: [{ code: "1", name: "a" }], heldIndustries: [{ code: "2", name: "b" }] },
     });
-    expect(loadAppConfig().productCodes).toEqual([
-      { code: "10", name: "조형물", held: true },
-      { code: "11", name: "안내판", held: true, requiresKeyword: true },
-      { code: "20", name: "조합놀이대", held: false },
-    ]);
+    expect(() => loadAppConfig()).toThrow(ConfigError);
   });
 
   it("held-qualifications.json에 중복된 코드가 있으면 ConfigError를 던진다", () => {

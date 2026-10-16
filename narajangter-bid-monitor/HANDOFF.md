@@ -79,8 +79,7 @@ git show origin/claude/automate-google-sheets-0jVhc:narajangter-bid-monitor/conf
 narajangter-bid-monitor/
 ├── config/
 │   ├── keywords.json          # 키워드/제외키워드/최소예산 — 코드 안 건드리고 여기만 수정
-│   ├── codes.json             # 관심 세부품명번호(물품)/업종코드(용역·공사)
-│   ├── held-qualifications.json  # 지일이 실제 보유한 등록물품/등록업종 (자격조건 필터용)
+│   ├── held-qualifications.json  # 지일이 실제 보유한 등록물품/등록업종 (자격조건 필터 + 세부품명 수집 기준)
 │   └── recipients.json        # 리포트 수신 이메일 목록
 ├── src/
 │   ├── api/                   # data.go.kr API 클라이언트, 필드 매핑, 정규화
@@ -129,12 +128,12 @@ narajangter-bid-monitor/
 ### recipients
 jayuna93@gmail.com, gaeunleee@ji1.co.kr, tongilil@naver.com
 
-### codes.json
-- 물품 수집 세부품명 = held-qualifications.json 등록물품 + `extraProductCodes`(등록증에 없는 본업 품목:
-  조합놀이대, 소파, 이동식서가, 전시용진열대, 가상현실장치, 전시홍보관설치서비스 등). 2026-10-16부터
-- `keywordRequiredProducts`: 제목 키워드가 같이 있어야 수집하는 넓은 품목 — 안내전광판,
+### 세부품명·업종 수집 기준 (2026-10-16 codes.json 삭제)
+- 물품 수집 세부품명 = held-qualifications.json 등록물품 그대로. 등록증에 없는 품목(조합놀이대, 소파,
+  이동식서가, 전시용진열대, 가상현실장치 등)은 세부품명으로 수집하지 않는다 (제목 키워드로는 걸린다)
+- 등록물품의 `requiresKeyword: true`: 제목 키워드가 같이 있어야 수집하는 넓은 품목 — 안내전광판,
   영상정보디스플레이장치, 안내판, 책상, 소프트웨어 3종
-- industryCodes(용역/공사, 실제 업종명 기준): 실내건축공사업, 금속창호·지붕건축물
+- 등록업종의 `strongMatchName`(강력추천 판정, 나라장터 표기): 실내건축공사업, 금속창호·지붕건축물
   조립공사업, 소프트웨어사업자, 공공디자인 전문회사, 전시사업자
 
 ### held-qualifications.json

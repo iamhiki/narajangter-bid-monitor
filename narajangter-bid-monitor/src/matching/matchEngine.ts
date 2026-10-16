@@ -73,7 +73,7 @@ export function evaluateNotice(
   const industryCodeMatched = matchedIndustryCodes.length > 0;
   const keywordMatched = matchedKeywords.length > 0;
 
-  // ③-b 해외 개최 판별: "전시회/박람회/엑스포 + 한국관/단체관"이 제목에 있으면 해외(무역박람회
+  // ③-b 해외 개최 판별 (overseasVenueFilter.ts — 전시회·박람회 + 한국관, 해외 지명 + 한국관, 영문 국가 약자): 해외(무역박람회
   // 국가관·한국관 조성) 공고로 본다. 실제 해외 부스 시공 공고 상당수는 "박물관"/"전시관" 같은
   // 기존 국내용 키워드를 전혀 포함하지 않으므로(예: "OO 전시회 한국관 설치공사"), 이 판정은
   // 기존 코드/키워드 매칭 결과와 무관하게 독립적으로 적용한다:

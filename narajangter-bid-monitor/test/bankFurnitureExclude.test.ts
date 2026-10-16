@@ -6,12 +6,12 @@ import type { NormalizedNotice } from "../src/api/types.js";
 /**
  * 실측 오탐 회귀 테스트 (2026-09-23).
  *
- * codes.json의 세부품명 '카운터'(5612100201)는 전시 카운터용으로 보유한 코드인데,
+ * 등록 세부품명 '카운터'(5612100201, held-qualifications.json)는 전시 카운터용으로 보유한 코드인데,
  * 은행 창구 카운터에도 이름이 겹쳐서 매칭됐다. 30일치 매칭에서 중소기업은행 6개 지점의
  * "OO지점 전체 레이아웃 가구 제작설치" 공고가 전부 이 코드 단독 매칭(키워드 매칭 없음)으로
  * 통과했다. config/keywords.json에 '레이아웃 가구' 제외어를 추가해 막았다.
  *
- * 실제 config 파일(keywords.json + codes.json)을 그대로 로드해서 검사한다 — mock config로는
+ * 실제 config 파일(keywords.json + held-qualifications.json)을 그대로 로드해서 검사한다 — mock config로는
  * 이 회귀를 재현할 수 없다. '카운터' 코드 자체는 지일이 실제로 보유하고 있어 지우면 안 되고,
  * 문제는 제외 키워드 쪽에서 막아야 하기 때문이다.
  */

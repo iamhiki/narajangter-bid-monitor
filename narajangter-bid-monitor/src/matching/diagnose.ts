@@ -117,7 +117,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   const overseas = detectOverseasVenue(notice.title, ctx.mongoliaKeywords);
   steps.push(
     overseas.shouldAutoExclude
-      ? { step: "해외개최", ok: false, detail: "전시회·박람회 한국관/단체관 (몽골 아님) — 자동배제" }
+      ? { step: "해외개최", ok: false, detail: `${overseas.reason} (몽골 아님) — 자동배제` }
       : { step: "해외개최", ok: true, detail: overseas.isMongolia ? `몽골 예외 (${overseas.matchedMongoliaKeyword})` : "해당 없음" }
   );
 

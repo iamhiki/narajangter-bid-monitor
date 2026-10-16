@@ -62,15 +62,8 @@ const keywordsFileSchema = z.object({
     .array(z.enum(BID_METHOD_CATEGORIES))
     .min(1, "allowedBidMethods 배열이 비어있습니다 (최소 1개 필요)")
     .default([...BID_METHOD_CATEGORIES]),
-});
-
-const codesFileSchema = z.object({
-  /** 등록증(held-qualifications.json)에 없지만 수집할 본업 품목 — 조합놀이대·소파 등 */
-  extraProductCodes: z.array(codeEntrySchema.omit({ requiresKeyword: true })).default([]),
-  /** 제목 키워드가 같이 있어야 수집하는 품목 (등록 품목·추가 관심 품목 어느 쪽이든). 쓰임새가 넓은 품목용 */
-  keywordRequiredProducts: z.array(codeEntrySchema.omit({ requiresKeyword: true })).default([]),
-  industryCodes: z.array(codeEntrySchema).min(1, "industryCodes 배열이 비어있습니다"),
-  serviceClasses: z.array(codeEntrySchema).default([]),
+  /** 용역 조달분류(8자리 품명번호) — 제목 키워드가 없어도 이 분류면 수집한다. 지금은 비워 둔다 */
+  serviceClasses: z.array(codeEntrySchema.omit({ requiresKeyword: true })).default([]),
   serviceClassExcludeWords: z.array(z.string().trim().min(1)).default([]),
 });
 
@@ -79,8 +72,12 @@ const recipientsFileSchema = z.object({
 });
 
 const heldQualificationsFileSchema = z.object({
+  /** requiresKeyword: 제목 키워드가 같이 있어야 수집하는 넓은 품목 (안내판·책상·소프트웨어 등) */
   heldProducts: z.array(codeEntrySchema).min(1, "heldProducts 배열이 비어있습니다"),
-  heldIndustries: z.array(codeEntrySchema).min(1, "heldIndustries 배열이 비어있습니다"),
+  /** strongMatchName: 강력추천 판정에 쓰는 업종 — 투찰가능업종명에서 찾을 나라장터 표기 */
+  heldIndustries: z
+    .array(codeEntrySchema.omit({ requiresKeyword: true }).extend({ strongMatchName: z.string().trim().min(1).optional() }))
+    .min(1, "heldIndustries 배열이 비어있습니다"),
 });
 
 function readJsonFile(filePath: string): unknown {
@@ -126,8 +123,6 @@ export interface CodeEntry {
    * 쓰임새가 넓은 품목(영상정보디스플레이장치 — 보안 관제실·상황실 모니터 구매에도 쓰인다)용.
    */
   requiresKeyword?: boolean;
-  /** productCodes 전용. 지일 등록 품목(held-qualifications.json)이면 true, codes.json 추가 관심 품목이면 false */
-  held?: boolean;
 }
 
 export interface AppConfig {
@@ -150,8 +145,9 @@ export interface AppConfig {
   keepMissingQualifications?: CodeEntry[];
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
-  /** 수집에 쓰는 세부품명 — 등록 품목(heldProducts)과 codes.json 추가 관심 품목을 합친 것 (collectProductCodes) */
+  /** 수집에 쓰는 세부품명 — 등록 품목(heldProducts) 그대로. requiresKeyword 품목은 제목 키워드가 같이 있어야 한다 */
   productCodes: CodeEntry[];
+  /** 강력추천 판정용 업종 — heldIndustries 중 strongMatchName이 있는 것. name은 투찰가능업종명에서 찾을 나라장터 표기 */
   industryCodes: CodeEntry[];
   /** 용역 조달분류(8자리 품명번호). 제목 키워드가 없어도 이 분류면 수집한다 — matching/codeMatcher.ts matchServiceClasses */
   serviceClasses?: CodeEntry[];
@@ -187,15 +183,13 @@ function configSignature(paths: string[]): string {
 export function loadAppConfig(): AppConfig {
   const configDir = resolveConfigDir();
   const keywordsPath = path.join(configDir, "keywords.json");
-  const codesPath = path.join(configDir, "codes.json");
   const recipientsPath = path.join(configDir, "recipients.json");
   const heldQualificationsPath = path.join(configDir, "held-qualifications.json");
 
-  const signature = configSignature([keywordsPath, codesPath, recipientsPath, heldQualificationsPath]);
+  const signature = configSignature([keywordsPath, recipientsPath, heldQualificationsPath]);
   if (cached && signature === cachedSignature) return cached;
 
   const keywordsData = parseOrThrow(keywordsFileSchema, readJsonFile(keywordsPath), keywordsPath);
-  const codesData = parseOrThrow(codesFileSchema, readJsonFile(codesPath), codesPath);
   const recipientsData = parseOrThrow(recipientsFileSchema, readJsonFile(recipientsPath), recipientsPath);
   const heldQualificationsData = parseOrThrow(
     heldQualificationsFileSchema,
@@ -213,16 +207,6 @@ export function loadAppConfig(): AppConfig {
     throw new ConfigError(`keywords.json excludeKeywords에 중복된 키워드가 있습니다: ${dupExcludeKeywords.join(", ")}`);
   }
 
-  const dupProductCodes = findDuplicates(codesData.extraProductCodes.map((c) => c.code));
-  if (dupProductCodes.length > 0) {
-    throw new ConfigError(`codes.json extraProductCodes에 중복된 코드가 있습니다: ${dupProductCodes.join(", ")}`);
-  }
-
-  const dupIndustryCodes = findDuplicates(codesData.industryCodes.map((c) => c.code));
-  if (dupIndustryCodes.length > 0) {
-    throw new ConfigError(`codes.json industryCodes에 중복된 코드가 있습니다: ${dupIndustryCodes.join(", ")}`);
-  }
-
   const dupRecipients = findDuplicates(recipientsData.recipients.map((r) => r.toLowerCase()));
   if (dupRecipients.length > 0) {
     throw new ConfigError(`recipients.json에 중복된 이메일이 있습니다: ${dupRecipients.join(", ")}`);
@@ -238,6 +222,15 @@ export function loadAppConfig(): AppConfig {
     throw new ConfigError(`held-qualifications.json heldIndustries에 중복된 코드가 있습니다: ${dupHeldIndustries.join(", ")}`);
   }
 
+  const industryCodes = heldQualificationsData.heldIndustries.flatMap((c) =>
+    c.strongMatchName ? [{ code: c.code, name: c.strongMatchName }] : []
+  );
+  if (industryCodes.length === 0) {
+    throw new ConfigError(
+      `held-qualifications.json heldIndustries에 strongMatchName이 있는 업종이 하나도 없습니다 (강력추천 판정용): ${heldQualificationsPath}`
+    );
+  }
+
   cached = {
     keywords: keywordsData.keywords,
     excludeKeywords: keywordsData.excludeKeywords,
@@ -251,31 +244,17 @@ export function loadAppConfig(): AppConfig {
     keepMissingQualifications: keywordsData.keepMissingQualifications,
     businessTypes: keywordsData.businessTypes,
     allowedBidMethods: keywordsData.allowedBidMethods,
-    productCodes: collectProductCodes(heldQualificationsData.heldProducts, codesData.extraProductCodes, codesData.keywordRequiredProducts),
-    industryCodes: codesData.industryCodes,
-    serviceClasses: codesData.serviceClasses,
-    serviceClassExcludeWords: codesData.serviceClassExcludeWords,
+    // 수집 세부품명 = 등록 품목 (2026-10-16 — codes.json을 없애고 보유자격 파일 하나를 기준으로). 등록증이 갱신되면 수집 기준도 따라온다
+    productCodes: heldQualificationsData.heldProducts,
+    industryCodes,
+    serviceClasses: keywordsData.serviceClasses,
+    serviceClassExcludeWords: keywordsData.serviceClassExcludeWords,
     recipients: recipientsData.recipients,
     heldProducts: heldQualificationsData.heldProducts,
-    heldIndustries: heldQualificationsData.heldIndustries,
+    heldIndustries: heldQualificationsData.heldIndustries.map(({ code, name }) => ({ code, name })),
   };
   cachedSignature = signature;
   return cached;
-}
-
-/**
- * 수집에 쓰는 세부품명 = 지일 등록 품목(held-qualifications.json) + 추가 관심 품목(codes.json extraProductCodes).
- * 등록증이 갱신되면 수집 기준도 따라온다 (2026-10-16 회의 — 보유자격 파일 하나를 기준으로).
- * 추가 관심 품목이 나중에 등록되면 등록 품목으로 친다. keywordRequiredProducts의 코드는 제목 키워드가 같이 있어야
- * 수집한다 — 두 목록 어디에도 없는 코드는 무시한다 (등록증에서 품목이 빠져도 설정 오류로 멈추지 않게).
- */
-function collectProductCodes(held: CodeEntry[], extra: CodeEntry[], keywordRequired: CodeEntry[]): CodeEntry[] {
-  const needsKeyword = new Set(keywordRequired.map((c) => c.code));
-  const heldCodes = new Set(held.map((c) => c.code));
-  return [
-    ...held.map((c) => ({ code: c.code, name: c.name, held: true })),
-    ...extra.filter((c) => !heldCodes.has(c.code)).map((c) => ({ code: c.code, name: c.name, held: false })),
-  ].map((c) => (needsKeyword.has(c.code) ? { ...c, requiresKeyword: true } : c));
 }
 
 /** 테스트에서 캐시를 리셋하기 위한 헬퍼 */
