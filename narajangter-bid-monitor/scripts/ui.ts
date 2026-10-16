@@ -854,7 +854,8 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
     // 이미 목록에 올린 공고는 "첨부로 다시 볼 공고"에서 뺀다 (본 목록에 있다)
     const titleExcluded = (lastDiagnostics ? titleExcludedCandidates(lastDiagnostics) : []).filter((x) => !promoted[x.notice.noticeNo]);
     const all = [...input.bid.matches, ...input.preStandard.matches];
-    const held = heldProductCandidates(appConfig, new Set([...all.map((m) => m.notice.noticeNo), ...titleExcluded.map((x) => x.notice.noticeNo)]));
+    // 제외 키워드 하나로만 빠진 공고(검토필요 칸)도 세부품명이 맞으면 세부품명 공고 탭에 함께 싣는다 — 탭은 품목으로 걸린 공고 전부 (2026-10-16 요청)
+    const held = heldProductCandidates(appConfig, new Set(all.map((m) => m.notice.noticeNo)));
     // 목록 밖 세부품명 공고도 목록 공고와 같은 카드로 보여 주므로 첨부(자격·싱크로율)를 함께 읽는다 — 목록 공고 다음 순서
     startEnrichment(
       all,

@@ -1619,7 +1619,8 @@ function renderReview() {
  * 목록 밖 공고(lastHeld — 제외 키워드에 걸렸거나 키워드가 필요한 넓은 품목)도 서버가 목록 공고와 같은 모양으로 보낸다.
  * 목록 밖이라는 것은 '세부품명으로만 수집' 배지 설명에만 적는다. 전체 목록·텔레그램 보고에는 들어가지 않는다.
  */
-const outsideShown = () => lastHeld.filter((n) => !docOut(n) && (includePre() || n.sourceType !== "사전규격"));
+// 첨부 판정(docOut)으로 목록에서 뺀 공고도 이 탭에는 싣는다 — 품목으로 걸린 공고는 무관해 보여도 전부 본다 (2026-10-16 요청). 배지가 이유를 알린다
+const outsideShown = () => lastHeld.filter((n) => includePre() || n.sourceType !== "사전규격");
 function renderProductView(shown) {
   const sort = LIVE_SORTS[$("liveSort").value] || LIVE_SORTS.deadline;
   const list = [...shown, ...outsideShown().filter(listFilterPass)].sort(sort);
@@ -1939,7 +1940,7 @@ function applyFilters() {
   const listed = lastItems.filter((n) => !docOut(n) && (includePre() || n.sourceType !== "사전규격"));
   // 본공고·사전규격 목록에는 제목 키워드가 있는 공고만 둔다. 세부품명으로만 걸린 공고는 '세부품명 공고' 탭으로 (2026-10-16 요청).
   // 화면에서만 나눈다 — 텔레그램 보고에는 지금처럼 나간다
-  const productIn = listed.filter(productOnly);
+  const productIn = lastItems.filter((n) => productOnly(n) && (includePre() || n.sourceType !== "사전규격"));
   const items = listed.filter((n) => !productOnly(n));
   const shown = filters.cat === "product"
     ? productIn.filter(listFilterPass)
