@@ -84,6 +84,7 @@ jobs:
           path: |
             narajangter-bid-monitor/cache/sent-reports.json
             narajangter-bid-monitor/cache/notified.json
+            narajangter-bid-monitor/cache/dev-alert-state.json
           key: daily-state-${{ github.run_id }}
           restore-keys: daily-state-
 
@@ -120,4 +121,5 @@ jobs:
           path: |
             narajangter-bid-monitor/cache/sent-reports.json
             narajangter-bid-monitor/cache/notified.json
+            narajangter-bid-monitor/cache/dev-alert-state.json
           key: daily-state-${{ github.run_id }}

@@ -38,6 +38,8 @@ export interface Env {
   runMode: RunMode;
   /** daily·weekly 보고를 이미 보냈는지 기억하는 파일 (두 곳이 깨워도 한 번만 보내려고) */
   sentReportsPath: string;
+  /** 개발자에게 알린 아직 안 풀린 문제 기록 — 다음 실행이 정상이면 "해결됨"을 알린다 */
+  devAlertStatePath: string;
   /** true면 이미 보낸 보고도 다시 보낸다 (담당자가 직접 다시 받고 싶을 때) */
   forceSend: boolean;
   /** hourly 모드에서 이미 알린 공고를 기억하는 파일 */
@@ -221,6 +223,7 @@ export function loadEnv(): Env {
     dryRun,
     forceSend,
     sentReportsPath: e.SENT_REPORTS_PATH?.trim() || "cache/sent-reports.json",
+    devAlertStatePath: e.DEV_ALERT_STATE_PATH?.trim() || "cache/dev-alert-state.json",
     logLevel,
 
     smtpHost,

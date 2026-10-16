@@ -54,7 +54,9 @@ jobs:
       - name: 보고 발송 기록 불러오기
         uses: actions/cache/restore@v4
         with:
-          path: narajangter-bid-monitor/cache/sent-reports.json
+          path: |
+            narajangter-bid-monitor/cache/sent-reports.json
+            narajangter-bid-monitor/cache/dev-alert-state.json
           key: sent-weekly-${{ github.run_id }}
           restore-keys: sent-weekly-
 
@@ -96,7 +98,9 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: narajangter-bid-monitor/cache/sent-reports.json
+          path: |
+            narajangter-bid-monitor/cache/sent-reports.json
+            narajangter-bid-monitor/cache/dev-alert-state.json
           key: sent-weekly-${{ github.run_id }}
 
       - name: 리포트 파일 업로드 (백업)

@@ -9,7 +9,8 @@ import {
   type PeriodReportOptions,
 } from "./notify/telegramMessage.js";
 import { sendPeriodReport, sendTelegramReport } from "./notify/telegram.js";
-import { hasDevAlertTarget, sendDevAlert, type DevAlertTargets } from "./notify/devAlert.js";
+import { describeFailure, hasDevAlertTarget, sendDevAlert, sendDevResolved, type DevAlertTargets } from "./notify/devAlert.js";
+import { closeIssueOpenedBefore, loadDevAlertState, openIssue, saveDevAlertState } from "./state/devAlertState.js";
 import { classifyBidMethod } from "./matching/bidMethod.js";
 import { appendMatchesToFeedbackSheet } from "./sheets/feedbackSheet.js";
 import { saveReportToDisk } from "./report/saveReport.js";
@@ -37,6 +38,9 @@ import { redactSecrets } from "./redact.js";
  *   hourly — 새로 나온 공고만 골라 텔레그램으로 바로 알린다. 2026-10-02부터 정기 실행하지 않는다
  *            (공고가 뜰 때마다 알림이 와서 담당자 요청으로 끔). 코드는 수동 실행용으로 남긴다.
  */
+/** 이번 실행이 시작된 시각 — 이번 실행 중에 생긴 문제와 그 전에 생긴 문제를 가른다 (해결 알림) */
+const runStartedAt = new Date();
+
 async function run(): Promise<number> {
   let env: Env | undefined;
   let state: NotifiedState | undefined;
@@ -75,6 +79,7 @@ async function run(): Promise<number> {
         : await runWeekly(env, appConfig.recipients, reportInput, now);
     // 여기까지 왔으면 보고는 나갔다 (발송 실패는 위에서 예외로 빠진다). 일부 조회 실패(2)여도 보낸 것으로 친다.
     if (scheduled && sent && !env.dryRun) markSent(env.sentReportsPath, sent, scheduled, now);
+    if (!env.dryRun) await alertResolved(env);
     return exitCode;
   } catch (err) {
     return await handleFailure(err, env);
@@ -329,6 +334,7 @@ function githubRunUrl(): string | undefined {
  */
 async function alertPartialFailure(env: Env, failures: string[]): Promise<void> {
   if (failures.length === 0) return;
+  recordOpenIssue(env, "일부 대화방 발송 실패");
   const targets = devAlertTargets(env);
   if (!hasDevAlertTarget(targets)) {
     logger.info("DEV_ALERT_TELEGRAM_CHAT_ID·DEV_ALERT_WEBHOOK_URL이 없어 일부 발송 실패 알림을 건너뜁니다.");
@@ -344,6 +350,33 @@ async function alertPartialFailure(env: Env, failures: string[]): Promise<void> 
   });
 }
 
+/** 개발자에게 알린 문제를 기록해 둔다 — 다음 실행이 정상이면 해결 알림을 보낸다 */
+function recordOpenIssue(env: Env, summary: string): void {
+  const state = loadDevAlertState(env.devAlertStatePath);
+  openIssue(state, env.runMode, summary, new Date());
+  saveDevAlertState(env.devAlertStatePath, state);
+}
+
+/**
+ * 앞서 실패를 알린 보고가 이번 실행에서 정상으로 나갔으면 "해결됨"을 알린다 (2026-10-16 요청).
+ * 이번 실행에서 또 일부 대화방 발송 실패가 났으면 아직 안 풀린 것이라 알리지 않는다.
+ */
+async function alertResolved(env: Env): Promise<void> {
+  const state = loadDevAlertState(env.devAlertStatePath);
+  const issue = closeIssueOpenedBefore(state, env.runMode, runStartedAt);
+  if (!issue) return;
+  saveDevAlertState(env.devAlertStatePath, state);
+  const targets = devAlertTargets(env);
+  if (!hasDevAlertTarget(targets)) return;
+  await sendDevResolved(targets, {
+    runMode: env.runMode,
+    issue,
+    resolvedAt: new Date(),
+    backupRun: env.backupRun,
+    runUrl: githubRunUrl(),
+  });
+}
+
 async function handleFailure(err: unknown, env: Env | undefined): Promise<number> {
   const secrets = env
     ? [env.naraBidServiceKey, env.naraPrestdServiceKey, env.smtpPass, env.telegramBotToken, env.googleServiceAccountJson]
@@ -351,6 +384,7 @@ async function handleFailure(err: unknown, env: Env | undefined): Promise<number
   const message = redactSecrets(toErrorMessage(err), secrets);
   logger.error("실행 실패", { error: message });
   if (!env || env.dryRun) return 1;
+  recordOpenIssue(env, describeFailure(message));
 
   const targets = devAlertTargets(env);
   if (!hasDevAlertTarget(targets)) {

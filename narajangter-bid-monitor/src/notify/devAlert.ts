@@ -103,13 +103,46 @@ export function hasDevAlertTarget(targets: DevAlertTargets): boolean {
 
 /** 보내지 못해도 실행 결과를 바꾸지 않는다 — 로그에만 남긴다. 주소·토큰은 오류에 싣지 않는다. */
 export async function sendDevAlert(targets: DevAlertTargets, input: DevAlertInput): Promise<void> {
+  await sendToTargets(targets, buildDevAlertTelegram(input), buildDevAlertText(input), "실패 알림");
+}
+
+export interface DevResolvedInput {
+  runMode: DevAlertInput["runMode"];
+  /** 열려 있던 문제 — 처음 시각과 한 줄 설명 */
+  issue: { since: string; summary: string };
+  resolvedAt: Date;
+  /** 이번 실행이 GitHub 예비 실행이었는지 (아니면 아침 실행) */
+  backupRun: boolean;
+  runUrl?: string;
+}
+
+/**
+ * 해결 알림 — 앞서 실패(또는 일부 대화방 발송 실패)를 알린 보고가 이번 실행에서 정상으로 나갔을 때.
+ * 2026-10-16 요청: 실패 알림 뒤에 풀렸는지 실행 기록을 열어 보지 않아도 알 수 있게.
+ */
+export function buildDevResolvedText(input: DevResolvedInput): string {
+  const since = new Date(input.issue.since).toLocaleString("ko-KR");
+  return [
+    `[나라장터 모니터링] ✅ ${RUN_NAME[input.runMode]} 정상화`,
+    `문제: ${input.issue.summary} (${since}부터)`,
+    `${input.resolvedAt.toLocaleString("ko-KR")} ${input.backupRun ? "예비 실행" : "정시 실행"}에서 보고를 정상 발송했습니다.`,
+    ...(input.runUrl ? [input.runUrl] : []),
+  ].join("\n");
+}
+
+export async function sendDevResolved(targets: DevAlertTargets, input: DevResolvedInput): Promise<void> {
+  const text = buildDevResolvedText(input);
+  await sendToTargets(targets, escapeTelegramHtml(text), text, "해결 알림");
+}
+
+async function sendToTargets(targets: DevAlertTargets, telegramHtml: string, plainText: string, label: string): Promise<void> {
   if (targets.telegram) {
     const { botToken, chatId } = targets.telegram;
     try {
-      await sendTelegramMessages([buildDevAlertTelegram(input)], { botToken, chatIds: [chatId], maxRetries: 1 });
-      logger.info("개발자 텔레그램 실패 알림 발송 완료");
+      await sendTelegramMessages([telegramHtml], { botToken, chatIds: [chatId], maxRetries: 1 });
+      logger.info(`개발자 텔레그램 ${label} 발송 완료`);
     } catch (err) {
-      logger.error("개발자 텔레그램 실패 알림 발송 실패", { error: redactSecrets(toErrorMessage(err), [botToken]) });
+      logger.error(`개발자 텔레그램 ${label} 발송 실패`, { error: redactSecrets(toErrorMessage(err), [botToken]) });
     }
   }
   if (targets.webhookUrl) {
@@ -118,13 +151,13 @@ export async function sendDevAlert(targets: DevAlertTargets, input: DevAlertInpu
       const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildDevAlertPayload(webhookUrl, buildDevAlertText(input))),
+        body: JSON.stringify(buildDevAlertPayload(webhookUrl, plainText)),
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      logger.info("개발자 웹훅 실패 알림 발송 완료");
+      logger.info(`개발자 웹훅 ${label} 발송 완료`);
     } catch (err) {
-      logger.error("개발자 웹훅 실패 알림 발송 실패", { error: redactSecrets(toErrorMessage(err), [webhookUrl]) });
+      logger.error(`개발자 웹훅 ${label} 발송 실패`, { error: redactSecrets(toErrorMessage(err), [webhookUrl]) });
     }
   }
 }
