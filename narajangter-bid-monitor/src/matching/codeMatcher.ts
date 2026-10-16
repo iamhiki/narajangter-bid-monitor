@@ -38,11 +38,6 @@ export function matchCodes(notice: NormalizedNotice, productCodes: CodeEntry[], 
   return { matchedProductCodes, matchedIndustryCodes };
 }
 
-/** 키워드 없이 품목만으로도 수집할 수 있는 매칭이 있는지 (requiresKeyword 품목은 제외) */
-export function hasStandaloneProductMatch(matchedProductCodes: CodeEntry[]): boolean {
-  return matchedProductCodes.some((c) => !c.requiresKeyword);
-}
-
 /**
  * 용역 공고의 조달분류(공공조달분류 품명번호, pubPrcrmntClsfcNo)가 등록 분류인가.
  * 제목에 키워드가 없어도 발주기관이 '전시장치설치및디자인서비스'로 분류한 공고는 본업일 가능성이 높다 —

@@ -2,7 +2,7 @@ import type { NormalizedNotice } from "../api/types.js";
 import type { LicenseLimitGroup } from "../api/licenseLimitApi.js";
 import type { AppConfig } from "../config/loadJsonConfig.js";
 import { classifyBidMethod } from "./bidMethod.js";
-import { hasStandaloneProductMatch, matchCodes, matchServiceClasses } from "./codeMatcher.js";
+import { matchCodes, matchServiceClasses } from "./codeMatcher.js";
 import { isDeadlinePassed } from "./deadline.js";
 import { matchExcludeKeyword, matchKeywords } from "./keywordMatcher.js";
 import { detectOverseasVenue } from "./overseasVenueFilter.js";
@@ -125,7 +125,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
   const matchedKeywords = matchKeywords(notice, config.keywords);
   const matchedServiceClasses = matchServiceClasses(notice, config.serviceClasses, config.serviceClassExcludeWords);
   const candidate =
-    hasStandaloneProductMatch(matchedProductCodes) || matchedKeywords.length > 0 || overseas.isMongolia || matchedServiceClasses.length > 0;
+    matchedProductCodes.length > 0 || matchedKeywords.length > 0 || overseas.isMongolia || matchedServiceClasses.length > 0;
   // 어디서 걸렸는지를 말로 구분한다 — "품목 조형물, 키워드 조형물"처럼 쓰면 같은 말이 두 번 나와
   // 무엇이 다른지 알 수 없었다 (2026-10-02 요청). 품목 = 발주기관이 나라장터에 등록한 물품 분류,
   // 키워드 = 공고 제목에 든 말.
@@ -146,12 +146,7 @@ export function diagnoseNotice(notice: NormalizedNotice, ctx: DiagnoseContext): 
     matchedIndustryCodes.length > 0
       ? ` (업종 ${matchedIndustryCodes.map((c) => c.name).join(", ")}은 맞지만 업종만으로는 수집하지 않음)`
       : "";
-  const keywordOnlyProducts = matchedProductCodes.filter((c) => c.requiresKeyword);
-  const productNote =
-    keywordOnlyProducts.length > 0
-      ? `제목에 등록 키워드가 없음 — 세부품명(${keywordOnlyProducts.map((c) => c.name).join(", ")})이 등록 품목이긴 하지만 ` +
-        `쓰임새가 넓어 키워드가 같이 있을 때만 수집함`
-      : `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님`;
+  const productNote = `제목에 등록 키워드가 없고 세부품명(${notice.productClsfcName ?? notice.productClsfcNo ?? "없음"})도 등록 품목이 아님`;
   steps.push(
     candidate
       ? { step: "키워드·품목", ok: true, detail: hits.join(" · ") }

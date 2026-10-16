@@ -85,7 +85,7 @@ describe("loadAppConfig", () => {
   it("수집 세부품명은 등록 품목 그대로이고, 강력추천 업종은 strongMatchName이 있는 보유 업종의 나라장터 표기다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
       heldQualifications: {
-        heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판", requiresKeyword: true }],
+        heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판" }],
         heldIndustries: [
           { code: "1426", name: "소프트웨어사업자(패키지소프트웨어개발.공급사업)", strongMatchName: "소프트웨어사업자" },
           { code: "1517", name: "출판사" },
@@ -95,7 +95,7 @@ describe("loadAppConfig", () => {
     const config = loadAppConfig();
     expect(config.productCodes).toEqual([
       { code: "10", name: "조형물" },
-      { code: "11", name: "안내판", requiresKeyword: true },
+      { code: "11", name: "안내판" },
     ]);
     expect(config.industryCodes).toEqual([{ code: "1426", name: "소프트웨어사업자" }]);
     // 자격 대조용 보유 업종은 등록증 이름 그대로, 전부

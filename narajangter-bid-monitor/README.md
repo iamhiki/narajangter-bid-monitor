@@ -21,7 +21,7 @@
 | 파일 | 내용 |
 |---|---|
 | `config/keywords.json` | 제목 키워드 목록(`keywords`) + 제외 키워드 목록(`excludeKeywords`) + 최소 예산금액(`minBudgetAmount`). 자유롭게 추가/삭제 가능 |
-| `config/held-qualifications.json` | 우리 회사가 실제 보유한 등록물품/등록업종 — **입찰 참가자격 충족 여부** 판정용 (아래 "자격조건 필터" 참고). 등록물품은 물품 공고 **수집 기준**으로도 쓰인다. 품목의 `requiresKeyword: true`는 제목 키워드가 같이 있어야 수집하는 넓은 품목, 업종의 `strongMatchName`은 강력추천 판정에 쓰는 업종(나라장터 표기) |
+| `config/held-qualifications.json` | 우리 회사가 실제 보유한 등록물품/등록업종 — **입찰 참가자격 충족 여부** 판정용 (아래 "자격조건 필터" 참고). 등록물품은 물품 공고 **수집 기준**으로도 쓰인다. 업종의 `strongMatchName`은 강력추천 판정에 쓰는 업종(나라장터 표기) |
 | `config/recipients.json` | 리포트를 받을 이메일 목록 (여러 명 추가 가능) |
 
 코드/키워드/수신자를 바꿀 때는 코드 수정이 필요 없고, 해당 JSON 파일만 수정하면 다음 실행부터 반영됩니다.

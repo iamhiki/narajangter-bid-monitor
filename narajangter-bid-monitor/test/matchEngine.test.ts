@@ -421,30 +421,22 @@ describe("넓은 제외 키워드 — 제작 신호가 있으면 통과", () => 
   });
 });
 
-describe("requiresKeyword 품목 — 쓰임새가 넓은 품목은 키워드가 같이 있어야 수집", () => {
+describe("등록 세부품명 단독 수집 (2026-10-16 — 넓은 품목에 키워드를 요구하던 규칙 삭제)", () => {
   const displayConfig: AppConfig = {
     ...config,
-    productCodes: [
-      ...config.productCodes,
-      { code: "4511189301", name: "영상정보디스플레이장치", requiresKeyword: true },
-    ],
+    productCodes: [...config.productCodes, { code: "4511189301", name: "영상정보디스플레이장치" }],
   };
 
-  it("키워드 없이 그 품목만 걸리면 수집하지 않는다 (보안 관제실 모니터 구매 등)", () => {
+  it("제목 키워드가 없어도 등록 품목이면 수집한다 (참고용)", () => {
     const notice = makeNotice({ title: "경비보안시스템 유지관리용 관제시스템 개선사업", productClsfcNo: "4511189301" });
-    expect(evaluateNotice(notice, displayConfig)).toBeNull();
+    expect(evaluateNotice(notice, displayConfig)?.confidence).toBe("참고용");
   });
 
-  it("제목 키워드가 같이 있으면 수집하고, 품목+키워드라 강력추천이다", () => {
+  it("제목 키워드가 같이 있으면 품목+키워드라 강력추천이다", () => {
     const notice = makeNotice({ title: "상설전시 영상장비 구매", productClsfcNo: "4511189301" });
     const result = evaluateNotice(notice, displayConfig);
     expect(result?.confidence).toBe("강력추천");
     expect(result?.matchedProductCodes[0]?.code).toBe("4511189301");
-  });
-
-  it("표시가 없는 품목(안내전광판)은 지금처럼 품목만으로도 수집한다", () => {
-    const notice = makeNotice({ title: "강의실 LED 스크린 설치", productClsfcNo: "5512190301" });
-    expect(evaluateNotice(notice, displayConfig)?.confidence).toBe("참고용");
   });
 });
 

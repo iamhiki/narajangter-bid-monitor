@@ -20,7 +20,6 @@ const emailSchema = z.string().trim().email();
 const codeEntrySchema = z.object({
   code: z.string().trim().min(1, "code는 비어있을 수 없습니다"),
   name: z.string().trim().min(1, "name은 비어있을 수 없습니다"),
-  requiresKeyword: z.boolean().optional(),
 });
 
 /**
@@ -63,7 +62,7 @@ const keywordsFileSchema = z.object({
     .min(1, "allowedBidMethods 배열이 비어있습니다 (최소 1개 필요)")
     .default([...BID_METHOD_CATEGORIES]),
   /** 용역 조달분류(8자리 품명번호) — 제목 키워드가 없어도 이 분류면 수집한다. 지금은 비워 둔다 */
-  serviceClasses: z.array(codeEntrySchema.omit({ requiresKeyword: true })).default([]),
+  serviceClasses: z.array(codeEntrySchema).default([]),
   serviceClassExcludeWords: z.array(z.string().trim().min(1)).default([]),
 });
 
@@ -72,11 +71,10 @@ const recipientsFileSchema = z.object({
 });
 
 const heldQualificationsFileSchema = z.object({
-  /** requiresKeyword: 제목 키워드가 같이 있어야 수집하는 넓은 품목 (안내판·책상·소프트웨어 등) */
   heldProducts: z.array(codeEntrySchema).min(1, "heldProducts 배열이 비어있습니다"),
   /** strongMatchName: 강력추천 판정에 쓰는 업종 — 투찰가능업종명에서 찾을 나라장터 표기 */
   heldIndustries: z
-    .array(codeEntrySchema.omit({ requiresKeyword: true }).extend({ strongMatchName: z.string().trim().min(1).optional() }))
+    .array(codeEntrySchema.extend({ strongMatchName: z.string().trim().min(1).optional() }))
     .min(1, "heldIndustries 배열이 비어있습니다"),
 });
 
@@ -118,11 +116,6 @@ function findDuplicates(values: string[]): string[] {
 export interface CodeEntry {
   code: string;
   name: string;
-  /**
-   * productCodes 전용. true면 이 품목만으로는 수집하지 않고 제목 키워드가 같이 걸려야 한다.
-   * 쓰임새가 넓은 품목(영상정보디스플레이장치 — 보안 관제실·상황실 모니터 구매에도 쓰인다)용.
-   */
-  requiresKeyword?: boolean;
 }
 
 export interface AppConfig {
@@ -145,7 +138,7 @@ export interface AppConfig {
   keepMissingQualifications?: CodeEntry[];
   businessTypes: BusinessType[];
   allowedBidMethods: BidMethodCategory[];
-  /** 수집에 쓰는 세부품명 — 등록 품목(heldProducts) 그대로. requiresKeyword 품목은 제목 키워드가 같이 있어야 한다 */
+  /** 수집에 쓰는 세부품명 — 등록 품목(heldProducts) 그대로. 제목 키워드가 없어도 이것만으로 수집한다 */
   productCodes: CodeEntry[];
   /** 강력추천 판정용 업종 — heldIndustries 중 strongMatchName이 있는 것. name은 투찰가능업종명에서 찾을 나라장터 표기 */
   industryCodes: CodeEntry[];
