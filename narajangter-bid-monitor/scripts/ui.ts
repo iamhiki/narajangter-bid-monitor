@@ -406,17 +406,20 @@ function allowedRegionsOf(n: NormalizedNotice): string[] | null {
   return map.get(n.noticeNo) ?? [];
 }
 
-/** 제외된 공고 카드의 싱크로율 — 제목 비교는 공고마다 한 번만 한다 */
-const excludedScoreCache = new Map<string, number>();
-function excludedScore(noticeNo: string, title: string): number {
-  const fromBody = enrichment.get(noticeNo)?.similarity?.maxScore;
-  if (fromBody != null) return fromBody;
-  let v = excludedScoreCache.get(noticeNo);
+/** 제외된 공고 카드의 싱크로율과 근거 — 첨부를 읽은 공고는 그 값, 아니면 제목 비교 (공고마다 한 번만) */
+const excludedSimilarityCache = new Map<string, SimilarityView>();
+function excludedSimilarity(noticeNo: string, title: string): SimilarityView {
+  const fromBody = enrichment.get(noticeNo)?.similarity;
+  if (fromBody) return fromBody;
+  let v = excludedSimilarityCache.get(noticeNo);
   if (v === undefined) {
-    v = similarityView(title).maxScore;
-    excludedScoreCache.set(noticeNo, v);
+    v = similarityView(title);
+    excludedSimilarityCache.set(noticeNo, v);
   }
   return v;
+}
+function excludedScore(noticeNo: string, title: string): number {
+  return excludedSimilarity(noticeNo, title).maxScore;
 }
 
 function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
@@ -838,7 +841,8 @@ function heldProductCandidates(appConfig: AppConfig, listed: Set<string>): unkno
       productCode: code,
       productName: held.get(code),
       reNotice: /재공고/.test(String(n.raw.ntceKindNm ?? "")) || /재공고/.test(n.title),
-      maxScore: excludedScore(n.noticeNo, n.title),
+      // 싱크로율과 근거(눌러서 보는 패널) — 본공고 카드와 같은 내용
+      ...excludedSimilarity(n.noticeNo, n.title),
       excludedAt: d.excludedAt,
       excludedDetail: failed?.detail ?? null,
     });
@@ -892,7 +896,7 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       bidMethod: notice.bidMethod,
       bidMethodCategory: classifyBidMethod(notice.bidMethod),
       reNotice: /재공고/.test(String(notice.raw.ntceKindNm ?? "")) || /재공고/.test(notice.title),
-      maxScore: excludedScore(notice.noticeNo, notice.title),
+      ...excludedSimilarity(notice.noticeNo, notice.title),
       excludeKeyword: keyword,
       // 제목·세부품명에 든 관심 키워드 — 제외 키워드와 함께 있으면 화면 '검토필요' 칸에 모은다 (2026-10-15 요청)
       interestKeywords: matchKeywords(notice, appConfig.keywords),

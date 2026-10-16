@@ -1021,15 +1021,15 @@ footer b { color: var(--muted); }
     <p class="sub enrich-meta" id="enrichMeta" role="status"></p>
     <div id="liveResults"></div>
     <div class="empty" id="kindEmpty" hidden></div>
-    <details class="group off-group rescue-group" id="reviewGroup" hidden>
-      <summary><h2>검토필요 <span class="group-n" id="reviewN"></span></h2></summary>
-      <p class="group-note">제목에 <b>관심 키워드</b>와 <b>제외 키워드</b>가 함께 있어 목록에서 뺀 공고입니다. 다른 조건(마감·금액·자격·지역 등)은 모두 통과했습니다. 우리 공고라고 판단되면 <b>목록에 올리기</b>를 누르세요 — 본공고·사전규격 목록에 들어가고 팀원 모두에게 보입니다.</p>
-      <div id="reviewList"></div>
-    </details>
     <details class="group off-group rescue-group" id="heldGroup" hidden>
       <summary><h2>보유 품목 공고 <span class="group-n" id="heldN"></span></h2></summary>
       <p class="group-note">공고의 세부품명이 <b>지일 보유 품목</b>(경쟁입찰참가자격 등록 품목)과 같은데, 키워드·금액 등으로 목록에 없던 공고입니다. 보유 품목으로 제한된 공고는 들어올 수 있는 업체가 적어 경쟁률이 낮습니다. 우리 공고라고 판단되면 <b>목록에 올리기</b>를 누르세요.</p>
       <div id="heldList"></div>
+    </details>
+    <details class="group off-group rescue-group" id="reviewGroup" hidden>
+      <summary><h2>검토필요 <span class="group-n" id="reviewN"></span></h2></summary>
+      <p class="group-note">제목에 <b>관심 키워드</b>와 <b>제외 키워드</b>가 함께 있어 목록에서 뺀 공고입니다. 다른 조건(마감·금액·자격·지역 등)은 모두 통과했습니다. 우리 공고라고 판단되면 <b>목록에 올리기</b>를 누르세요 — 본공고·사전규격 목록에 들어가고 팀원 모두에게 보입니다.</p>
+      <div id="reviewList"></div>
     </details>
     <details class="group off-group rescue-group" id="rescueGroup" hidden>
       <summary><h2>첨부로 다시 볼 공고 <span class="group-n" id="rescueN"></span></h2></summary>
@@ -1657,17 +1657,6 @@ function bigCardHead(n, markWord) {
         <h3>${title}${noticeNoTag(n.noticeNo)}</h3>
         <dl class="facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
 }
-/** 큰 카드 오른쪽 싱크로율 칸 (누르지 않는 표시용) */
-function staticScore(n) {
-  const score = Math.round((n.maxScore ?? 0) * 100);
-  const tone = (n.maxScore ?? 0) >= HIGH ? "hi" : (n.maxScore ?? 0) >= LOW ? "edge" : "";
-  return `<div class="card-score static ${tone}">
-        <b>${score}<i>%</i></b>
-        <span class="score-bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, score))}%"></span></span>
-        <small>싱크로율</small>
-      </div>`;
-}
-
 /** 보유 품목 공고 카드 — 본공고 카드처럼 크게 (2026-10-15 요청) */
 function renderHeldRow(n) {
   const past = daysLeft(n.sourceType === "본공고" ? effDeadline(n) : n.deadline);
@@ -1682,10 +1671,10 @@ function renderHeldRow(n) {
           <dl class="er-rows"><div><dt>목록에 없던 이유</dt><dd>${why}</dd></div></dl>
         </div>
       </div>
-      ${staticScore(n)}
+      ${scoreBoxHtml(n)}
     </div>
     <div class="ex-foot">
-      <span class="promote-ask">우리 공고라고 판단되면 <button type="button" class="rs-promote" data-promote="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-keyword="" data-reason="${esc(n.excludedAt ? stageLabel(n.excludedAt) : "첨부 확인")}">목록에 올리기</button></span>
+      <span class="promote-ask">우리 공고라고 판단되면 <button type="button" class="rs-promote" data-promote="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-keyword=""data-reason="${esc(n.excludedAt ? stageLabel(n.excludedAt) : "첨부 확인")}">목록에 올리기</button></span>
     </div>
   </div>`;
 }
@@ -1717,7 +1706,7 @@ function renderReviewRow(n) {
           </dl>
         </div>
       </div>
-      ${staticScore(n)}
+      ${scoreBoxHtml(n)}
     </div>
     <div class="ex-foot">
       <span class="promote-ask">우리 공고라고 판단되면 <button type="button" class="rs-promote" data-promote="${esc(n.noticeNo)}" data-title="${esc(n.title)}" data-keyword="${esc(kw)}">목록에 올리기</button></span>
@@ -2062,6 +2051,7 @@ function applyFilters() {
 const JUMPS = [
   { id: "grpMain", label: "본공고" },
   { id: "grpPre", label: "사전규격" },
+  // 화면에 놓인 순서와 같아야 한다 — markJump가 이 순서로 '지금 보는 칸'을 고른다
   { id: "heldGroup", label: "보유 품목 공고" },
   { id: "reviewGroup", label: "검토필요" },
   { id: "rescueGroup", label: "첨부로 다시 볼 공고" },
@@ -2219,7 +2209,8 @@ function scoreWhyHtml(n) {
  * 쓰던 대화가 날아가므로 점수 칸과 카드 테두리 색만 고친다.
  */
 function applyBodyScores() {
-  for (const n of [...lastItems, ...lastClosed]) {
+  // 검토필요·보유 품목 카드도 같은 점수 칸(눌러서 근거 보기)을 쓴다
+  for (const n of [...lastItems, ...lastClosed, ...lastTitleExcluded, ...lastHeld]) {
     const s = enrich.byNo[n.noticeNo]?.similarity;
     // 점수가 그대로여도 공고문·내역서로 근거 키워드를 새로 찾았으면(textSource) 근거 칸을 다시 그린다
     if (!s || (s.maxScore === n.maxScore && s.basis === n.basis && s.textSource === n.textSource)) continue;
