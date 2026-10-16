@@ -74,7 +74,7 @@ async function readFirstDocument(candidates: NoticeAttachment[], options: FetchB
       }
 
       // 공고 첨부에도 발주기관 담당자 성명·연락처가 그대로 들어 있다. 이 텍스트는 이후
-      // ⑤ LLM 프롬프트로 나갈 수 있으므로 여기서 한 번 가린 뒤에 넘긴다.
+      // 화면·리포트·캐시에 쓰이므로 여기서 한 번 가린 뒤에 넘긴다.
       const masked = redactPersonal(extracted.text);
 
       return {

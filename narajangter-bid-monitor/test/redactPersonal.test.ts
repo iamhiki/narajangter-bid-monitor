@@ -49,7 +49,7 @@ describe("redactPersonal", () => {
   });
 
   it("사업 내용은 건드리지 않는다", () => {
-    // 마스킹이 과하면 ⑤단계 LLM이 판단할 근거 자체가 사라진다.
+    // 마스킹이 과하면 첨부 문장 규칙(참가자격·과업 범위)이 읽을 근거 자체가 사라진다.
     const raw = "국립생물자원관 어린이체험실 전시 설계 및 제작·설치, 총사업비 620,000,000원, 과업기간 2026. 7. 31.까지";
     const { text, counts } = redactPersonal(raw);
     expect(text).toBe(raw);
