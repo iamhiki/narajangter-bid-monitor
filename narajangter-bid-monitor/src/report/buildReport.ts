@@ -97,9 +97,69 @@ function missingQualificationText(m: MatchedNotice): string | undefined {
   return `자격 미보유 (공동수급 확인 필요) — 아래 중 하나 필요: ${q.missing.map((g) => g.text ?? g.names.join(" 또는 ")).join(" / 또는 ")}`;
 }
 
-function renderMissingQualificationHtml(m: MatchedNotice): string {
-  const text = missingQualificationText(m);
-  return text ? `<br/><span style="color:#b45309;font-weight:600;">${escapeHtml(text)}</span>` : "";
+const QUAL_OK = "color:#15803d;";
+const QUAL_MISS = "color:#b91c1c;font-weight:600;";
+const QUAL_SPARE = "color:#9ca3af;";
+const QUAL_OR = `<div style="color:#9ca3af;font-size:11px;padding:1px 0 1px 14px;">또는</div>`;
+
+function qualItem(label: string, style: string, mark: string): string {
+  return `<div style="${style}padding:1px 0;">${mark} ${escapeHtml(label)}</div>`;
+}
+
+function qualBlock(heading: string, items: string[], joiner = ""): string {
+  return (
+    `<div style="margin-top:8px;"><div style="font-size:12px;color:#6b7280;margin-bottom:2px;">${heading}</div>` +
+    `${items.join(joiner)}</div>`
+  );
+}
+
+/**
+ * 자격 미보유 상세 — 카드 오른쪽 칸에 "필수 보유 / 이 중 하나" 묶음으로 한 줄씩 보여 준다.
+ * 예전에는 "A + B + C 또는 D / 또는 …"를 본문 한 줄에 이어 붙여 무엇이 꼭 필요한지 읽기 어려웠다 (2026-10-19 요청).
+ * 묶음 구조는 웹 화면 팝업(ui.html layoutHtml)과 같다. layout이 없는 예전 캐시는 참가 방법별 목록으로 보여 준다.
+ */
+function renderQualificationPanelHtml(m: MatchedNotice): string {
+  const q = m.qualification;
+  if (q?.status !== "미충족") return "";
+  const parts: string[] = [];
+  const layout = q.layout;
+  if (layout && (layout.blocks.length > 0 || layout.methods)) {
+    for (const b of layout.blocks) {
+      if (b.kind === "all") {
+        const h = b.options.length === 1 ? "필수 보유" : `필수 보유 — ${b.options.length}개 모두 필요`;
+        parts.push(qualBlock(h, b.options.map((o) => (o.held ? qualItem(o.label, QUAL_OK, "✓") : qualItem(o.label, QUAL_MISS, "✗")))));
+      } else {
+        const items = b.options.map((o) =>
+          o.held ? qualItem(o.label, QUAL_OK, "✓") : b.met ? qualItem(o.label, QUAL_SPARE, "–") : qualItem(o.label, QUAL_MISS, "✗")
+        );
+        parts.push(qualBlock(`아래 중 1개 이상 — ${b.met ? "보유로 충족" : "미보유"}`, items, QUAL_OR));
+      }
+    }
+    if (layout.methods) {
+      const ok = (method: { held: boolean }[][]) => method.every((row) => row.some((o) => o.held));
+      const anyOk = layout.methods.some(ok);
+      const items = layout.methods.map((method) => {
+        const text = method.map((row) => row.map((o) => o.label).join(" 또는 ")).join(" + ");
+        return ok(method) ? qualItem(text, QUAL_OK, "✓") : anyOk ? qualItem(text, QUAL_SPARE, "–") : qualItem(text, QUAL_MISS, "✗");
+      });
+      parts.push(qualBlock(`아래 방법 중 하나 — ${anyOk ? "보유로 충족" : "미보유"}`, items, QUAL_OR));
+    }
+  } else {
+    const items = q.missing.map((g) => qualItem(g.text ?? g.names.join(" 또는 "), QUAL_MISS, "✗"));
+    parts.push(qualBlock(q.missing.length > 1 ? "아래 중 하나 필요" : "필요한 자격", items, QUAL_OR));
+  }
+  // 공동수급 불허면 부족한 자격을 함께 채울 업체를 구할 수 없어 빨강, 허용·미확인이면 노랑
+  const denied = m.jointBidStatus !== undefined && /불허/.test(m.jointBidStatus);
+  const joint = !m.jointBidStatus ? "공동수급 여부는 원문 확인" : denied ? "공동수급 불허 — 참가 어려움" : "공동수급으로 참가 검토";
+  return `
+      <td style="width:360px;vertical-align:top;padding-left:16px;">
+        <div style="background:${denied ? "#fef2f2" : "#fffbeb"};border:1px solid ${denied ? "#fecaca" : "#fde68a"};border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.5;color:#374151;">
+          <div style="font-size:13px;font-weight:700;color:${denied ? "#b91c1c" : "#b45309"};">자격 미보유</div>
+          <div style="color:#6b7280;">${joint}</div>
+          ${parts.join("")}
+          <div style="margin-top:8px;font-size:11px;color:#9ca3af;">✓ 보유 · ✗ 미보유 · – 없어도 됨</div>
+        </div>
+      </td>`;
 }
 
 function renderMissingQualificationText(m: MatchedNotice): string | undefined {
@@ -130,21 +190,23 @@ function renderMatchCardHtml(m: MatchedNotice): string {
     .join("");
 
   return `
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;margin-bottom:10px;">
-    <div style="margin-bottom:6px;">
+  <div style="border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:12px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"><tr><td style="vertical-align:top;">
+    <div style="margin-bottom:8px;">
       <span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${style.bg};color:${style.fg};font-size:12px;font-weight:600;margin-right:6px;">${m.confidence}</span>
       ${renderOverseasVenueBadgeHtml(m)}
       ${renderSimilarityHtml(m)}
       <span style="font-size:13px;color:#6b7280;">[${n.businessType}]</span>
     </div>
-    <div style="font-size:15px;font-weight:600;margin-bottom:6px;">${titleHtml}</div>
-    <div style="font-size:13px;color:#374151;line-height:1.6;">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px;">${titleHtml}</div>
+    <div style="font-size:13px;color:#374151;line-height:1.7;">
       기관: ${escapeHtml(formatDisplayValue(n.institution))}<br/>
       사업금액: ${escapeHtml(formatBudget(n.budgetAmount))}<br/>
       마감/일정: ${escapeHtml(formatDisplayValue(n.deadline))}<br/>
-      공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderMissingQualificationHtml(m)}${renderJointBidHtml(m)}
+      공고번호: ${escapeHtml(n.noticeNo)}${n.bidMethod ? `<br/>낙찰방법: ${escapeHtml(n.bidMethod)}` : ""}${renderJointBidHtml(m)}
     </div>
-    <div style="margin-top:8px;">${badges}</div>
+    <div style="margin-top:10px;">${badges}</div>
+    </td>${renderQualificationPanelHtml(m)}</tr></table>
   </div>`;
 }
 
@@ -223,7 +285,7 @@ export function buildReport(input: ReportInput, options: { title?: string } = {}
   const periodLabel = `${input.window.begin.toLocaleDateString("ko-KR")} ~ ${input.window.end.toLocaleDateString("ko-KR")}`;
 
   const html = `
-  <div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:680px;margin:0 auto;color:#111827;">
+  <div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:960px;margin:0 auto;padding:0 16px;color:#111827;">
     <h1 style="font-size:20px;margin-bottom:4px;">${escapeHtml(title)}</h1>
     <div style="font-size:13px;color:#6b7280;margin-bottom:16px;">조회 기간: ${periodLabel} · 생성 시각: ${input.generatedAt.toLocaleString("ko-KR")}</div>
     ${renderSectionHtml("본공고", input.bid)}
