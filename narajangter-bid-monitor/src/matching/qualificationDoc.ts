@@ -53,6 +53,23 @@ export interface DocRequirement {
   orGroup?: number;
   /** 미보유지만 같은 "또는" 묶음의 다른 자격을 보유해 이 요건은 채운 상태 — 미보유로 세지 않는다 */
   covered?: boolean;
+  /**
+   * "…면허를 단독으로 보유하지 않은 경우에는 해당 면허를 보유한 업체와 분담이행방식으로 공동수급체를 구성"처럼
+   * 없어도 공동수급으로 참가할 수 있는 조건부 요건 (2026-10-19 휘문고 역사관 실내건축공사업). 미보유로 세지 않는다
+   */
+  jointAlternative?: boolean;
+}
+
+/** 코드가 나온 항목 안에 "보유하지 않은 경우 … 공동수급/분담이행/공동이행"이 있는지 */
+const JOINT_ALTERNATIVE =
+  /(?:보\s*유\s*하\s*지\s*(?:않|못)|없\s*는|미\s*보\s*유)[^.]{0,30}?경\s*우[^.]{0,120}?(?:공\s*동\s*수\s*급|분\s*담\s*이\s*행|공\s*동\s*이\s*행)/;
+const COLLECTIVE_QUALIFICATION =
+  /공\s*동\s*(?:으\s*로|수\s*급\s*체\s*(?:가|구\s*성\s*원\s*이))\s*(?:입\s*찰\s*)?(?:참\s*가\s*)?자\s*격\s*을?\s*(?:모\s*두\s*)?갖\s*추/;
+export function isJointAlternative(section: string, at: number): boolean {
+  const after = section.slice(at, at + 260);
+  // 다음 항목("사.", "2)", "③", "※") 앞까지만 본다 — 다음 항목의 공동수급 문구가 붙지 않게
+  const stop = after.slice(1).search(/\s[가-하]\s*\.\s|\s\d{1,2}\s*\)\s|[①-⑳]|※/);
+  return JOINT_ALTERNATIVE.test(stop >= 0 ? after.slice(0, stop + 1) : after);
 }
 
 export type RequirementBasis = "등록" | "직접생산" | "면허";
@@ -267,7 +284,30 @@ export function findQualificationSection(text: string): string | null {
     if (!best || score > best.score) best = { at: m.index, score };
   }
   if (!best || best.score < 2) return null;
-  return flat.slice(best.at, best.at + 1500);
+  return flat.slice(best.at, sectionEnd(flat, best.at));
+}
+
+/** 번호 붙은 참가자격 절을 끝까지 읽을 때의 상한 — 다음 절 번호를 못 찾고 끝없이 읽지 않게 */
+const SECTION_MAX = 6000;
+const SECTION_DEFAULT = 1500;
+
+/**
+ * 참가자격 부분의 끝. 제목이 "2. 입찰 참가 자격"처럼 번호가 붙어 있으면 다음 절 "3. 입찰보증금" 앞까지 읽는다 —
+ * 앞 1500자만 보면 뒤쪽 항목의 요건을 놓친다 (2026-10-19 휘문고 역사관: '바' 항 끝, 2,066자째의
+ * 실내건축공사업(업종코드: 452106) 공동수급 조건). 번호가 없거나 다음 절을 못 찾으면 예전처럼 1500자.
+ */
+function sectionEnd(flat: string, at: number): number {
+  // 제목 앞: "2. 입찰 " / "3) " — 같은 번호 형식("." 또는 ")")의 다음 번호를 찾는다
+  const head = /(?:^|\s)(\d{1,2})\s*([.)])\s*(?:입\s*찰\s*)?$/.exec(flat.slice(Math.max(0, at - 12), at));
+  if (!head) return at + SECTION_DEFAULT;
+  const next = Number(head[1]) + 1;
+  const delim = head[2] === "." ? "\\." : "\\)";
+  // "2026. 3. 25."처럼 날짜 속 숫자는 뒤가 숫자라 걸리지 않는다. 제목 바로 뒤 100자는 건너뛴다
+  const re = new RegExp(String.raw`\s${next}\s*${delim}\s*[가-힣「｢\[(]`, "g");
+  re.lastIndex = at + 100;
+  const m = re.exec(flat);
+  if (!m || m.index - at > SECTION_MAX) return at + SECTION_DEFAULT;
+  return Math.max(m.index, at + SECTION_DEFAULT);
 }
 
 const REGIONS =
@@ -488,6 +528,12 @@ function linkAlternatives(section: string, requirements: DocRequirement[], posOf
   }
 }
 
+/** 공고문에 적힌 업종 이름이 보유 업종 이름과 같으면 그 이름 (공백·가운뎃점 무시) */
+function heldIndustryByName(docName: string, heldIndustries: CodeEntry[]): string | null {
+  const key = (s: string) => s.replace(/[\s·ㆍ.]/g, "");
+  return heldIndustries.find((c) => key(c.name) === key(docName))?.name ?? null;
+}
+
 /**
  * @param section 참가자격 부분 (코드는 여기서만 찾는다 — 다른 곳의 숫자는 공고번호·전화번호 등이라 오탐이 난다)
  * @param fullText 공고문 전체 (지역제한·지명경쟁은 "입찰방식" 항목에 따로 적히는 경우가 많아 전체에서 본다)
@@ -517,15 +563,20 @@ export function analyzeQualificationText(
       return;
     }
     seen.add(code);
-    const name = (kind === "업종" ? industryName : productName).get(code) ?? null;
+    // 나라장터 업종코드는 4자리다. "실내건축공사업(업종코드: 452106)"처럼 다른 번호 체계로 적은 업종은 이름으로 보유 목록과 맞춘다
+    const name =
+      (kind === "업종" ? industryName : productName).get(code) ??
+      (kind === "업종" && code.length !== 4 && docName ? heldIndustryByName(docName, heldIndustries) : null);
     const related = kind === "품명" && name === null ? relatedHeldProducts(code, heldProducts) : null;
     const req: DocRequirement = { kind, code, name, held: name !== null, docName, related, bases: [requirementBasis(section, at, kind, code, docName)] };
+    if (isJointAlternative(section, at)) req.jointAlternative = true;
     requirements.push(req);
     posOf.set(req, at);
   };
 
   // "업종코드 4444", "[업종코드 4444]", "(업종코드: 4990)" — 코드 뒤에 "또는 4442"처럼 이어지는 것도 잡는다.
-  for (const m of section.matchAll(/업종\s*코드\s*[:：]?\s*\[?\s*(\d{4})\b/g)) add("업종", m);
+  // 6자리("업종코드: 452106")는 나라장터와 다른 번호 체계 — 이름으로 맞춘다 (add)
+  for (const m of section.matchAll(/업종\s*코드\s*[:：]?\s*\[?\s*(\d{4}|\d{6})(?!\d)/g)) add("업종", m);
   // "[실내건축공사(4990)]", "정보통신공사업(0036)" — 업종명 바로 뒤 괄호 속 4자리
   for (const m of section.matchAll(/(?:업|공사|분야|사업)\s*[(（]\s*(\d{4})\s*[)）]/g)) add("업종", m);
   // PDF 추출은 글 순서가 섞여 "(업종코드: 4442)"가 "( )( : 4442)"로 나온다 (울산박물관 재공고문 실측)
@@ -548,6 +599,11 @@ export function analyzeQualificationText(
       add("품명", m);
   }
   linkAlternatives(section, requirements, posOf);
+  // "입찰참여업체는 공동으로 입찰참가자격을 모두 갖추어야" — 공동수급체가 함께 갖추면 되는 공고는 없는 업종도 구성원이 채운다
+  // (2026-10-19 한국디자인진흥원: 대표사는 디자인 전문회사, 수급사는 조경면허[4993] 소지업체)
+  if (COLLECTIVE_QUALIFICATION.test(section)) {
+    for (const r of requirements) if (r.kind === "업종" && !r.held) r.jointAlternative = true;
+  }
   // 코드 없이 이름만 적은 보유 자격 (예: "전문건설업(…금속구조물·창호·온실공사업…)")
   const flat = normalize(section);
   for (const c of heldIndustries) {

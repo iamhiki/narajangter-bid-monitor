@@ -424,3 +424,52 @@ describe("'또는'으로 이은 요건 (2026-10-02 고흥분청문화박물관 �
     expect(r.filter((x) => x.orGroup !== undefined).every((x) => !x.held && !x.covered)).toBe(true);
   });
 });
+
+describe("긴 참가자격 절 (2026-10-19 휘문고 역사관 조성 2차 공고문)", () => {
+  const filler = "다. 입찰참가자는 조달청 입찰참가자격 등록 업체이어야 하며 관련 법령에 따른 자격을 갖추어야 합니다. ".repeat(30);
+  const joint =
+    "바. 본 용역에는 실내 건축 공사가 포함되어 있으므로 입찰참가자(대표사)가 「건설산업기본법」에 따른 실내건축공사업(업종코드: 452106) " +
+    "면허를 단독으로 보유하지 않은 경우에는, 반드시 해당 면허를 보유한 업체와 분담이행방식으로 공동수급체를 구성하여 참여하여야 함 ";
+  const text =
+    "1. 사업개요 가. 사업명: 역사관 조성 2. 입찰 참가 자격 가. 산업디자인전문회사[(종합디자인분야, 업종코드 4444)]를 등록한 업체 " +
+    filler + joint + "사. 미자격자가 고의로 입찰에 참여하면 제재할 수 있습니다. 3. 입찰보증금 납부 가. 입찰보증금은 면제합니다. " +
+    "다. 실내건축공사업(업종코드 4990)이 있는 업체는 감면".padEnd(50);
+
+  it("번호 붙은 절은 다음 절 번호 앞까지 읽는다", () => {
+    const s = findQualificationSection(text)!;
+    expect(s.length).toBeGreaterThan(1500);
+    expect(s).toContain("452106");
+    expect(s).not.toContain("입찰보증금");
+  });
+
+  it("6자리 업종코드는 이름으로 보유 업종과 맞추고, '없으면 공동수급' 조건을 단다", () => {
+    const r = analyze(findQualificationSection(text)!, text).requirements.find((x) => x.code === "452106")!;
+    expect(r).toMatchObject({ kind: "업종", name: "실내건축공사업", held: true, jointAlternative: true });
+  });
+
+  it("보유하지 않은 업종도 '없으면 공동수급'이면 조건부", () => {
+    const r = analyzeQualificationText(joint, joint, [], []).requirements.find((x) => x.code === "452106")!;
+    expect(r).toMatchObject({ held: false, jointAlternative: true });
+  });
+
+  it("번호가 없는 제목은 예전처럼 1500자", () => {
+    const s = findQualificationSection("입찰 참가 자격 가. 산업디자인전문회사[업종코드 4444] 등록 업체 " + filler + joint)!;
+    expect(s.length).toBe(1500);
+  });
+});
+
+describe("공동수급체가 함께 갖추면 되는 자격 (2026-10-19 한국디자인진흥원)", () => {
+  it("'공동으로 입찰참가자격을 모두 갖추어야' — 없는 업종은 공동수급으로 채운다", () => {
+    const section =
+      "참가자격 가. 대표사는 디자인 전문회사, 수급사는 조경면허 소지업체로 한다. - 입찰참여업체는 공동으로 입찰참가자격을 모두 갖추어야 하며 " +
+      "- 종합디자인 분야[업종코드 4444]로 신고를 필한 업체 - 조경식재·시설물공사업[업종코드 4993] 등록업체";
+    const r = analyze(section).requirements;
+    expect(r.find((x) => x.code === "4993")).toMatchObject({ held: false, jointAlternative: true });
+    expect(r.find((x) => x.code === "4444")?.held).toBe(true);
+  });
+
+  it("그런 문구가 없으면 없는 업종은 그대로 미보유", () => {
+    const r = analyze("참가자격 가. 조경식재·시설물공사업[업종코드 4993] 등록업체").requirements;
+    expect(r.find((x) => x.code === "4993")?.jointAlternative).toBeUndefined();
+  });
+});

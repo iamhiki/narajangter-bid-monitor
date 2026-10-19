@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "../src/config/env.js";
-import { loadAppConfig, type AppConfig } from "../src/config/loadJsonConfig.js";
+import { loadAppConfig, type AppConfig, type CodeEntry } from "../src/config/loadJsonConfig.js";
 import { fetchJointBidStatus, getSessionCookie } from "../src/api/jointBidApi.js";
 import { meetsRegion, readQualificationFromNotice, type QualificationDocResult } from "../src/matching/qualificationDoc.js";
 import { loadHeadquartersRegion } from "../src/matching/regionFilter.js";
@@ -452,7 +452,7 @@ function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
  * 키워드·품목으로는 걸렸는데(= 우리 공고 후보) 다른 조건으로 빠진 공고,
  * 그리고 **키워드·세부품명 하나만** 안 맞아 빠진 공고 (2026-10-19 요청 — 다른 조건은 모두 통과해 참가는 할 수 있는 공고).
  * 키워드·세부품명에 더해 다른 조건에도 걸린 공고는 싣지 않는다 — 수만 건이라 목록으로는 쓸모가 없고,
- * 그런 공고는 공고번호 추적으로 한 건씩 본다. 키워드·세부품명 미달 공고는 천 건 단위라 화면에서 기본 보기에 섞지 않는다.
+ * 그런 공고는 공고번호 추적으로 한 건씩 본다. 키워드·세부품명 미달 공고도 화면 기본 보기(전체)에 함께 싣는다 (2026-10-19 요청).
  */
 function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; byStage: Record<string, number> } {
   if (excludedCache?.source === diag) return excludedCache;
@@ -478,7 +478,7 @@ function docQualBlocked(qualificationStatus: string | null, doc: QualificationDo
   if (qualificationStatus !== null && qualificationStatus !== "조회실패" && qualificationStatus !== "제한없음") return null;
   if (!doc || doc.sectionFound === false) return null;
   const keep = keepQualifications();
-  const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered && !isKeptQualification(r, keep));
+  const missing = doc.requirements.filter((r) => r.kind === "업종" && !r.held && !r.covered && !r.jointAlternative && !isKeptQualification(r, keep));
   if (missing.length === 0) return null;
   // 요구 업종 중 보유한 것이 학술.연구용역뿐이면 빼지 않는다 — 나머지 자격을 가진 업체와 컨소시엄으로 들어갈 만한지
   // 담당자가 본다 (2026-10-15 회의: 대표님). 화면 ui.html consortiumCase와 같은 기준
@@ -787,6 +787,108 @@ async function classesFor(doc: QualificationDocResult | null): Promise<Record<st
   return out;
 }
 
+/** 공고 한 건의 공고문 참가자격·공동수급·과업 본문을 읽어 enrichment에 채운다 (이미 읽은 항목은 건너뜀). */
+async function enrichDoc(n: NormalizedNotice, appConfig: AppConfig, cookie: Awaited<ReturnType<typeof getSessionCookie>>, classOnly: boolean): Promise<void> {
+  const e = enrichment.get(n.noticeNo) ?? {};
+  if (n.sourceType === "본공고" && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
+  if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
+  if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
+  const needCore = classOnly && e.core === undefined;
+  if (e.similarity === undefined || e.scope === undefined || needCore) {
+    const body = await fetchNoticeBody(n).catch(() => null);
+    // 과업지시서가 없으면 입찰공고문 개요·공내역서에서 근거 키워드만 찾는다 (점수는 제목 기준 그대로)
+    const outline = body ? null : await fetchNoticeOutline(n).catch(() => null);
+    e.similarity = body ? similarityView(n.title, body) : outline ? similarityView(n.title, undefined, outline.text) : null;
+    e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
+    e.specSubmission = body ? findSubmissionDeadline(body.text) : null;
+    if (needCore) {
+      const words = body ? findCoreWords(body.text, appConfig.keywords) : [];
+      e.core = { status: !body ? "못읽음" : words.length ? "확인" : "없음", words: words.slice(0, 4), sourceFile: body?.sourceFile ?? null };
+    }
+  }
+  enrichment.set(n.noticeNo, e);
+}
+
+// ── 공고문으로 찾는 세부품명 공고 ─────────────────────────────
+/**
+ * 용역 공고는 나라장터 분류에 세부품명이 없고 용역분류만 있어, 공고문 참가자격에 지일 등록 세부품명을 요구해도
+ * '세부품명 미달'로 빠졌다 (2026-10-19 휘문고 역사관 조성 2차: 공고문에 디자인서비스(8214150201)·동영상제작서비스).
+ * 키워드·세부품명 하나만 안 맞은 용역 공고(제외된 공고 탭의 '세부품명 미달')의 공고문을 뒤에서 읽고,
+ * 등록 세부품명을 하나라도 요구하면 '세부품명 공고' 탭에 싣는다. 매일 보고에는 넣지 않는다 (heldProductCandidates와 같음).
+ * 목록 공고 첨부 읽기(startEnrichment)와 따로 돈다 — 건수가 수백 건이라 목록 카드 채우기를 막지 않게.
+ */
+let docProductPool: { notice: NormalizedNotice; detail: string | null }[] = [];
+let docScanState = { running: false, done: 0, total: 0, found: 0 };
+
+function docProductPoolOf(diag: CollectionDiagnostics, skip: Set<string>): { notice: NormalizedNotice; detail: string | null }[] {
+  const byNo = new Map(diag.notices.map((n) => [n.noticeNo, n]));
+  const out: { notice: NormalizedNotice; detail: string | null }[] = [];
+  for (const item of excludedCandidates(diag).items as { noticeNo: string; excludedAt: string; excludedDetail: string | null }[]) {
+    if (item.excludedAt !== "키워드·품목" || skip.has(item.noticeNo) || promoted[item.noticeNo]) continue;
+    const notice = byNo.get(item.noticeNo);
+    if (notice?.businessType === "용역") out.push({ notice, detail: item.excludedDetail });
+  }
+  return out;
+}
+
+/** 공고문 참가자격이 요구한 세부품명 중 지일 등록 품목 (같은 코드는 한 번) */
+function docHeldProducts(noticeNo: string, appConfig: AppConfig): CodeEntry[] {
+  const doc = enrichment.get(noticeNo)?.qualDoc;
+  if (!doc) return [];
+  const byCode = new Map(appConfig.productCodes.map((c) => [c.code.trim(), c]));
+  const out = new Map<string, CodeEntry>();
+  for (const r of doc.requirements) {
+    const c = r.kind === "품명" && r.code ? byCode.get(r.code) : undefined;
+    if (c) out.set(r.code!, c);
+  }
+  return [...out.values()];
+}
+
+/** '세부품명 공고' 탭에 붙일 공고문 세부품명 공고 — 지금까지 읽은 것까지 (응답할 때마다 다시 센다) */
+function docHeldItems(appConfig: AppConfig): unknown[] {
+  return docProductPool.flatMap(({ notice, detail }) => {
+    const codes = docHeldProducts(notice.noticeNo, appConfig);
+    if (!codes.length) return [];
+    const match = { ...forceMatch(notice, appConfig), matchedProductCodes: codes };
+    return [{
+      ...(decorate(match, appConfig) as object),
+      productCode: codes[0]!.code,
+      productName: codes[0]!.name,
+      outside: true,
+      fromDoc: true,
+      excludedAt: "키워드·품목",
+      excludedDetail: detail,
+    }];
+  });
+}
+
+function startDocScan(appConfig: AppConfig): void {
+  if (docScanState.running) return;
+  const todo = docProductPool.map((p) => p.notice).filter((n) => enrichment.get(n.noticeNo)?.qualDoc === undefined);
+  docScanState = { running: todo.length > 0, done: 0, total: todo.length, found: docHeldItems(appConfig).length };
+  if (!todo.length) return;
+  void (async () => {
+    try {
+      const cookie = await getSessionCookie();
+      for (const n of todo) {
+        // 공고문 참가자격만 먼저 읽고, 등록 세부품명이 나온 공고만 목록 카드처럼 나머지(과업 본문·공동수급)를 채운다
+        if (enrichment.get(n.noticeNo)?.qualDoc === undefined) {
+          const qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
+          enrichment.set(n.noticeNo, { ...enrichment.get(n.noticeNo), qualDoc });
+        }
+        if (docHeldProducts(n.noticeNo, appConfig).length) {
+          await enrichDoc(n, appConfig, cookie, false);
+          docScanState.found += 1;
+        }
+        docScanState.done += 1;
+        await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
+      }
+    } finally {
+      docScanState.running = false;
+    }
+  })();
+}
+
 /**
  * docOnly: 목록 밖 세부품명 공고. 목록 공고를 먼저 읽고 그 뒤에 읽는다.
  * rescue: 제목의 제외 키워드로 빠진 후보 — 맨 마지막에 첨부만 읽어 본업 근거(findMakeEvidence)를 찾는다.
@@ -813,31 +915,13 @@ function startEnrichment(activeMatches: MatchedNotice[], appConfig: AppConfig, d
   const rescueTodo = rescue.filter((n) => enrichment.get(n.noticeNo)?.rescue === undefined);
   if (docTodo.length === 0 && rescueTodo.length === 0) return;
   enrichState = { running: true, done: 0, total: docTodo.length + rescueTodo.length };
-  const held = heldOf(appConfig);
 
   void (async () => {
     try {
       // 1) 공고문·공동수급
       const cookie = await getSessionCookie();
       for (const n of docTodo) {
-        const e = enrichment.get(n.noticeNo) ?? {};
-        if (isBid(n) && e.jointBid === undefined) e.jointBid = await fetchJointBidStatus(n, cookie).catch(() => null);
-        if (e.qualDoc === undefined) e.qualDoc = await readQualificationFromNotice(n, held).catch(() => null);
-        if (e.classes === undefined) e.classes = await classesFor(e.qualDoc ?? null);
-        const needCore = classOnly.has(n.noticeNo) && e.core === undefined;
-        if (e.similarity === undefined || e.scope === undefined || needCore) {
-          const body = await fetchNoticeBody(n).catch(() => null);
-          // 과업지시서가 없으면 입찰공고문 개요·공내역서에서 근거 키워드만 찾는다 (점수는 제목 기준 그대로)
-          const outline = body ? null : await fetchNoticeOutline(n).catch(() => null);
-          e.similarity = body ? similarityView(n.title, body) : outline ? similarityView(n.title, undefined, outline.text) : null;
-          e.scope = body ? { flags: body.scopeFlags, sourceFile: body.sourceFile } : null;
-          e.specSubmission = body ? findSubmissionDeadline(body.text) : null;
-          if (needCore) {
-            const words = body ? findCoreWords(body.text, appConfig.keywords) : [];
-            e.core = { status: !body ? "못읽음" : words.length ? "확인" : "없음", words: words.slice(0, 4), sourceFile: body?.sourceFile ?? null };
-          }
-        }
-        enrichment.set(n.noticeNo, e);
+        await enrichDoc(n, appConfig, cookie, classOnly.has(n.noticeNo));
         enrichState.done += 1;
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
       }
@@ -901,6 +985,12 @@ function heldProductCandidates(appConfig: AppConfig, listed: Set<string>): { mat
   return out;
 }
 
+/** 공고문 세부품명 공고(docHeldItems)는 뒤에서 늘어나므로 응답할 때마다 붙인다 */
+function withDocHeld(result: NoticeCache): NoticeCache {
+  if (result.error) return result;
+  return { ...result, heldItems: [...(result.heldItems ?? []), ...docHeldItems(loadAppConfig())] };
+}
+
 async function fetchNotices(period: string): Promise<NoticeCache> {
   const { lookbackDays, preStandardLookbackDays, incremental, label: periodLabel } = periodOptions(period);
   try {
@@ -926,6 +1016,9 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
       held.map((h) => h.match),
       titleExcluded.map((x) => x.notice)
     );
+    // 키워드 없이 빠진 용역 공고는 공고문 세부품명으로 다시 찾는다 — 찾은 공고는 응답할 때 heldItems에 붙인다 (withDocHeld)
+    docProductPool = lastDiagnostics ? docProductPoolOf(lastDiagnostics, new Set([...all, ...held.map((h) => h.match)].map((m) => m.notice.noticeNo))) : [];
+    startDocScan(appConfig);
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
     const items = all.map((m) => decorate(m, appConfig)).sort((a, b) => (b as { maxScore: number }).maxScore - (a as { maxScore: number }).maxScore);
@@ -1188,7 +1281,7 @@ const server = createServer((req, res) => {
     const byNo = Object.fromEntries(
       [...enrichment].map(([no, e]) => [no, { ...e, regionOk: e.qualDoc?.region ? meetsRegion(e.qualDoc.region, hq) : null }])
     );
-    json(res, { ...enrichState, headquartersRegion: hq, keepQualifications: keepQualifications(), byNo });
+    json(res, { ...enrichState, docScan: docScanState, headquartersRegion: hq, keepQualifications: keepQualifications(), byNo });
     return;
   }
 
@@ -1336,7 +1429,7 @@ const server = createServer((req, res) => {
     const refresh = url.searchParams.get("refresh") === "1";
 
     if (!refresh && noticeCache && noticeCache.period === period) {
-      json(res, { ...noticeCache, cached: true });
+      json(res, { ...withDocHeld(noticeCache), cached: true });
       return;
     }
 
@@ -1353,7 +1446,7 @@ const server = createServer((req, res) => {
       inFlight.set(period, running);
     }
     running
-      .then((result) => json(res, { ...result, cached: false }))
+      .then((result) => json(res, { ...withDocHeld(result), cached: false }))
       .catch((err: unknown) => {
         inFlight.delete(period);
         json(res, { fetchedAt: new Date(), period, periodLabel: periodOptions(period).label, items: [], titleExcludedItems: [], error: String(err), cached: false });
