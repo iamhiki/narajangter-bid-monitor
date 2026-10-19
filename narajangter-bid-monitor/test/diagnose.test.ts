@@ -95,13 +95,13 @@ describe("diagnoseNotice", () => {
     );
   });
 
-  it("제목엔 없고 세부품명 이름에만 있는 키워드는 [세부품명 이름]으로 적는다 (신평초 '…디자인 구조물')", () => {
+  it("키워드는 제목에서만 찾는다 — 세부품명 이름에만 있는 키워드는 맞은 것으로 보지 않는다", () => {
     const d = diagnoseNotice(
       makeNotice({ title: "보행환경안심길 조성공사-디자인 구조물", businessType: "물품", productClsfcNo: "4924159701", productClsfcName: "조합놀이대 과학관" }),
       ctx
     );
     expect(d.steps.find((s) => s.step === "키워드·품목")?.detail).toBe(
-      "[나라장터 물품분류] '조합놀이대' — 우리 등록 품목 · [세부품명 이름] '과학관' — 우리 키워드"
+      "[나라장터 물품분류] '조합놀이대' — 우리 등록 품목"
     );
   });
 

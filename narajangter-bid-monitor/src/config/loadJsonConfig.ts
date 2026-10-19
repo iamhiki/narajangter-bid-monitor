@@ -72,10 +72,9 @@ const recipientsFileSchema = z.object({
 
 const heldQualificationsFileSchema = z.object({
   heldProducts: z.array(codeEntrySchema).min(1, "heldProducts 배열이 비어있습니다"),
-  /** strongMatchName: 강력추천 판정에 쓰는 업종 — 투찰가능업종명에서 찾을 나라장터 표기 */
-  heldIndustries: z
-    .array(codeEntrySchema.extend({ strongMatchName: z.string().trim().min(1).optional() }))
-    .min(1, "heldIndustries 배열이 비어있습니다"),
+  heldIndustries: z.array(codeEntrySchema).min(1, "heldIndustries 배열이 비어있습니다"),
+  /** 업종코드 (용역·공사 공고용, 강력추천 판정) — name은 투찰가능업종명에서 찾을 나라장터 표기 */
+  industryCodes: z.array(codeEntrySchema).min(1, "industryCodes 배열이 비어있습니다 (강력추천 판정용)"),
 });
 
 function readJsonFile(filePath: string): unknown {
@@ -140,7 +139,7 @@ export interface AppConfig {
   allowedBidMethods: BidMethodCategory[];
   /** 수집에 쓰는 세부품명 — 등록 품목(heldProducts) 그대로. 제목 키워드가 없어도 이것만으로 수집한다 */
   productCodes: CodeEntry[];
-  /** 강력추천 판정용 업종 — heldIndustries 중 strongMatchName이 있는 것. name은 투찰가능업종명에서 찾을 나라장터 표기 */
+  /** 업종코드 (용역·공사 공고용, 강력추천 판정) — held-qualifications.json industryCodes. name은 투찰가능업종명에서 찾을 나라장터 표기 */
   industryCodes: CodeEntry[];
   /** 용역 조달분류(8자리 품명번호). 제목 키워드가 없어도 이 분류면 수집한다 — matching/codeMatcher.ts matchServiceClasses */
   serviceClasses?: CodeEntry[];
@@ -215,14 +214,6 @@ export function loadAppConfig(): AppConfig {
     throw new ConfigError(`held-qualifications.json heldIndustries에 중복된 코드가 있습니다: ${dupHeldIndustries.join(", ")}`);
   }
 
-  const industryCodes = heldQualificationsData.heldIndustries.flatMap((c) =>
-    c.strongMatchName ? [{ code: c.code, name: c.strongMatchName }] : []
-  );
-  if (industryCodes.length === 0) {
-    throw new ConfigError(
-      `held-qualifications.json heldIndustries에 strongMatchName이 있는 업종이 하나도 없습니다 (강력추천 판정용): ${heldQualificationsPath}`
-    );
-  }
 
   cached = {
     keywords: keywordsData.keywords,
@@ -239,7 +230,7 @@ export function loadAppConfig(): AppConfig {
     allowedBidMethods: keywordsData.allowedBidMethods,
     // 수집 세부품명 = 등록 품목 (2026-10-16 — codes.json을 없애고 보유자격 파일 하나를 기준으로). 등록증이 갱신되면 수집 기준도 따라온다
     productCodes: heldQualificationsData.heldProducts,
-    industryCodes,
+    industryCodes: heldQualificationsData.industryCodes,
     serviceClasses: keywordsData.serviceClasses,
     serviceClassExcludeWords: keywordsData.serviceClassExcludeWords,
     recipients: recipientsData.recipients,

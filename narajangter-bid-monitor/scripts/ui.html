@@ -1021,7 +1021,7 @@ footer b { color: var(--muted); }
   </section>
 
   <section id="tab-excluded" hidden>
-    <p class="sub ex-summary" id="exSummary" title="키워드·품목은 맞지만 다른 조건에 걸려 목록에서 빠진 공고입니다. 여러 조건에 걸리면 처음 걸린 조건에만 셉니다.">불러오는 중…</p>
+    <p class="sub ex-summary" id="exSummary" title="키워드·품목은 맞지만 다른 조건에 걸려 목록에서 빠진 공고입니다. 여러 조건에 걸리면 처음 걸린 조건에만 셉니다. 세부품명 미달 공고는 제외 사유에서 따로 고릅니다.">불러오는 중…</p>
     <div class="filter-row">
       <div class="filters" id="exFilters"></div>
       <label class="sort-box">정렬
@@ -2111,7 +2111,7 @@ function renderNotice(n) {
 }
 
 /**
- * 세부품명으로만 수집한 공고 — 제목·세부품명 이름에 관심 키워드가 없고, 공고에 분류된 세부품명 코드가 지일 등록 품목과 맞아 들어온 것.
+ * 세부품명으로만 수집한 공고 — 제목에 관심 키워드가 없고, 공고에 분류된 세부품명 코드가 지일 등록 품목과 맞아 들어온 것.
  * 화면에서는 본공고·사전규격 목록이 아니라 '세부품명 공고' 탭에 모은다 (2026-10-16 요청). 매일 보고에 나가는지는 배지 설명에 적는다.
  */
 const productOnly = (n) => !!n.matchedBy?.products?.length && !n.matchedBy?.keywords?.length;
@@ -2484,7 +2484,7 @@ function sizeBadge(doc) {
 }
 
 /**
- * 추천등급. 강력추천 = 공고의 품목(물품분류번호)·업종이 지일 등록 품목·업종과 맞고, 제목·품명에 우리 키워드도 있을 때
+ * 추천등급. 강력추천 = 공고의 품목(물품분류번호)·업종이 지일 등록 품목·업종과 맞고, 제목에 우리 키워드도 있을 때
  * (matchEngine.ts). 그 밖은 참고용. 무엇이 맞았는지 matchedBy로 보여 준다.
  */
 function gradeBadge(n) {
@@ -2496,7 +2496,7 @@ function gradeBadge(n) {
   const rows = [
     by.products.length ? `<li class="lay-ok">✓ 지일 보유 품목: ${names(by.products)}</li>` : "",
     by.industries.length ? `<li class="lay-ok">✓ 지일 보유 업종: ${names(by.industries)}</li>` : "",
-    by.keywords.length ? `<li class="lay-ok">✓ 제목·품명의 키워드: ${by.keywords.map(esc).join(", ")}</li>` : "",
+    by.keywords.length ? `<li class="lay-ok">✓ 제목의 키워드: ${by.keywords.map(esc).join(", ")}</li>` : "",
     by.classes.length ? `<li class="lay-ok">✓ 나라장터 조달분류: ${names(by.classes)}</li>` : "",
     n.overseas ? `<li class="lay-ok">✓ 몽골 개최 전시회: ${esc(n.overseas)}</li>` : "",
   ].join("");
@@ -3329,7 +3329,7 @@ const STAGE_LABEL = {
   최소예산: "금액 미달",
   낙찰방법: "수의계약·설계공모",
   해외개최: "해외 개최",
-  "키워드·품목": "키워드 없음",
+  "키워드·품목": "세부품명 미달",
   // 참가자격 단계에서 빠지는 경우: 조경·토목·건축사 면허 필수, 또는 (용역·공사) 요구 업종을 하나도 보유하지 않음.
   // 일부만 보유한 공고는 빼지 않고 표시만 한다 (공동수급)
   참가자격: "보유하지 않은 자격 필요",
@@ -3345,7 +3345,7 @@ const STAGE_NOTE = {
   최소예산: "사업금액이 설정한 최소 금액보다 작습니다.",
   낙찰방법: "수집하지 않는 낙찰방법입니다(수의계약, 설계공모).",
   해외개최: "몽골이 아닌 해외 개최 공고입니다. 제목에 한국관이 있거나, 전시회·해외 지명과 단체관이 함께 있거나, USA·UAE 같은 영문 국가 약자가 있으면 해외 개최로 봅니다.",
-  "키워드·품목": "제목·품명에 등록 키워드가 없고, 공고 품목도 지일 등록 품목이 아닙니다.",
+  "키워드·품목": "제목에 등록 키워드가 없고, 공고의 세부품명(용역은 용역분류)도 지일 등록 품목이 아닙니다.<br>다른 조건(금액·낙찰방법·자격·지역)은 모두 통과한 공고만 싣습니다.",
   참가자격: "참가자격이 지일이 보유하지 않은 면허(조경·토목·건축사 등)를 꼭 갖추도록 요구합니다.<br>공동수급으로도 지일이 맡을 몫이 없습니다.",
   참가지역: "다른 지역에 본사가 있는 업체만 참가할 수 있는 공고입니다.<br>사전규격은 첨부 문서에 적힌 지역제한으로 판단했습니다.",
   "과업 내용": "첨부 과업지시서를 읽어 보니 전시·제작 사업이 아닙니다.<br>제목에 키워드가 없고 과업에도 전시·제작 내용이 없거나, 사업 목적이 휴게·독서 공간 조성입니다.",
@@ -3407,7 +3407,7 @@ const STAGE_RULE = {
   최소예산: "사업금액이 최소 금액 미만",
   낙찰방법: "수의계약 또는 설계공모",
   해외개최: "몽골 외 한국관, 전시회·해외 지명 + 단체관, 영문 국가 약자(USA 등)",
-  "키워드·품목": "등록 키워드·품목이 없음",
+  "키워드·품목": "세부품명·용역분류가 지일 등록 품목이 아님 (제목에 관심 키워드도 없음)",
   참가자격: "지일이 없는 면허·업종을 요구",
   참가지역: "본점 지역 밖 업체만 참가 가능",
   "과업 내용": "과업지시서에 전시·제작 내용 없음, 휴게·독서 공간 조성",
@@ -3418,6 +3418,11 @@ const num = (v) => v.toLocaleString("ko-KR");
  * 제외된 공고 — 사진 시안대로 위에 요약 한 줄, 드롭다운(제외 사유·제외 키워드·공고·낙찰방법·업무), 아래 카드.
  * 예전 '빠진 이유 | 건수 | 기준' 표는 '제외 사유' 드롭다운으로 옮겼다 (기준은 항목 아래 작은 글씨).
  */
+/**
+ * 키워드·세부품명만 안 맞아 빠진 공고 — 천 건 단위라 '전체'에 섞으면 후보였다가 빠진 공고가 묻힌다.
+ * 제외 사유 드롭다운에서 고를 때만 보여 준다 (2026-10-19 요청)
+ */
+const LOW_FIT = "키워드·품목";
 const exF = { stage: "active", kw: "all", kind: "all", method: "all", biz: "all" };
 const EX_PAGE = 30;
 let exLimit = EX_PAGE;
@@ -3445,7 +3450,7 @@ const EX_TESTS = {
 };
 /** skip: 이 조건 하나는 빼고 본다 — 드롭다운 항목 옆 숫자 계산용 */
 function exPass(n, skip) {
-  if (skip !== "stage" && exF.stage !== "active" && n.excludedAt !== exF.stage) return false;
+  if (skip !== "stage" && (exF.stage === "active" ? n.excludedAt === LOW_FIT : n.excludedAt !== exF.stage)) return false;
   if (!matchesLiveQuery(n)) return false;
   return Object.entries(EX_TESTS).every(([g, t]) => g === skip || exF[g] === "all" || t(n, exF[g]));
 }
@@ -3463,16 +3468,18 @@ function renderExcluded() {
   const d = exData;
   // 많이 빠진 이유부터
   const stages = Object.entries(d.byStage).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+  const lowFit = d.byStage[LOW_FIT] || 0;
   $("exSummary").innerHTML =
-    `${esc(d.periodLabel || "")} 수집 <b>${num(d.total)}</b>건 중 우리 분야 후보였다가 빠진 마감 전 공고 <b>${num(d.items.length)}</b>건 — ` +
-    stages.map(([s, c]) => `${esc(stageLabel(s))} ${num(c)}`).join(" · ");
+    `${esc(d.periodLabel || "")} 수집 <b>${num(d.total)}</b>건 중 우리 분야 후보였다가 빠진 마감 전 공고 <b>${num(d.items.length - lowFit)}</b>건 — ` +
+    stages.filter(([s]) => s !== LOW_FIT).map(([s, c]) => `${esc(stageLabel(s))} ${num(c)}`).join(" · ") +
+    (lowFit ? `<br>세부품명 미달 공고 ${num(lowFit)}건은 제외 사유에서 '${esc(stageLabel(LOW_FIT))}'을 고르면 볼 수 있습니다.` : "");
 
   const pool = (g) => d.items.filter((n) => exPass(n, g));
   const stagePool = pool("stage");
   const exDd = (group, name, opts) => dropdown(group, name, opts, "", exF);
   $("exFilters").innerHTML = [
     exDd("stage", "제외 사유", [
-      ["active", "전체", stagePool.length, `${d.periodLabel || ""} 조회 기준 · 마감 전`],
+      ["active", "전체", stagePool.filter((n) => n.excludedAt !== LOW_FIT).length, `${d.periodLabel || ""} 조회 기준 · 마감 전 (세부품명 미달 제외)`],
       ...stages.map(([s]) => [s, stageLabel(s), stagePool.filter((n) => n.excludedAt === s).length, STAGE_RULE[s] || null]),
     ]),
     exDd("kw", "제외 키워드", [["all", "전체", null], ...countBy(pool("kw"), exKeyword).map(([k, c]) => [k, k, c])]),
@@ -3547,8 +3554,12 @@ function exStepBadges(n) {
           ? tipBadge("faint", "지역제한 미정", "참가 지역", `<p>${esc(r.detail)}</p>`)
           : tipBadge("okb", "지역제한 · 본점 충족", "참가 지역", `<p>${esc(r.detail)}</p>`);
   const group = (label, html) => (html ? `<div class="tag-group"><span class="tg-label">${label}</span>${html}</div>` : "");
-  // 제외된 공고는 첨부 공고문을 읽지 않아 세부품명 요건은 확인하지 않았다 — 사실대로 '미확인'
-  const product = tipBadge("faint", "세부품명번호 미확인", "세부품명", `<p>제외된 공고는 첨부 공고문을 읽지 않아<br>세부품명번호 요건을 확인하지 않았습니다.</p>`);
+  // 키워드·세부품명 단계에서 빠진 공고는 나라장터 분류로 이미 미달이 확인됐다
+  const k = step("키워드·품목");
+  // 그 밖에는 첨부 공고문을 읽지 않아 세부품명 요건은 확인하지 않았다 — 사실대로 '미확인'
+  const product = k && !k.ok
+    ? tipBadge("block", "세부품명번호 미달", "세부품명", `<p>${esc(k.detail)}</p>`)
+    : tipBadge("faint", "세부품명번호 미확인", "세부품명", `<p>제외된 공고는 첨부 공고문을 읽지 않아<br>세부품명번호 요건을 확인하지 않았습니다.</p>`);
   return group("자격", qual + product) + group("지역", region);
 }
 
@@ -3564,18 +3575,18 @@ function exReasonBlock(n, kw) {
   const parts = step?.ok ? step.detail.split(" · ") : [];
   const pick = (tag) => parts.filter((p) => p.startsWith(tag)).map((p) => p.slice(tag.length).replace(/\s*—.*$/, "").trim());
   const inTitle = pick("[공고 제목]");
-  const inName = pick("[세부품명 이름]");
   const products = pick("[나라장터 물품분류]");
   const services = pick("[나라장터 용역분류]");
   const words = exData?.keywords || [];
   const allKw = words.length
     ? ` <details class="kw-all"><summary>관심 키워드 ${words.length}개 보기</summary><p>${words.map(esc).join(", ")}</p></details>`
     : "";
-  const kwRow = inTitle.length || inName.length
-    ? [inTitle.length ? `공고명에 관심 키워드 ${esc(inTitle.join(", "))}` : "", inName.length ? `세부품명 이름에 관심 키워드 ${esc(inName.join(", "))}` : ""].filter(Boolean).join(" · ")
-    : step && !step.ok
+  const kwRow = inTitle.length
+    ? `공고명에 관심 키워드 ${esc(inTitle.join(", "))}`
+    // 키워드·세부품명 미달 공고는 위 사유 줄에 같은 설명이 이미 있다
+    : step && !step.ok && n.excludedAt !== LOW_FIT
       ? esc(step.detail)
-      : "공고명·세부품명에 관심 키워드가 없음";
+      : "공고명에 관심 키워드가 없음";
   const rows = [
     ["키워드", kwRow + allKw],
     ["품명코드", products.length ? `우리 등록 품목 ${esc(products.join(", "))}` : `등록 품목과 맞지 않음${n.businessType !== "물품" ? ` <span class="er-note">(용역·공사 공고는 세부품명번호가 대부분 없음)</span>` : ""}`],

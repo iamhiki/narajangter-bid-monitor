@@ -9,12 +9,12 @@ function stripWhitespace(value: string): string {
 }
 
 /**
- * 공고 제목(및 품목명)에 키워드가 포함되는지 확인한다.
- * 참고: data.go.kr API는 공고 "과업내용" 상세(첨부파일)까지는 제공하지 않으므로
- * 제목/품목명 텍스트를 기준으로 매칭한다 (README 참고).
+ * 공고 제목에 키워드가 포함되는지 확인한다.
+ * 세부품명 이름은 보지 않는다 (2026-10-19 요청) — 세부품명은 등록 품목 코드로 따로 수집하므로
+ * 키워드는 제목만 본다. data.go.kr API는 과업내용(첨부)을 주지 않아 제목 텍스트가 기준이다.
  */
 export function matchKeywords(notice: NormalizedNotice, keywords: string[]): string[] {
-  const haystack = stripWhitespace(`${notice.title} ${notice.productClsfcName ?? ""}`);
+  const haystack = stripWhitespace(notice.title);
   const matched: string[] = [];
   for (const keyword of keywords) {
     if (haystack.includes(stripWhitespace(keyword))) {

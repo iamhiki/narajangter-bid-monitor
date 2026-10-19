@@ -132,7 +132,7 @@ jayuna93@gmail.com, gaeunleee@ji1.co.kr, tongilil@naver.com
 - 물품 수집 세부품명 = held-qualifications.json 등록물품 그대로. 등록증에 없는 품목(조합놀이대, 소파,
   이동식서가, 전시용진열대, 가상현실장치 등)은 세부품명으로 수집하지 않는다 (제목 키워드로는 걸린다)
 - 등록물품은 제목 키워드가 없어도 세부품명만으로 수집한다 (2026-10-16 — 넓은 품목에 키워드를 요구하던 규칙 삭제)
-- 등록업종의 `strongMatchName`(강력추천 판정, 나라장터 표기): 실내건축공사업, 금속창호·지붕건축물
+- 업종코드 `industryCodes`(강력추천 판정, 나라장터 표기 — codes.json에서 held-qualifications.json으로 옮김): 실내건축공사업, 금속창호·지붕건축물
   조립공사업, 소프트웨어사업자, 공공디자인 전문회사, 전시사업자
 
 ### held-qualifications.json

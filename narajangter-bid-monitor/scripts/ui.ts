@@ -447,9 +447,10 @@ function noticeSummary(n: NormalizedNotice, d: Diagnosis): unknown {
 }
 
 /**
- * 키워드·품목으로는 걸렸는데(= 우리 공고 후보) 다른 조건으로 빠진 공고.
- * 키워드·품목 단계에서 떨어진 공고는 싣지 않는다 — 수만 건이라 목록으로는 쓸모가 없고,
- * 그런 공고는 공고번호 추적으로 한 건씩 본다.
+ * 키워드·품목으로는 걸렸는데(= 우리 공고 후보) 다른 조건으로 빠진 공고,
+ * 그리고 **키워드·세부품명 하나만** 안 맞아 빠진 공고 (2026-10-19 요청 — 다른 조건은 모두 통과해 참가는 할 수 있는 공고).
+ * 키워드·세부품명에 더해 다른 조건에도 걸린 공고는 싣지 않는다 — 수만 건이라 목록으로는 쓸모가 없고,
+ * 그런 공고는 공고번호 추적으로 한 건씩 본다. 키워드·세부품명 미달 공고는 천 건 단위라 화면에서 기본 보기에 섞지 않는다.
  */
 function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; byStage: Record<string, number> } {
   if (excludedCache?.source === diag) return excludedCache;
@@ -457,7 +458,8 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
   const items: unknown[] = [];
   for (const n of diag.notices) {
     const d = diagnoseNotice(n, diag.context);
-    if (!d.candidate || d.excludedAt === null) continue;
+    if (d.excludedAt === null) continue;
+    if (!d.candidate && d.steps.some((s) => !s.ok && s.step !== "키워드·품목")) continue;
     byStage[d.excludedAt] = (byStage[d.excludedAt] ?? 0) + 1;
     items.push(noticeSummary(n, d));
   }

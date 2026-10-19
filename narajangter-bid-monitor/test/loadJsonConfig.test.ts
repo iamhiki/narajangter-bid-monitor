@@ -21,7 +21,8 @@ function writeConfigDir(files: {
     JSON.stringify(
       files.heldQualifications ?? {
         heldProducts: [{ code: "1", name: "a" }],
-        heldIndustries: [{ code: "2", name: "b", strongMatchName: "b" }],
+        heldIndustries: [{ code: "2", name: "b" }],
+        industryCodes: [{ code: "2", name: "b" }],
       }
     )
   );
@@ -82,14 +83,15 @@ describe("loadAppConfig", () => {
     expect(() => loadAppConfig()).toThrow(ConfigError);
   });
 
-  it("수집 세부품명은 등록 품목 그대로이고, 강력추천 업종은 strongMatchName이 있는 보유 업종의 나라장터 표기다", () => {
+  it("수집 세부품명은 등록 품목 그대로이고, 강력추천 업종은 industryCodes 목록이다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
       heldQualifications: {
         heldProducts: [{ code: "10", name: "조형물" }, { code: "11", name: "안내판" }],
         heldIndustries: [
-          { code: "1426", name: "소프트웨어사업자(패키지소프트웨어개발.공급사업)", strongMatchName: "소프트웨어사업자" },
+          { code: "1426", name: "소프트웨어사업자(패키지소프트웨어개발.공급사업)" },
           { code: "1517", name: "출판사" },
         ],
+        industryCodes: [{ code: "1426", name: "소프트웨어사업자" }],
       },
     });
     const config = loadAppConfig();
@@ -105,9 +107,9 @@ describe("loadAppConfig", () => {
     ]);
   });
 
-  it("강력추천 업종(strongMatchName)이 하나도 없으면 ConfigError를 던진다", () => {
+  it("강력추천 업종(industryCodes)이 비어 있으면 ConfigError를 던진다", () => {
     process.env.APP_CONFIG_DIR = writeConfigDir({
-      heldQualifications: { heldProducts: [{ code: "1", name: "a" }], heldIndustries: [{ code: "2", name: "b" }] },
+      heldQualifications: { heldProducts: [{ code: "1", name: "a" }], heldIndustries: [{ code: "2", name: "b" }], industryCodes: [] },
     });
     expect(() => loadAppConfig()).toThrow(ConfigError);
   });
