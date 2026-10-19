@@ -24,7 +24,15 @@ import {
   saveNotifiedState,
   type NotifiedState,
 } from "./state/notifiedStore.js";
-import { isPostedIn, isPostedWithin, periodWindow, previousDays, type PostedPeriod } from "./state/recency.js";
+import {
+  dailyPeriod,
+  isKstWeekend,
+  isPostedIn,
+  isPostedWithin,
+  periodWindow,
+  previousDays,
+  type PostedPeriod,
+} from "./state/recency.js";
 import { alreadySent, loadSentReports, markSent, reportPeriodKey } from "./state/sentReports.js";
 import { toErrorMessage } from "./errors.js";
 import { logger } from "./logger.js";
@@ -34,7 +42,7 @@ import { redactSecrets } from "./redact.js";
  * 두 가지 모드로 돈다 (RUN_MODE).
  *
  *   weekly — 매주 월 09:10, 지난 7일 게시분을 이메일 리포트로, "입찰"을 뺀 공고(협상·규격가격·사전규격)를 텔레그램으로 보낸다.
- *   daily  — 매일 09:00, 전날 게시된 "입찰"(적격심사·최저가 등) 본공고를 텔레그램으로 보낸다.
+ *   daily  — 평일 09:00, 전날 게시된 "입찰"(적격심사·최저가 등) 본공고를 텔레그램으로 보낸다 (월요일은 금~일 게시분).
  *   hourly — 새로 나온 공고만 골라 텔레그램으로 바로 알린다. 2026-10-02부터 정기 실행하지 않는다
  *            (공고가 뜰 때마다 알림이 와서 담당자 요청으로 끔). 코드는 수동 실행용으로 남긴다.
  */
@@ -50,6 +58,13 @@ async function run(): Promise<number> {
     const appConfig = loadAppConfig();
     const now = new Date();
     if (env.runMode === "hourly") state = loadNotifiedState(env.notifiedStatePath);
+
+    // 매일 입찰 보고는 평일만 보낸다 (2026-10-19 담당자 요청). 주말 게시분은 월요일 보고에 담긴다 (dailyPeriod).
+    // cron-job.org가 주말에도 깨우므로 여기서 거른다. 주말에 꼭 받아야 하면 FORCE_SEND=true로 수동 실행한다.
+    if (env.runMode === "daily" && !env.forceSend && isKstWeekend(now)) {
+      logger.info("주말에는 매일 입찰 보고를 보내지 않습니다 — 월요일 보고에 함께 담깁니다.");
+      return 0;
+    }
 
     // 매일·주간 보고는 cron-job.org와 GitHub 예약 실행 두 곳이 깨운다. 먼저 보낸 쪽이 있으면 조회도 하지 않고 끝낸다.
     const scheduled = env.runMode === "hourly" ? undefined : env.runMode;
@@ -242,7 +257,8 @@ async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: N
 }
 
 /**
- * 매일 09:00 입찰 보고 — 전날(한국 날짜) 게시된 "입찰"(적격심사·최저가 등) 본공고.
+ * 평일 09:00 입찰 보고 — 전날(한국 날짜) 게시된 "입찰"(적격심사·최저가 등) 본공고.
+ * 주말에는 보내지 않고, 월요일 보고가 금~일 게시분을 받는다 (2026-10-19 담당자 요청).
  *
  * 2026-09-29 미팅: 입찰은 공고 후 7일 안에 마감되는 경우가 있어 주간 보고로는 늦다.
  * 2026-10-15 담당자 정리: 전날 게시분만 보내고, 없으면 "새 공고 없음"을 보낸다. 날짜로 끊으므로
@@ -251,7 +267,7 @@ async function runHourly(env: Env, reportInput: ReportInput, now: Date, state: N
  */
 async function runDaily(env: Env, collected: CollectedInput, now: Date): Promise<number> {
   const fetchFailed = hasFetchFailures(collected);
-  const period = previousDays(now, 1);
+  const period = dailyPeriod(now);
   const isBid = (m: MatchedNotice) => classifyBidMethod(m.notice.bidMethod) === "입찰";
   const posted = postedIn(collected, period);
   const input: ReportInput = {
@@ -260,7 +276,7 @@ async function runDaily(env: Env, collected: CollectedInput, now: Date): Promise
     preStandard: { ...posted.preStandard, matches: [] },
   };
   const options: PeriodReportOptions = { kind: "daily", period, closedCount: closedIn(collected, period, isBid) };
-  logger.info("전날 게시 입찰 공고", { 게시일: period.from, 입찰: input.bid.matches.length, 마감지남: options.closedCount });
+  logger.info("전날 게시 입찰 공고", { 게시일: `${period.from}~${period.to}`, 입찰: input.bid.matches.length, 마감지남: options.closedCount });
 
   const messages = buildPeriodReportMessages(input, options);
   if (env.dryRun) {

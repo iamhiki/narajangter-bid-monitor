@@ -29,6 +29,7 @@ export function isPostedWithin(postedAt: string | null, now: Date, hours = NEW_N
  * 정기 보고가 다루는 게시일 범위 (한국 날짜, 양끝 포함, "YYYY-MM-DD").
  *
  * 2026-10-15 담당자 정리: 매일 09:00 보고는 "전날 게시분", 매주 월 09:10 보고는 "지난 7일 게시분".
+ * 2026-10-19: 매일 보고는 평일만 — 월요일 보고가 금~일 게시분을 받는다 (dailyPeriod).
  * 날짜로 끊으므로 하루 단위로 겹치거나 비는 날이 없다 — 이미 알린 공고 기록(notified.json)이 필요 없다.
  */
 export interface PostedPeriod {
@@ -47,6 +48,25 @@ export function kstDateKey(now: Date, offsetDays = 0): string {
 /** 오늘(한국 날짜) 직전 days일. days=1이면 전날, days=7이면 지난 7일. */
 export function previousDays(now: Date, days: number): PostedPeriod {
   return { from: kstDateKey(now, -days), to: kstDateKey(now, -1) };
+}
+
+/** now의 한국 요일 (0=일 … 6=토). 실행 환경 시간대와 무관하다. */
+export function kstWeekday(now: Date): number {
+  return new Date(now.getTime() + KST_MS).getUTCDay();
+}
+
+/** 한국 날짜로 토·일인지 — 매일 입찰 보고는 주말에 보내지 않는다 (2026-10-19 담당자 요청: 평일만) */
+export function isKstWeekend(now: Date): boolean {
+  const day = kstWeekday(now);
+  return day === 0 || day === 6;
+}
+
+/**
+ * 매일 입찰 보고가 다루는 게시일 범위. 평일은 전날 하루, 월요일은 금~일 사흘 —
+ * 주말에는 보고를 보내지 않으므로 금·토 게시분을 월요일 보고에 함께 담는다.
+ */
+export function dailyPeriod(now: Date): PostedPeriod {
+  return previousDays(now, kstWeekday(now) === 1 ? 3 : 1);
 }
 
 /**

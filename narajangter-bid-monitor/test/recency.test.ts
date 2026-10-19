@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isPostedIn, isPostedWithin, kstDateKey, previousDays } from "../src/state/recency.js";
+import {
+  dailyPeriod,
+  isKstWeekend,
+  isPostedIn,
+  isPostedWithin,
+  kstDateKey,
+  previousDays,
+} from "../src/state/recency.js";
 import { buildTelegramMessages } from "../src/notify/telegramMessage.js";
 import type { ReportInput } from "../src/report/buildReport.js";
 
@@ -48,6 +55,17 @@ describe("정기 보고 게시일 범위 (한국 날짜)", () => {
   it("매일 보고는 전날, 주간 보고는 지난 7일", () => {
     expect(previousDays(now, 1)).toEqual({ from: "2026-10-14", to: "2026-10-14" });
     expect(previousDays(now, 7)).toEqual({ from: "2026-10-08", to: "2026-10-14" });
+  });
+
+  it("매일 보고는 평일만 — 월요일은 금~일 게시분을 받는다", () => {
+    // 10/17(토)·10/18(일) 09:00 한국은 주말, 10/19(월)·10/16(금)은 평일
+    expect(isKstWeekend(new Date("2026-10-17T00:00:00Z"))).toBe(true);
+    expect(isKstWeekend(new Date("2026-10-18T00:00:00Z"))).toBe(true);
+    expect(isKstWeekend(new Date("2026-10-16T00:00:00Z"))).toBe(false);
+    // UTC로는 일요일 밤이어도 한국은 월요일
+    expect(isKstWeekend(new Date("2026-10-18T16:00:00Z"))).toBe(false);
+    expect(dailyPeriod(new Date("2026-10-19T00:00:00Z"))).toEqual({ from: "2026-10-16", to: "2026-10-18" });
+    expect(dailyPeriod(now)).toEqual({ from: "2026-10-14", to: "2026-10-14" });
   });
 
   it("UTC로는 전날이어도 한국 날짜로 계산한다", () => {
