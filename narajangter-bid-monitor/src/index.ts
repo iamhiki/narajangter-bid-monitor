@@ -34,6 +34,7 @@ import {
   type PostedPeriod,
 } from "./state/recency.js";
 import { alreadySent, loadSentReports, markSent, reportPeriodKey } from "./state/sentReports.js";
+import { buildReportLog, writeReportLog, type ReportKind } from "./state/reportLog.js";
 import { toErrorMessage } from "./errors.js";
 import { logger } from "./logger.js";
 import { redactSecrets } from "./redact.js";
@@ -42,7 +43,8 @@ import { redactSecrets } from "./redact.js";
  * 두 가지 모드로 돈다 (RUN_MODE).
  *
  *   weekly — 매주 월 09:10, 지난 7일 게시분을 이메일 리포트로, "입찰"을 뺀 공고(협상·규격가격·사전규격)를 텔레그램으로 보낸다.
- *   daily  — 평일 09:00, 전날 게시된 "입찰"(적격심사·최저가 등) 본공고를 텔레그램으로 보낸다 (월요일은 금~일 게시분).
+ *   daily  — 평일 09:00, 전날 게시된 "입찰"(적격심사·최저가 등) 본공고를 텔레그램으로 보내고 구글 시트에도 쌓는다
+ *            (월요일은 금~일 게시분).
  *   hourly — 새로 나온 공고만 골라 텔레그램으로 바로 알린다. 2026-10-02부터 정기 실행하지 않는다
  *            (공고가 뜰 때마다 알림이 와서 담당자 요청으로 끔). 코드는 수동 실행용으로 남긴다.
  */
@@ -124,6 +126,8 @@ async function runWeekly(env: Env, recipients: string[], collected: CollectedInp
   }
 
   const telegramFailed = await sendWeeklyTelegram(env, weeklyInput, options);
+  // 텔레그램으로 나간 공고(입찰 제외)를 사내 화면 판단 기록에 쌓도록 남긴다. 텔레그램이 일부 실패해도 이메일로는 나간다
+  if (env.telegramEnabled && env.telegramBotToken) saveReportLog("weekly", allMatches(weeklyInput), now);
 
   if (report.totalMatchCount === 0 && !env.sendEmptyReport) {
     logger.info("매칭 결과 0건이며 SEND_EMPTY_REPORT=false → 이메일 발송을 생략합니다.");
@@ -292,8 +296,29 @@ async function runDaily(env: Env, collected: CollectedInput, now: Date): Promise
     botToken: env.telegramBotToken,
     chatIds: env.telegramChatIds,
   });
+  saveReportLog("daily", allMatches(input), now);
+  // 구글 시트에도 쌓는다 (2026-10-19) — 사무실 PC가 꺼져 있어도 시트에서 보고된 공고를 볼 수 있게.
+  // 주간 보고와 같은 시트이고, 이미 있는 공고번호는 건너뛰어 두 보고에 같은 공고가 나와도 한 줄이다
+  const feedbackSheetFailed = await appendToSheet(env, allMatches(input), now);
   await alertPartialFailure(env, failures);
-  return fetchFailed ? 2 : 0;
+  return fetchFailed || feedbackSheetFailed ? 2 : 0;
+}
+
+/** 워크플로가 올릴 보고 기록 폴더 (output/은 저장소에 올리지 않는다) */
+const REPORT_LOG_DIR = "output/report-log";
+
+/**
+ * 보고에 나간 공고 목록을 남긴다 — 워크플로가 report-log 브랜치에 올리고, 사내 화면이 받아 판단 기록에 '미판단'으로 쌓는다
+ * (src/state/reportLog.ts). 0건이어도 남기지 않는다 — 쌓을 게 없다. 실패해도 보고는 이미 나갔으니 경고만 남긴다.
+ */
+function saveReportLog(kind: ReportKind, matches: MatchedNotice[], now: Date): void {
+  if (matches.length === 0) return;
+  try {
+    const path = writeReportLog(REPORT_LOG_DIR, buildReportLog(kind, matches, now));
+    logger.info("보고 기록을 남겼습니다 (사내 화면 판단 기록용)", { path, 공고: matches.length });
+  } catch (err) {
+    logger.warn("보고 기록을 남기지 못했습니다 — 사내 화면 판단 기록에 이번 보고가 쌓이지 않습니다", { error: toErrorMessage(err) });
+  }
 }
 
 function allMatches(input: ReportInput): MatchedNotice[] {

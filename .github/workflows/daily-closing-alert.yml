@@ -64,6 +64,9 @@ jobs:
 
   alert:
     runs-on: ubuntu-latest
+    # 보고 기록을 report-log 브랜치에 올린다 (보고 기록 올리기 단계)
+    permissions:
+      contents: write
     timeout-minutes: 30
     steps:
       - name: 저장소 체크아웃
@@ -106,6 +109,9 @@ jobs:
           NARA_PRESTD_SERVICE_KEY: ${{ secrets.NARA_PRESTD_SERVICE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          # 구글 시트 피드백 기록 — 매일 보고도 주간 보고와 같은 시트에 쌓는다 (2026-10-19). 시크릿이 없으면 건너뛴다.
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FEEDBACK_SHEET_ID: ${{ secrets.FEEDBACK_SHEET_ID }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           FORCE_SEND: ${{ github.event.inputs.force || 'false' }}
           # 실행 실패는 담당자 방이 아니라 개발자 텔레그램 대화방·웹훅으로만 간다. 시크릿이 없으면 로그에만 남는다.
@@ -114,6 +120,14 @@ jobs:
           # 예비 실행(schedule)이면 실패 알림에 "이번 보고가 빠졌다"고 적는다. 아침 실행은 cron-job.org가 부르는 workflow_dispatch
           BACKUP_RUN: ${{ github.event_name == 'schedule' }}
         run: npm run report
+
+      - name: 보고 기록 올리기 (사내 화면 판단 기록에 '미판단'으로 쌓이게)
+        # 보고에 나간 공고 목록을 report-log 브랜치에 올린다 (scripts/push-report-log.sh). 보고가 일부 조회 실패로
+        # 끝나도(종료 코드 2) 이미 나간 보고라 올린다. 보내지 않았으면 올릴 파일이 없어 그냥 끝난다.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/push-report-log.sh
 
       - name: 보고 발송 기록·이미 알린 공고 기록 저장
         if: always()

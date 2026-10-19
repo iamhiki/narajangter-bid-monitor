@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { networkInterfaces } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -31,6 +33,7 @@ import { calibrate } from "../src/similarity/calibrate.js";
 import { groupWorkTerms } from "../src/similarity/workTerms.js";
 import { backupContent, restoreIfMissing } from "../src/state/backup.js";
 import { decisionsCsv } from "../src/state/decisionCsv.js";
+import { demandInstitutionOf, mergeReportLog, parseReportLog, type ReportKind } from "../src/state/reportLog.js";
 
 /**
  * 유사도 탐색기 — 로컬 웹 UI.
@@ -260,14 +263,6 @@ function registrationDeadlineOf(n: NormalizedNotice): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-function demandInstitutionOf(n: NormalizedNotice): string | null {
-  const raw = (n.raw ?? {}) as Record<string, unknown>;
-  for (const key of ["dminsttNm", "rlDminsttNm", "dmndInsttNm"]) {
-    const v = raw[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
-}
 
 interface SimilarityView {
   maxScore: number;
@@ -612,6 +607,8 @@ interface Participation {
   prev?: DecisionSnapshot | null;
   /** 담당이 참가여부를 고르면서 정해졌는지 ('내가 맡기'로 직접 맡으면 false). 참가여부를 다시 고르면 어느 쪽이든 그 사람으로 바뀐다 */
   autoOwner?: boolean;
+  /** 이 공고가 나간 텔레그램 보고 (보고일·매일/주간). 있으면 판단 전이어도 판단 기록 탭에 '미판단'으로 보인다 (4단계) */
+  reports?: { date: string; kind: ReportKind }[];
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
 mkdirSync(dirname(PARTICIPATION_PATH), { recursive: true });
@@ -688,6 +685,50 @@ const backupAll = (): void => {
 };
 backupAll();
 setTimeout(backupAll, 2 * 60_000).unref();
+
+// ── 보고 기록 → 판단 기록 (4단계, 2026-10-19) ──────────────────
+/**
+ * 매일·주간 텔레그램 보고에 나간 공고를 판단 기록에 '미판단'으로 쌓는다. 보고는 GitHub Actions에서 돌아
+ * 이 PC에 직접 쓸 수 없으니, 보고가 저장소의 report-log 브랜치에 남긴 목록을 몇 분마다 받아 합친다
+ * (src/state/reportLog.ts). 받아오기(git fetch)는 원격 기록만 갱신하고 작업 폴더·브랜치는 건드리지 않는다.
+ * PC가 꺼져 있던 동안의 보고는 켜진 뒤 한꺼번에 들어온다. 이미 판단한 공고는 판단을 그대로 둔다.
+ */
+const execFileAsync = promisify(execFile);
+const REPORT_LOG_REF = "refs/remotes/origin/report-log";
+const REPORT_LOG_POLL_MS = 5 * 60_000;
+/** 이미 합친 보고 파일 (git blob 해시) — 같은 파일을 다시 읽지 않는다. 다시 합쳐도 결과는 같다 */
+const mergedReportBlobs = new Set<string>();
+let lastReportLogError = "";
+const git = async (args: string[]): Promise<string> =>
+  (await execFileAsync("git", args, { timeout: 60_000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 })).stdout;
+
+async function pullReportLog(): Promise<void> {
+  try {
+    await git(["fetch", "--quiet", "origin", `+refs/heads/report-log:${REPORT_LOG_REF}`]);
+    let added = 0;
+    for (const line of (await git(["ls-tree", REPORT_LOG_REF, "reports/"])).split("\n")) {
+      // "100644 blob <해시>\treports/2026-10-20-daily.json"
+      const m = /^\d+ blob ([0-9a-f]+)\t(reports\/[^/]+\.json)$/.exec(line.trim());
+      if (!m || mergedReportBlobs.has(m[1]!)) continue;
+      const entry = parseReportLog(await git(["cat-file", "-p", m[1]!]));
+      mergedReportBlobs.add(m[1]!);
+      const before = Object.keys(participation).length;
+      if (entry && mergeReportLog(participation, entry)) {
+        added += Object.keys(participation).length - before;
+        saveParticipation();
+      }
+    }
+    if (added > 0) console.log(`  보고된 공고 ${added}건을 판단 기록에 '미판단'으로 쌓았습니다`);
+    lastReportLogError = "";
+  } catch (err) {
+    // 같은 오류를 5분마다 되풀이해 남기지 않는다 (인터넷 끊김 등). 첫 보고 전이라 브랜치가 없을 때도 여기로 온다
+    const msg = String(err instanceof Error ? err.message : err).split("\n")[0]!;
+    if (msg !== lastReportLogError) console.log(`  보고 기록을 받아오지 못했습니다 (다음에 다시 시도): ${msg}`);
+    lastReportLogError = msg;
+  }
+}
+setTimeout(() => void pullReportLog(), 15_000).unref();
+setInterval(() => void pullReportLog(), REPORT_LOG_POLL_MS).unref();
 
 // ── 부가 정보 (공고문 참가자격 · 공동수급) ──────────────────────
 /**
