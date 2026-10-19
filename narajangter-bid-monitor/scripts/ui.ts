@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "../src/config/env.js";
@@ -29,6 +29,8 @@ import type { PastProject } from "../src/corpus/types.js";
 import { buildSimilarityIndex } from "../src/similarity/loadCorpus.js";
 import { calibrate } from "../src/similarity/calibrate.js";
 import { groupWorkTerms } from "../src/similarity/workTerms.js";
+import { backupContent, restoreIfMissing } from "../src/state/backup.js";
+import { decisionsCsv } from "../src/state/decisionCsv.js";
 
 /**
  * 유사도 탐색기 — 로컬 웹 UI.
@@ -50,6 +52,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = resolve(HERE, "ui.html");
 const CORPUS_PATH = resolve(process.env.CORPUS_PATH ?? "data/past-projects.json");
 const PORT = Number(process.env.UI_PORT ?? 5173);
+/**
+ * 판단 기록·목록에 올린 공고를 한 부 더 둘 폴더 — 회사 구글 드라이브 데스크톱이 동기화하는 폴더 (src/state/backup.ts).
+ * 비어 있으면 백업하지 않는다.
+ */
+const BACKUP_DIR = process.env.UI_BACKUP_DIR?.trim() || null;
 
 const argv = process.argv.slice(2);
 /** --lan: 사내망의 다른 PC에서도 볼 수 있게 연다. 기본은 이 PC에서만(127.0.0.1). */
@@ -607,6 +614,9 @@ interface Participation {
   autoOwner?: boolean;
 }
 const PARTICIPATION_PATH = resolve("cache/participation.json");
+mkdirSync(dirname(PARTICIPATION_PATH), { recursive: true });
+// 새 PC에 설치했거나 cache가 지워졌으면 백업에서 되살린다 (이 PC에 파일이 있으면 건드리지 않는다)
+restoreIfMissing(PARTICIPATION_PATH, BACKUP_DIR);
 
 let participation: Record<string, Participation> = (() => {
   try {
@@ -632,7 +642,11 @@ const snapshotOf = (p: Participation): DecisionSnapshot => ({
 });
 function saveParticipation(): void {
   mkdirSync(dirname(PARTICIPATION_PATH), { recursive: true });
-  writeFileSync(PARTICIPATION_PATH, JSON.stringify(participation, null, 2), "utf8");
+  const content = JSON.stringify(participation, null, 2);
+  writeFileSync(PARTICIPATION_PATH, content, "utf8");
+  backupContent("participation.json", content, BACKUP_DIR);
+  // 팀원이 구글 드라이브에서 표로 보는 판단 기록 — 화면 'CSV 내려받기'와 같은 표 (보기용이라 날짜별 사본은 두지 않는다)
+  backupContent("판단기록.csv", decisionsCsv(participation), BACKUP_DIR, new Date(), false);
 }
 
 // ── 담당자가 목록에 올린 공고 (팀 공유) ─────────────────────────
@@ -651,6 +665,7 @@ interface Promotion {
   reason?: string;
 }
 const PROMOTED_PATH = resolve("cache/promoted.json");
+restoreIfMissing(PROMOTED_PATH, BACKUP_DIR);
 let promoted: Record<string, Promotion> = (() => {
   try {
     return JSON.parse(readFileSync(PROMOTED_PATH, "utf8")) as Record<string, Promotion>;
@@ -660,8 +675,19 @@ let promoted: Record<string, Promotion> = (() => {
 })();
 function savePromoted(): void {
   mkdirSync(dirname(PROMOTED_PATH), { recursive: true });
-  writeFileSync(PROMOTED_PATH, JSON.stringify(promoted, null, 2), "utf8");
+  const content = JSON.stringify(promoted, null, 2);
+  writeFileSync(PROMOTED_PATH, content, "utf8");
+  backupContent("promoted.json", content, BACKUP_DIR);
 }
+// 서버가 뜰 때 지금 기록을 한 번 백업한다 — 판단을 새로 누르지 않아도 백업 폴더가 최신이 되게.
+// 로그인하자마자 서버가 뜨면 구글 드라이브(G:)가 아직 연결되기 전일 수 있어 2분 뒤 한 번 더 한다
+const backupAll = (): void => {
+  backupContent("participation.json", JSON.stringify(participation, null, 2), BACKUP_DIR);
+  backupContent("판단기록.csv", decisionsCsv(participation), BACKUP_DIR, new Date(), false);
+  backupContent("promoted.json", JSON.stringify(promoted, null, 2), BACKUP_DIR);
+};
+backupAll();
+setTimeout(backupAll, 2 * 60_000).unref();
 
 // ── 부가 정보 (공고문 참가자격 · 공동수급) ──────────────────────
 /**
@@ -1315,5 +1341,10 @@ server.listen(PORT, HOST, () => {
     console.log(`  · 화면에 과업지시서 본문과 발주기관 담당자 연락처가 나옵니다.`);
     console.log(`    사내 공유용이며, 외부로 주소를 전달하지 마세요.`);
   }
+  console.log(
+    BACKUP_DIR
+      ? `\n  판단 기록 백업: ${BACKUP_DIR}${existsSync(BACKUP_DIR) ? "" : "  ⚠ 폴더가 없습니다 — 구글 드라이브가 켜져 있는지 확인하세요"}`
+      : `\n  판단 기록 백업: 꺼져 있음 (.env의 UI_BACKUP_DIR에 구글 드라이브 폴더를 적으면 켜집니다)`
+  );
   console.log(`\n  종료: Ctrl+C\n`);
 });
