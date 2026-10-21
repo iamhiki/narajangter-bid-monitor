@@ -459,10 +459,20 @@ function excludedCandidates(diag: CollectionDiagnostics): { items: unknown[]; by
   const byStage: Record<string, number> = Object.fromEntries(DIAGNOSE_STEPS.map((s) => [s, 0]));
   const items: unknown[] = [];
   for (const n of diag.notices) {
-    const d = diagnoseNotice(n, diag.context);
-    if (d.excludedAt === null) continue;
-    if (!d.candidate && d.steps.some((s) => !s.ok && s.step !== "키워드·품목")) continue;
-    byStage[d.excludedAt] = (byStage[d.excludedAt] ?? 0) + 1;
+    const first = diagnoseNotice(n, diag.context);
+    if (first.excludedAt === null) continue;
+    // 해외 개최 공고는 대부분 키워드에도 안 맞아 이 탭에 한 건도 안 보였다 (2026-10-20 요청). 키워드·제외 키워드·금액 등
+    // 다른 조건에 걸렸어도 '해외 개최'로 싣되, 낙찰방법(수의계약·설계공모)에 걸린 공고는 뺀다 — 애초에 수집하지 않는
+    // 계약 방식이라 볼 일이 없다 (옥동 한국관~송현동 폐기물처리 용역: 소액수의견적)
+    const overseas =
+      first.excludedAt !== "마감" &&
+      first.excludedAt !== "본공고 게시" &&
+      first.steps.some((s) => s.step === "해외개최" && !s.ok) &&
+      !first.steps.some((s) => s.step === "낙찰방법" && !s.ok);
+    const d: Diagnosis = overseas ? { ...first, excludedAt: "해외개최" } : first;
+    if (!overseas && !d.candidate && d.steps.some((s) => !s.ok && s.step !== "키워드·품목")) continue;
+    const stage = d.excludedAt!;
+    byStage[stage] = (byStage[stage] ?? 0) + 1;
     items.push(noticeSummary(n, d));
   }
   excludedCache = { source: diag, items, byStage };
@@ -862,29 +872,58 @@ function docHeldItems(appConfig: AppConfig): unknown[] {
   });
 }
 
+/**
+ * 제외된 공고의 첨부 읽기 (2026-10-20 요청 — 제외된 공고도 공고문 참가자격·세부품명과 과업지시서 기준 싱크로율을 보게).
+ * 순서: 다른 조건으로 빠진 후보 → 키워드 없이 빠진 용역 공고(공고문 세부품명 공고를 찾는 대상) → 나머지 세부품명 미달.
+ * 조회를 다시 하면 목록(docScanList)만 바꾸고, 돌던 작업은 새 목록에서 아직 안 읽은 공고를 이어 읽는다.
+ */
+let docScanList: NormalizedNotice[] = [];
+const docScanTried = new Set<string>();
+
+function docScanListOf(diag: CollectionDiagnostics, skip: Set<string>): NormalizedNotice[] {
+  const byNo = new Map(diag.notices.map((n) => [n.noticeNo, n]));
+  const pool = new Set(docProductPool.map((p) => p.notice.noticeNo));
+  const items = (excludedCandidates(diag).items as { noticeNo: string; excludedAt: string }[]).filter(
+    (i) => i.excludedAt !== "마감" && i.excludedAt !== "본공고 게시" && !skip.has(i.noticeNo) && !promoted[i.noticeNo]
+  );
+  const rank = (i: { noticeNo: string; excludedAt: string }) => (i.excludedAt !== "키워드·품목" ? 0 : pool.has(i.noticeNo) ? 1 : 2);
+  return items
+    .sort((a, b) => rank(a) - rank(b))
+    .map((i) => byNo.get(i.noticeNo))
+    .filter((n): n is NormalizedNotice => !!n);
+}
+
+/** 공고문·과업 본문을 아직 다 읽지 않은 공고 */
+function needsDoc(n: NormalizedNotice): boolean {
+  const e = enrichment.get(n.noticeNo);
+  return !e || e.qualDoc === undefined || e.similarity === undefined || e.scope === undefined;
+}
+
+function updateDocScanCounts(appConfig: AppConfig): void {
+  docScanState.total = docScanList.length;
+  docScanState.done = docScanList.filter((n) => !needsDoc(n) || docScanTried.has(n.noticeNo)).length;
+  docScanState.found = docHeldItems(appConfig).length;
+}
+
 function startDocScan(appConfig: AppConfig): void {
+  updateDocScanCounts(appConfig);
   if (docScanState.running) return;
-  const todo = docProductPool.map((p) => p.notice).filter((n) => enrichment.get(n.noticeNo)?.qualDoc === undefined);
-  docScanState = { running: todo.length > 0, done: 0, total: todo.length, found: docHeldItems(appConfig).length };
-  if (!todo.length) return;
+  if (!docScanList.some(needsDoc)) return;
+  docScanState.running = true;
   void (async () => {
     try {
       const cookie = await getSessionCookie();
-      for (const n of todo) {
-        // 공고문 참가자격만 먼저 읽고, 등록 세부품명이 나온 공고만 목록 카드처럼 나머지(과업 본문·공동수급)를 채운다
-        if (enrichment.get(n.noticeNo)?.qualDoc === undefined) {
-          const qualDoc = await readQualificationFromNotice(n, heldOf(appConfig)).catch(() => null);
-          enrichment.set(n.noticeNo, { ...enrichment.get(n.noticeNo), qualDoc });
-        }
-        if (docHeldProducts(n.noticeNo, appConfig).length) {
-          await enrichDoc(n, appConfig, cookie, false);
-          docScanState.found += 1;
-        }
-        docScanState.done += 1;
+      for (;;) {
+        const n = docScanList.find((x) => needsDoc(x) && !docScanTried.has(x.noticeNo));
+        if (!n) break;
+        docScanTried.add(n.noticeNo);
+        await enrichDoc(n, appConfig, cookie, false).catch(() => undefined);
+        updateDocScanCounts(appConfig);
         await new Promise((r) => setTimeout(r, 300)); // g2b·조달청 서버에 몰아서 요청하지 않는다
       }
     } finally {
       docScanState.running = false;
+      updateDocScanCounts(appConfig);
     }
   })();
 }
@@ -1018,6 +1057,7 @@ async function fetchNotices(period: string): Promise<NoticeCache> {
     );
     // 키워드 없이 빠진 용역 공고는 공고문 세부품명으로 다시 찾는다 — 찾은 공고는 응답할 때 heldItems에 붙인다 (withDocHeld)
     docProductPool = lastDiagnostics ? docProductPoolOf(lastDiagnostics, new Set([...all, ...held.map((h) => h.match)].map((m) => m.notice.noticeNo))) : [];
+    docScanList = lastDiagnostics ? docScanListOf(lastDiagnostics, new Set([...all, ...held.map((h) => h.match)].map((m) => m.notice.noticeNo))) : [];
     startDocScan(appConfig);
     // 유사도 높은 순. 기존 리포트는 추천등급→마감일 순인데, 여기서는 ④가 무엇을
     // 끌어올리는지 보는 게 목적이라 일부러 유사도로 세운다.
@@ -1198,6 +1238,18 @@ const server = createServer((req, res) => {
     } catch {
       res.writeHead(404).end("asset not found");
     }
+    return;
+  }
+
+  // 제외된 공고 카드의 싱크로율 근거 — 카드가 천 건 단위라 목록에는 점수만 싣고, 근거는 %를 누를 때 받는다
+  if (url.pathname === "/api/similarity") {
+    const no = (url.searchParams.get("no") ?? "").trim();
+    const n = lastDiagnostics?.notices.find((x) => x.noticeNo === no);
+    if (!n) {
+      json(res, { error: "공고를 찾지 못했습니다. 공고를 다시 불러오세요." });
+      return;
+    }
+    json(res, excludedSimilarity(n.noticeNo, n.title));
     return;
   }
 

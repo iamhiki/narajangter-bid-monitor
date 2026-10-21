@@ -1024,8 +1024,17 @@ footer b { color: var(--muted); }
   </section>
 
   <section id="tab-excluded" hidden>
-    <p class="sub ex-summary" id="exSummary" title="목록에서 빠진 공고입니다. 여러 조건에 걸리면 처음 걸린 조건에만 셉니다.">불러오는 중…</p>
+    <p class="sub ex-summary" id="exSummary" title="목록에서 빠진 공고입니다. 여러 조건에 걸리면 처음 걸린 조건에만 셉니다. 해외 개최는 다른 조건에 걸렸어도 해외 개최로 셉니다(수의계약·설계공모 제외).">불러오는 중…</p>
     <div class="filter-row">
+      <!-- 조회 기간 — '실제 공고' 탭의 기간 선택과 같은 값이다 (바꾸면 두 탭 모두 그 기간으로 다시 만든다) -->
+      <label class="sort-box">조회 기간
+        <select id="exDays" autocomplete="off" aria-label="제외된 공고 조회 기간">
+          <option value="3">최근 3일</option>
+          <option value="7" selected>최근 7일</option>
+          <option value="14">최근 14일</option>
+          <option value="open">마감 전 공고 전체</option>
+        </select>
+      </label>
       <div class="filters" id="exFilters"></div>
       <label class="sort-box">정렬
         <select id="exSort" aria-label="제외된 공고 정렬">
@@ -2014,12 +2023,21 @@ const scoreBand = (n) => (n.confidence === "강력추천" ? "urgent" : n.maxScor
 /** 점수는 카드 오른쪽 위에 따로 — 배지 줄에 섞으면 정보가 전부 왼쪽에 몰린다. 담당자에게는 싱크로율(%)만 보인다 */
 function scoreBoxHtml(n, open = false) {
   const tone = n.maxScore >= HIGH ? "hi" : n.maxScore >= LOW ? "edge" : "";
-  return `<div class="card-score ${tone} ${open ? "open" : ""}" data-score="${esc(n.noticeNo)}" role="button" tabindex="0" aria-expanded="${open}" title="눌러서 근거 보기">
+  // 제외된 공고는 근거(비슷한 과거 사업)를 싣지 않고 받아 온다 — 누를 때 /api/similarity로 (toggleScoreWhy)
+  const lazy = n.similar === undefined;
+  return `<div class="card-score ${tone} ${open ? "open" : ""}" data-score="${esc(n.noticeNo)}" ${lazy ? 'data-lazy="1"' : ""} role="button" tabindex="0" aria-expanded="${open}" title="눌러서 근거 보기">
       <b>${Math.round(n.maxScore * 100)}<i>%</i></b>
       <span class="score-bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, Math.round(n.maxScore * 100)))}%"></span></span>
       <small><u>싱크로율</u></small>
-      <div class="score-why" role="dialog" aria-label="싱크로율 근거">${scoreWhyHtml(n)}</div>
+      <div class="score-why" role="dialog" aria-label="싱크로율 근거">${lazy ? '<p class="meta">근거를 불러오는 중…</p>' : scoreWhyHtml(n)}</div>
     </div>`;
+}
+
+/** 제외된 공고 카드의 싱크로율 — 서버가 첨부를 읽었으면 그 값(과업지시서 기준), 받아 온 근거가 있으면 그것까지 */
+const exWhy = {};
+function exScoreBox(n) {
+  const sim = enrich.byNo[n.noticeNo]?.similarity;
+  return scoreBoxHtml({ ...n, ...(exWhy[n.noticeNo] || {}), ...(sim || {}) });
 }
 
 /**
@@ -2371,7 +2389,7 @@ function renderEnrichMeta() {
   const parts = [];
   if (e.running && e.total) parts.push(`첨부 공고문·과업지시서 확인 ${e.done}/${e.total}`);
   // 키워드 없이 빠진 용역 공고의 공고문을 읽어 등록 세부품명을 찾는 중 — 찾으면 '세부품명 공고' 탭에 붙는다
-  if (scan?.running) parts.push(`용역 공고문 세부품명 확인 ${scan.done}/${scan.total} (찾음 ${scan.found}건)`);
+  if (scan?.running) parts.push(`제외된 공고 첨부 확인 ${scan.done}/${scan.total} (세부품명 공고 ${scan.found}건 찾음)`);
   $("enrichMeta").textContent = parts.join(" · ") + " — 끝나는 대로 카드에 채워집니다";
 }
 
@@ -2388,6 +2406,15 @@ async function pollEnrich() {
     return;
   }
   refreshCards("enrich");
+  // 제외된 공고 탭을 보고 있으면, 보이는 카드의 첨부를 서버가 새로 읽었을 때 그 카드들을 다시 그린다
+  // (근거 패널을 열어 둔 동안은 닫히지 않게 기다린다)
+  if (!$("tab-excluded").hidden && exData && !document.querySelector("#tab-excluded .card-score.open")) {
+    const key = exShownKey();
+    if (key !== lastExKey) {
+      renderExcluded();
+      lastExKey = exShownKey();
+    }
+  }
   // 공고문으로 새 세부품명 공고를 찾았으면 '세부품명 공고' 탭 목록만 다시 받는다 (서버가 받아 둔 조회 결과라 금방 온다)
   const found = enrich.docScan?.found ?? 0;
   if (found !== lastDocFound) {
@@ -2405,6 +2432,15 @@ async function pollEnrich() {
 }
 
 let lastDocFound = 0;
+let lastExKey = "";
+/** 제외된 공고 탭에 보이는 카드마다 첨부를 읽었는지 — 바뀌면 다시 그린다 */
+const exShownKey = () =>
+  [...document.querySelectorAll("#tab-excluded [data-score]")]
+    .map((el) => {
+      const e = enrich.byNo[el.dataset.score];
+      return `${el.dataset.score}:${e?.qualDoc !== undefined ? 1 : 0}${e?.similarity ? 1 : 0}`;
+    })
+    .join(",");
 async function reloadHeld() {
   try {
     const data = await getJson(`/api/notices?days=${$("days").value}`);
@@ -3412,7 +3448,7 @@ const STAGE_NOTE = {
   제외키워드: "제목에 지일 업무와 무관한 공고를 거르는 단어가 들어 있습니다.",
   최소예산: "사업금액이 설정한 최소 금액보다 작습니다.",
   낙찰방법: "수집하지 않는 낙찰방법입니다(수의계약, 설계공모).",
-  해외개최: "몽골이 아닌 해외 개최 공고입니다. 제목에 한국관이 있거나, 전시회·해외 지명과 단체관이 함께 있거나, USA·UAE 같은 영문 국가 약자가 있으면 해외 개최로 봅니다.",
+  해외개최: "몽골이 아닌 해외 개최 공고입니다. 제목에 한국관(통합한국관 포함)이 있거나, 전시회·박람회·엑스포 또는 해외 지명과 단체관이 함께 있거나, USA·UAE·UK 같은 영문 국가 약자가 있으면 해외 개최로 봅니다.<br>몽골 공고는 빼지 않습니다. 키워드·제외 키워드·금액 등 다른 조건에 걸렸어도 이 사유로 보여 주고, 수의계약·설계공모는 싣지 않습니다.",
   "키워드·품목": "제목에 등록 키워드가 없고, 공고의 세부품명(용역은 용역분류)도 지일 등록 품목이 아닙니다.<br>다른 조건(금액·낙찰방법·자격·지역)은 모두 통과한 공고만 싣습니다.",
   참가자격: "참가자격이 지일이 보유하지 않은 면허(조경·토목·건축사 등)를 꼭 갖추도록 요구합니다.<br>공동수급으로도 지일이 맡을 몫이 없습니다.",
   참가지역: "다른 지역에 본사가 있는 업체만 참가할 수 있는 공고입니다.<br>사전규격은 첨부 문서에 적힌 지역제한으로 판단했습니다.",
@@ -3446,6 +3482,7 @@ const STEP_NAME = {
   "과업 내용": "과업 내용",
 };
 async function loadExcluded() {
+  $("exDays").value = $("days").value;
   $("exMeta").textContent = "불러오는 중…";
   $("exSummary").textContent = "";
   $("exResults").innerHTML = "";
@@ -3561,7 +3598,9 @@ function renderExcluded() {
 
   const list = d.items.filter((n) => exPass(n));
   const sort = $("exSort").value;
-  if (sort === "score") list.sort((a, b) => (b.maxScore ?? 0) - (a.maxScore ?? 0));
+  // 서버가 과업지시서를 읽었으면 그 기준 점수로 (카드 오른쪽 숫자와 같은 값)
+  const exScore = (n) => enrich.byNo[n.noticeNo]?.similarity?.maxScore ?? n.maxScore ?? 0;
+  if (sort === "score") list.sort((a, b) => exScore(b) - exScore(a));
   else if (sort === "amount") list.sort((a, b) => (b.budgetAmount ?? -1) - (a.budgetAmount ?? -1));
   // 게시일이 없는 공고는 맨 뒤 (실제 공고 탭의 최근 게시 순과 같은 셈)
   else if (sort === "posted") list.sort((a, b) => postedTime(a) - postedTime(b) || byDeadline(a, b));
@@ -3609,7 +3648,7 @@ function exStepBadges(n) {
         : /^자격 미보유/.test(q.detail)
           ? tipBadge("fix", "자격 미보유 · 공동수급 확인", "참가 자격", `<p>${esc(q.detail)}</p>`)
           : /업종제한 없음/.test(q.detail)
-            ? tipBadge("faint", "자격요건 제한 없음", "참가 자격", `<p>나라장터 면허제한정보에 업종제한이 없습니다.</p>`)
+            ? tipBadge("faint", "나라장터 업종제한 없음", "참가 자격", `<p>나라장터 면허제한정보에 업종제한이 없습니다.<br>공고문을 아직 읽지 않아 공고문의 참가자격은 확인하지 않았습니다.<br>서버가 차례로 읽는 중이며, 읽으면 이 배지가 바뀝니다.</p>`)
             : tipBadge("faint", n.sourceType === "사전규격" ? "자격 판정 안 함" : "자격 확인 실패", "참가 자격", `<p>${esc(q.detail)}</p>`);
   const region = !r
     ? ""
@@ -3626,7 +3665,18 @@ function exStepBadges(n) {
   // 그 밖에는 첨부 공고문을 읽지 않아 세부품명 요건은 확인하지 않았다 — 사실대로 '미확인'
   const product = k && !k.ok
     ? tipBadge("block", "세부품명번호 미달", "세부품명", `<p>${esc(k.detail)}</p>`)
-    : tipBadge("faint", "세부품명번호 미확인", "세부품명", `<p>제외된 공고는 첨부 공고문을 읽지 않아<br>세부품명번호 요건을 확인하지 않았습니다.</p>`);
+    : tipBadge("faint", "세부품명번호 미확인", "세부품명", `<p>첨부 공고문을 아직 읽지 않아<br>세부품명번호 요건을 확인하지 않았습니다.<br>서버가 차례로 읽는 중이며, 읽으면 이 배지가 바뀝니다.</p>`);
+  // 서버가 공고문을 읽어 둔 공고(용역 공고문 세부품명 확인 등)는 목록 카드와 같은 공고문 기준 배지를 쓴다 (2026-10-20 —
+  // 제천 도로 실시설계용역: 나라장터 업종제한은 없고 공고문에 측량업 5023/5021, 세부품명 8115160401이 있었는데 '제한 없음'으로 보였다)
+  const e = enrich.byNo[n.noticeNo];
+  if (e?.qualDoc && e.qualDoc.sectionFound !== false) {
+    const qdoc = { ...e.qualDoc, classes: e.classes || {}, regionOk: e.regionOk };
+    // 나라장터 업종제한이 등록된 공고는 그게 정답이라 자격 배지는 그대로 두고, 없을 때만 공고문으로 판정한다
+    const apiNone = !q || /업종제한 없음|조회 실패|판정하지 않음/.test(q.detail);
+    const status = n.sourceType === "사전규격" ? null : /조회 실패/.test(q?.detail || "") ? "조회실패" : "제한없음";
+    const asListed = { ...n, qualification: status ? { status } : null };
+    return group("자격", (apiNone ? qualBadge(asListed, qdoc) : qual) + productBadge(asListed, qdoc)) + group("지역", region);
+  }
   return group("자격", qual + product) + group("지역", region);
 }
 
@@ -3719,8 +3769,6 @@ function renderExcludedCard(n) {
     n.demandInstitution && n.institution && n.demandInstitution !== n.institution ? ["공고기관", esc(n.institution)] : null,
     ["사업금액", n.budgetAmount ? won(n.budgetAmount) : "—"],
   ].filter(Boolean);
-  const score = Math.round((n.maxScore ?? 0) * 100);
-  const tone = (n.maxScore ?? 0) >= HIGH ? "hi" : (n.maxScore ?? 0) >= LOW ? "edge" : "";
   // 마감 전이면 어떤 사유로 빠졌든 올릴 수 있다 (2026-10-15 요청 — 서버가 올린 공고는 조건을 보지 않는다)
   const canPromote = n.excludedAt !== "마감" && !(daysLeft(n.sourceType === "본공고" ? effDeadline(n) : n.deadline) < 0);
   return `<div class="notice live">
@@ -3732,11 +3780,7 @@ function renderExcludedCard(n) {
         ${exReasonBlock(n, kw)}
         <div class="tag-rows">${exStepBadges(n)}</div>
       </div>
-      <div class="card-score static ${tone}">
-        <b>${score}<i>%</i></b>
-        <span class="score-bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, score))}%"></span></span>
-        <small>싱크로율</small>
-      </div>
+      ${exScoreBox(n)}
     </div>
     <div class="ex-foot">
       <details class="body"><summary>조건별 확인 결과 보기</summary>${renderSteps(diagnosedSteps(n), n.excludedAt)}</details>
@@ -3879,6 +3923,15 @@ $("corpusRows").onclick = (ev) => {
 };
 // 기간을 바꾸면 바로 다시 불러온다 (서버에 같은 기간 결과가 있으면 즉시 나온다)
 $("days").onchange = () => loadNotices(false);
+// 제외된 공고 탭의 기간 선택 — 실제 공고 탭의 기간을 바꿔 다시 조회한다. 조회가 끝나면 loadNotices가 이 탭도 다시 불러온다
+$("exDays").onchange = () => {
+  $("days").value = $("exDays").value;
+  $("exMeta").textContent =
+    $("days").value === "open" ? "공고를 불러오는 중… (그날 첫 조회는 3~4분 걸릴 수 있습니다)" : "공고를 불러오는 중…";
+  $("exSummary").textContent = "";
+  $("exResults").innerHTML = "";
+  loadNotices(false);
+};
 $("form").onsubmit = (e) => { e.preventDefault(); search(); };
 for (const id of ["recent", "examples"]) {
   $(id).onclick = (ev) => { const q = ev.target.closest("button")?.dataset.q; if (q) runQuery(q); };
@@ -3939,6 +3992,23 @@ function toggleScoreWhy(box) {
   if (open) {
     box.classList.add("open");
     box.setAttribute("aria-expanded", "true");
+    if (box.dataset.lazy) loadScoreWhy(box);
+  }
+}
+async function loadScoreWhy(box) {
+  const no = box.dataset.score;
+  try {
+    const v = await getJson(`/api/similarity?no=${encodeURIComponent(no)}`);
+    const why = box.querySelector(".score-why");
+    if (v.error) {
+      why.innerHTML = `<p class="meta">${esc(v.error)}</p>`;
+      return;
+    }
+    exWhy[no] = v;
+    delete box.dataset.lazy;
+    why.innerHTML = scoreWhyHtml({ noticeNo: no, ...v });
+  } catch (e) {
+    box.querySelector(".score-why").innerHTML = `<p class="meta">근거를 불러오지 못했습니다. 다시 눌러 보세요.</p>`;
   }
 }
 
